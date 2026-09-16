@@ -9,6 +9,7 @@ export const Icon = ({ name, size = 20, stroke = 1.9, className = '' }) => {
     receipt: 'M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6m-6 4h6',
     pause: 'M8 5v14M16 5v14',
     table: 'M4 4h16v4H4zm4 4v12m8-12v12M2 20h20',
+    delivery: 'M3 6h11v11H3zm11 4h4l3 3v3h-7M7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4',
     card: 'M3 6h18v12H3zM3 10h18M7 15h3',
     check: 'M5 12l4 4L19 6',
     x: 'M6 6l12 12M18 6L6 18',

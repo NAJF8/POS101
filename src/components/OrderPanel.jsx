@@ -1,4 +1,5 @@
 import { Icon } from './Icons'
+import { productNames } from '../data/menu'
 
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
@@ -10,7 +11,7 @@ export default function OrderPanel({
   const total = Math.max(0, subtotal - discountVal)
 
   return (
-    <section className="order-panel" inert={disabled ? '' : undefined}>
+    <section className="order-panel" inert={disabled || undefined}>
       {/* Top Header */}
       <div className="order-top">
         <div className="order-title">
@@ -38,8 +39,9 @@ export default function OrderPanel({
               <p>السلة فارغة</p>
             </div>
           ) : (
-            order.items.map((item, index) => (
-              <div key={item.lineId} className="cart-item">
+            order.items.map((item, index) => {
+              const names = productNames(item)
+              return <div key={item.lineId} className="cart-item">
                 <button className="del-btn" onClick={() => removeItem(item.lineId)}>
                   <Icon name="trash" size={18} />
                 </button>
@@ -58,17 +60,17 @@ export default function OrderPanel({
                 </div>
                 <div className="i-prod" onClick={() => item.configurable && onEdit(item)}>
                   <div className="i-prod-text">
-                    <b>{item.name}</b>
-                    <small>{item.english}</small>
+                    <b>{names.arabic}</b>
+                    {names.english && <small>{names.english}</small>}
                     {item.options?.map((o, i) => <div className="opt" key={i}>+ {o.name}</div>)}
                   </div>
                   <div className="i-prod-img">
-                    {item.image ? <img src={item.image} alt={item.name} /> : <div className="no-img">١٠١</div>}
+                    {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img">١٠١</div>}
                   </div>
                 </div>
                 <div className="i-num">{index + 1}</div>
               </div>
-            ))
+            })
           )}
         </div>
       </div>

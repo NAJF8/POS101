@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 
-const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-pos-original.png`
+// Use the supplied 101 COFFEE HOUSE mark, not the POS promotional artwork.
+const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
 
 function useLiveClock() {
   const [now, setNow] = useState(() => new Date())

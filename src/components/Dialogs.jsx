@@ -71,18 +71,17 @@ export function ProductOptions({ product, onClose, onAdd }) {
 
 /* ── Order Type ── */
 export function OrderType({ onClose, onChoose }) {
-  const types = [['داخل الكوفي', 'table'], ['توصيل', 'arrow']]
+  const types = [['داخل الكوفي', 'table'], ['توصيل', 'delivery']]
   return (
     <Dialog onClose={onClose} className="type-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
-      <h2>كيف يرغب العميل باستلام الطلب؟</h2>
+      <h2>كيف ترغب باستلام الطلب؟</h2>
       <p>اختر نوع الطلب للمتابعة إلى الدفع</p>
       <div className="type-grid">
         {types.map(([label, icon]) => (
           <button onClick={() => onChoose(label)} key={label}>
             <span><Icon name={icon} size={27} /></span>
             <b>{label}</b>
-            <Icon name="arrow" size={17} />
           </button>
         ))}
       </div>
@@ -119,13 +118,19 @@ export function TableSelection({ onClose, onChoose, orders = [] }) {
 }
 
 /* ── Payment ── */
-export function Payment({ total, onClose, onSuccess, initialMethod = '' }) {
-  const [method, setMethod] = React.useState(initialMethod)
+export function Payment({ total, onClose, onSuccess }) {
   const [processing, setProcessing] = React.useState(false)
-  const sell = () => {
-    if (!method || processing) return
+  const [error, setError] = React.useState('')
+  const choose = method => {
+    if (processing) return
     setProcessing(true)
-    setTimeout(() => onSuccess({ method, received: 0, change: 0 }), 180)
+    setError('')
+    try {
+      if (onSuccess({ method, received: 0, change: 0 }) === false) throw new Error('SALE_FAILED')
+    } catch {
+      setProcessing(false)
+      setError('تعذر حفظ البيع. بقي الطلب الحالي كما هو، حاول مرة أخرى.')
+    }
   }
   return (
     <Dialog onClose={onClose} className="payment-dialog">
@@ -133,19 +138,15 @@ export function Payment({ total, onClose, onSuccess, initialMethod = '' }) {
       <p>الإجمالي المطلوب</p>
       <h2>{format(total)}</h2>
       <div className="payment-methods">
-        <button className={method === 'نقدي' ? 'chosen' : ''} onClick={() => setMethod('نقدي')}>
-          <Icon name="coffee" size={26} /><b>نقدي</b>
+        <button disabled={processing} onClick={() => choose('cash')}>
+          <Icon name="coffee" size={26} /><b>{processing ? 'جارٍ التسجيل…' : 'نقدي'}</b>
         </button>
-        <button className={method === 'إلكتروني' ? 'chosen' : ''} onClick={() => setMethod('إلكتروني')}>
+        <button disabled={processing} onClick={() => choose('electronic')}>
           <Icon name="card" size={26} /><b>إلكتروني</b>
         </button>
       </div>
-      {method === 'إلكتروني' && (
-        <div className="electronic-note">تسجيل Prototype محلي فقط — لا يوجد تكامل دفع فعلي.</div>
-      )}
-      <button className="primary-action" disabled={!method || processing} onClick={sell} style={{ marginTop: 16 }}>
-        {processing ? 'جارٍ التسجيل…' : 'بيع'} <Icon name="check" size={18} />
-      </button>
+      <p className="payment-hint">اختيار وسيلة الدفع يؤكد البيع مباشرةً.</p>
+      {error && <div className="form-error">{error}</div>}
     </Dialog>
   )
 }
@@ -164,7 +165,7 @@ export function QuickCash({ total, onClose, onSuccess }) {
   const sell = () => {
     if (amount < total || processing) return
     setProcessing(true)
-    setTimeout(() => onSuccess({ method: 'نقدي', received: amount, change: amount - total }), 180)
+    setTimeout(() => onSuccess({ method: 'cash', received: amount, change: amount - total }), 180)
   }
   return (
     <Dialog onClose={onClose} className="payment-dialog quick-cash-dialog">
@@ -339,7 +340,7 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 /* ── Receipt — display:none normally, shown only @media print ── */
 export function Receipt({ sale }) {
   if (!sale) return null
-  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-pos-original.png`
+  const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
   return (
     <div className="receipt-sheet">
       {/* CENTERED LOGO WRAPPER */}
@@ -367,7 +368,7 @@ export function CashierLogin({ cashiers, onClose, onLogin }) {
   const [cashierId, setCashierId] = React.useState(cashiers[0]?.cashierId || '')
   const [pin, setPin] = React.useState('')
   const [error, setError] = React.useState('')
-  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-pos-original.png`
+  const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
 
   const submit = e => {
     e.preventDefault()

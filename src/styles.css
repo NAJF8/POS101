@@ -82,10 +82,9 @@ input, textarea, select { cursor: text; }
 
 .brand { display: flex; align-items: center; }
 .brand img {
-  height: 40px;
+  height: 48px;
   width: auto;
   object-fit: contain;
-  /* Transparent cutout appearance */
 }
 
 .cashier-btn {
@@ -153,7 +152,8 @@ input, textarea, select { cursor: text; }
   flex: 1;
   min-height: 0;
   display: flex;
-  direction: rtl;
+  /* Physical panel order stays cart-left / catalog-right; each panel remains RTL. */
+  direction: ltr;
   overflow: hidden;
   padding: 16px;
   gap: 16px;
@@ -175,6 +175,7 @@ input, textarea, select { cursor: text; }
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow);
+  direction: rtl;
 }
 
 .order-top {
@@ -373,6 +374,7 @@ input, textarea, select { cursor: text; }
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow);
+  direction: rtl;
 }
 
 .catalog-toolbar {
@@ -517,6 +519,7 @@ input, textarea, select { cursor: text; }
 .p-eng { display: block; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 .p-price { font-size: 15px; font-weight: 700; color: var(--green); display: flex; justify-content: center; gap: 4px; }
 .p-price small { font-size: 11px; align-self: flex-end; margin-bottom: 2px; }
+.payment-hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 16px; }
 
 /* Login gate */
 .login-gate {
@@ -559,17 +562,41 @@ input, textarea, select { cursor: text; }
 }
 .dialog .close { position: absolute; top: 16px; left: 16px; background: #f0eee8; padding: 6px; border-radius: 8px; }
 
+/* Order type: deliberately separate, large RTL touch cards. */
+.type-dialog { width: min(520px, 100%); direction: rtl; text-align: right; padding: 28px; }
+.type-dialog h2 { font-size: 22px; padding-left: 44px; margin-bottom: 6px; }
+.type-dialog > p { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+.type-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.type-grid button {
+  min-height: 112px; padding: 16px; border: 1.5px solid var(--line-strong);
+  border-radius: 12px; background: #fff; color: var(--coffee); display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  font-size: 17px; transition: background .15s, border-color .15s, transform .1s;
+}
+.type-grid button span { color: var(--green); display: grid; place-items: center; }
+.type-grid button:hover { background: #eef2eb; border-color: var(--green); }
+.type-grid button:active { transform: scale(.98); background: #e2e7dc; }
+.payment-dialog { direction: rtl; text-align: right; }
+.payment-dialog > p:first-of-type { color: var(--muted); }
+.payment-dialog > h2 { color: var(--green); font-size: 28px; margin: 4px 0 18px; }
+.payment-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.payment-methods button { min-height: 88px; border: 1.5px solid var(--line-strong); border-radius: 12px; background: #fff; color: var(--coffee); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-size: 17px; }
+.payment-methods button:hover:not(:disabled) { border-color: var(--green); background: #eef2eb; }
+@media (max-width: 640px) { .type-grid { grid-template-columns: 1fr; } }
+
 /* Print mode */
 .receipt-sheet { display: none; }
 @media print {
   @page { margin: 0; size: 80mm auto; }
-  body * { display: none !important; }
-  .receipt-sheet, .receipt-sheet * { display: block !important; }
-  .receipt-sheet {
+  body * { visibility: hidden !important; }
+  body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
+  body .receipt-sheet {
+    display: block !important;
     position: fixed; left: 0; top: 0; width: 80mm;
     background: #fff; color: #000; font-size: 12px;
     padding: 0 4mm 10mm;
   }
-  .receipt-logo-wrap { display: block; text-align: center; margin-bottom: 6mm; }
-  .receipt-logo-wrap img { display: block; margin: 0 auto; width: 40mm; max-height: 20mm; object-fit: contain; }
+  body .receipt-logo-wrap { display: block; text-align: center; margin-bottom: 6mm; }
+  body .receipt-logo-wrap img { display: block; margin: 0 auto; width: 40mm; max-height: 20mm; object-fit: contain; }
+  body .receipt-line, body .receipt-total { display: flex; justify-content: space-between; gap: 4mm; margin: 2mm 0; }
 }

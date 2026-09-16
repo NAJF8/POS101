@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
@@ -25,6 +25,7 @@ export default function App() {
   const [printSale, setPrintSale] = useState(null)
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
+  const saleInFlight = useRef(false)
 
   const activeOrder = orders[active] || orders[0]
   const subtotal = activeOrder.items.reduce((s, i) => s + i.price * i.quantity, 0)
@@ -58,7 +59,8 @@ export default function App() {
   const openOrder = useCallback(id => { const idx = orders.findIndex(o => o.id === id); if (idx >= 0) { setActive(idx); setOrders(v => v.map(o => o.id === id ? ({ ...o, held: false }) : o)); setModal(null) } }, [orders])
 
   const complete = useCallback(payment => {
-    if (!session || !activeOrder.items.length) return
+    if (!session || !activeOrder.items.length || saleInFlight.current) return false
+    saleInFlight.current = true
     const originalItems = activeOrder.items.map(i => ({ ...i }))
     const sale = {
       saleId: crypto.randomUUID(),
@@ -76,18 +78,21 @@ export default function App() {
       items: originalItems,
       order: { ...activeOrder, items: originalItems }
     }
-    setNextNumber(n => n + 1)
-    
-    // Clear only current order, remain on same tab
-    setOrders(v => v.map((o, i) => i === active
-      ? blankOrder(o.id)
-      : o
-    ))
-    
-    // We don't save 'sale' to the active order since it's cleared, but we could save to history
-    // For now, print it directly
-    if (autoPrint || payment.forcePrint) setPrintSale(sale)
-    setModal(null)
+    try {
+      // Persist before clearing: a storage failure must leave this order intact.
+      localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []), sale]))
+      setNextNumber(n => n + 1)
+      setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
+      if (autoPrint || payment.forcePrint) setPrintSale(sale)
+      // Keep the processing dialog over the page through the lock window so a
+      // second rapid tap cannot fall through to a product beneath the dialog.
+      window.setTimeout(() => setModal(null), 350)
+      return true
+    } catch {
+      return false
+    } finally {
+      window.setTimeout(() => { saleInFlight.current = false }, 350)
+    }
   }, [session, activeOrder, nextNumber, subtotal, total, active, autoPrint])
 
   // Keyboard shortcuts
@@ -102,7 +107,7 @@ export default function App() {
         e.preventDefault()
         if (activeOrder.items.length) {
           // Trigger complete with a default method (e.g., Cash) and force print
-          complete({ method: 'نقدي', received: total, change: 0, forcePrint: true })
+          complete({ method: 'cash', received: total, change: 0, forcePrint: true })
         }
       }
       
@@ -118,7 +123,9 @@ export default function App() {
   // Auto-print trigger
   useEffect(() => {
     if (printSale) {
-      const t = setTimeout(() => { window.print(); setPrintSale(null) }, 100)
+      // Leave the rendered receipt mounted long enough for Chrome's preview to
+      // capture it before returning the POS to its normal screen.
+      const t = setTimeout(() => { window.print(); setPrintSale(null) }, 500)
       return () => clearTimeout(t)
     }
   }, [printSale])
@@ -223,7 +230,6 @@ export default function App() {
       {modal === 'orderType' && <OrderType onClose={() => setModal(null)} onChoose={chooseType} />}
       {modal === 'tables' && <TableSelection orders={orders} onClose={() => setModal(null)} onChoose={chooseTable} />}
       {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={complete} />}
-      {modal === 'payment-electronic' && <Payment initialMethod="إلكتروني" total={total} onClose={() => setModal(null)} onSuccess={complete} />}
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={complete} />}
       {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} onClose={() => setModal(null)} onApply={applyDiscount} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}

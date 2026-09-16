@@ -1,4 +1,5 @@
 import { Icon } from './Icons'
+import { productNames } from '../data/menu'
 
 // Mapping categories to icons
 const getCategoryIcon = (category) => {
@@ -70,22 +71,23 @@ export default function ProductGrid({
       {/* Products Area */}
       <div className="products-area">
         <div className="product-grid">
-          {products.map(p => (
-            <button key={p.id} className={`product-card ${p.unavailable ? 'unavailable' : ''}`} disabled={p.unavailable} onClick={() => onSelect(p)}>
+          {products.map(p => {
+            const names = productNames(p)
+            return <button key={p.id} className={`product-card ${p.unavailable ? 'unavailable' : ''}`} disabled={p.unavailable} onClick={() => onSelect(p)}>
               <div className="img-wrap">
-                {p.image ? <img src={p.image} alt={p.name} loading="lazy" /> : <div className="no-img">١٠١</div>}
+                {p.image ? <img src={p.image} alt={names.arabic} loading="lazy" /> : <div className="no-img" aria-label="صورة 101 البديلة">١٠١</div>}
                 {p.category === 'مشروبات 101' && <span className="product-mark"><Icon name="star" size={12}/></span>}
               </div>
               <div className="p-info">
-                <b className="p-name">{p.name}</b>
-                <small className="p-eng">{p.english}</small>
+                <b className="p-name">{names.arabic}</b>
+                {names.english && <small className="p-eng">{names.english}</small>}
                 <div className="p-price">
                   <span>{p.price ? p.price.toLocaleString() : '—'}</span>
                   {p.price && <small>د.ع</small>}
                 </div>
               </div>
             </button>
-          ))}
+          })}
           {products.length === 0 && <div className="empty-state">لا يوجد منتجات تطابق البحث</div>}
         </div>
       </div>

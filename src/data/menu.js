@@ -49,3 +49,11 @@ const imageMap = {
 }
 
 export const products = rows.map(([category, name, english, price], index) => ({ id: index + 1, category, name, english, price, image: imageMap[index + 1] ? `${import.meta.env.BASE_URL}${imageMap[index + 1]}` : null, unavailable: price === null, configurable: ['لاتيه كلاسيك','سبانيش لاتيه','لاتيه بنكهات','آيس لاتيه كلاسيك','آيس سبانيش لاتيه','موكا'].includes(name), favorite: index < 6 }))
+
+// The authoritative menu currently stores Arabic in `name` and the optional
+// secondary English label in `english`; alternate established keys stay safe.
+const hasArabic = value => typeof value === 'string' && /[\u0600-\u06ff]/.test(value)
+export const productNames = product => ({
+  arabic: [product?.nameAr, product?.name_ar, product?.name].find(hasArabic) || product?.name || '',
+  english: [product?.nameEn, product?.name_en, product?.english].find(value => typeof value === 'string' && value.trim()) || ''
+})
