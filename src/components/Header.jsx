@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 
 // Use the supplied transparent 101 COFFEE HOUSE mark in the POS header.
+// The available source logo contains baked-in checkerboard pixels. Keep the
+// original asset untouched until a verified clean transparent master is supplied.
 const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo.jpg`
 
 function useLiveClock() {

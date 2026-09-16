@@ -206,31 +206,60 @@ export function QuickCash({ total, onClose, onSuccess }) {
 /* ── Discount Dialog ── */
 export function DiscountDialog({ subtotal, current, onClose, onApply }) {
   const [kind, setKind] = React.useState(current?.kind || 'amount')
-  const [input, setInput] = React.useState(current?.input || 0)
-  const raw = Number(input) || 0
-  const value = Math.min(subtotal, kind === 'percent'
-    ? Math.round(subtotal * Math.min(100, Math.max(0, raw)) / 100)
-    : Math.max(0, raw)
-  )
+  const [input, setInput] = React.useState(current?.input ?? '')
+  const isPreset = kind === 'baly' || kind === 'toters'
+  const raw = Number(input)
+  const inputIsNumber = input !== '' && Number.isFinite(raw)
+  const inputTooLarge = kind === 'amount' ? raw > subtotal : raw > 100
+  const invalid = !isPreset && (!inputIsNumber || raw < 0 || inputTooLarge)
+  const percentage = kind === 'baly' ? 26 : kind === 'toters' ? 25 : Math.min(100, Math.max(0, raw || 0))
+  const value = Math.min(subtotal, Math.max(0, Math.round(kind === 'amount' ? (raw || 0) : subtotal * percentage / 100)))
+  const chooseKind = nextKind => {
+    setKind(nextKind)
+    if (nextKind === 'baly') setInput(26)
+    if (nextKind === 'toters') setInput(25)
+    if (nextKind === 'amount' || nextKind === 'percent') setInput(current?.kind === nextKind ? current.input : '')
+  }
+  const cards = [
+    { kind: 'amount', title: 'مبلغ ثابت', note: 'أدخل مبلغ الخصم بالدينار' },
+    { kind: 'percent', title: 'نسبة مئوية', note: 'أدخل نسبة الخصم بنفسك' },
+    { kind: 'baly', title: 'بلي', note: 'خصم ثابت 26%' },
+    { kind: 'toters', title: 'توترز', note: 'خصم ثابت 25%' }
+  ]
   return (
     <Dialog onClose={onClose} className="discount-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
-      <h2>إضافة خصم</h2>
-      <p style={{ color: 'var(--muted)', margin: '4px 0 16px', fontSize: 13 }}>اختر نوع الخصم وقيمته</p>
-      <div className="payment-methods">
-        <button className={kind === 'amount' ? 'chosen' : ''} onClick={() => setKind('amount')}>مبلغ ثابت</button>
-        <button className={kind === 'percent' ? 'chosen' : ''} onClick={() => setKind('percent')}>نسبة مئوية</button>
+      <div className="dialog-heading">
+        <h2>إضافة خصم</h2>
+        <p>اختر نوع الخصم وقيمته</p>
       </div>
-      <label className="discount-input">
-        {kind === 'percent' ? 'النسبة %' : 'قيمة الخصم'}
-        <input type="number" min="0" max={kind === 'percent' ? 100 : subtotal} value={input} onChange={e => setInput(e.target.value)} />
-      </label>
-      <div className="discount-preview">
-        <span>المجموع الفرعي <b>{format(subtotal)}</b></span>
-        <span>قيمة الخصم <b>{format(value)}</b></span>
-        <strong>الإجمالي النهائي <b>{format(subtotal - value)}</b></strong>
+      <div className="discount-cards" role="group" aria-label="نوع الخصم">
+        {cards.map(card => (
+          <button key={card.kind} type="button" className={`discount-card ${kind === card.kind ? 'selected' : ''}`} aria-pressed={kind === card.kind} onClick={() => chooseKind(card.kind)}>
+            <b>{card.title}</b>
+            <small>{card.note}</small>
+          </button>
+        ))}
       </div>
-      <button className="primary-action" onClick={() => onApply({ kind, input: raw, value })}>تطبيق الخصم</button>
+      {!isPreset && (
+        <label className="discount-input">
+          <span>{kind === 'percent' ? 'النسبة المئوية' : 'قيمة الخصم'}</span>
+          <div className="number-input-wrap">
+            <input type="number" inputMode="decimal" min="0" max={kind === 'percent' ? 100 : subtotal} value={input} onChange={e => setInput(e.target.value)} placeholder={kind === 'percent' ? 'مثال: 10' : 'مثال: 3000'} />
+            <b>{kind === 'percent' ? '%' : 'د.ع'}</b>
+          </div>
+          {invalid && <small className="discount-validation">{input === '' ? 'أدخل قيمة الخصم أولاً.' : raw < 0 ? 'لا يمكن أن تكون القيمة سالبة.' : inputTooLarge ? 'لا يمكن أن يتجاوز الخصم المجموع الفرعي.' : 'أدخل رقمًا صحيحًا.'}</small>}
+        </label>
+      )}
+      <div className="discount-summary" aria-label="ملخص الخصم">
+        <div><span>المجموع الفرعي</span><b dir="ltr">{format(subtotal)}</b></div>
+        <div className="discount-summary-value"><span>قيمة الخصم</span><b dir="ltr">{format(value)}</b></div>
+        <div className="discount-summary-total"><span>الإجمالي بعد الخصم</span><strong dir="ltr">{format(subtotal - value)}</strong></div>
+      </div>
+      <div className="dialog-actions">
+        <button type="button" className="secondary-action" onClick={onClose}>إلغاء</button>
+        <button type="button" className="primary-action" disabled={invalid} onClick={() => onApply({ kind, input: isPreset ? percentage : raw, value })}>تطبيق الخصم</button>
+      </div>
     </Dialog>
   )
 }
@@ -242,26 +271,25 @@ export function OpenOrders({ orders, onClose, onSelect, onHistory }) {
   return (
     <Dialog onClose={onClose} className="open-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
-      <h2>الطلبات</h2>
+      <div className="dialog-heading"><h2>الطلبات المفتوحة</h2><p>اختر طلبًا للاستكمال أو عرض تفاصيله.</p></div>
       <div className="order-filters">
         <button className={tab === 'open' ? 'active' : ''} onClick={() => setTab('open')}>المفتوحة</button>
         <button className={tab === 'held' ? 'active' : ''} onClick={() => setTab('held')}>المعلقة</button>
         <button className={tab === 'completed' ? 'active' : ''} onClick={() => setTab('completed')}>المكتملة</button>
       </div>
-      {list.map(o => (
-        <button className="open-order" key={o.id} onClick={() => o.completed ? onHistory(o) : onSelect(o.id)}>
-          <span>
-            <b>{o.sale?.orderNumber ? `#${o.sale.orderNumber}` : o.name}</b>
-            <small>{(o.originalItems || o.items).length} منتجات</small>
-          </span>
-          <span>
-            {o.table ? `داخل الكوفي • طاولة ${o.table}` : o.orderType || 'غير محدد'}
-            <b>{format(o.total || o.items.reduce((s, i) => s + i.price * i.quantity, 0))}</b>
-          </span>
-          <em className={o.held ? 'held' : ''}>{o.completed ? 'مكتمل' : o.held ? 'معلق' : 'مفتوح'}</em>
-        </button>
-      ))}
-      {!list.length && <div className="empty"><b>لا توجد طلبات هنا</b></div>}
+      <div className="open-orders-list">
+        {list.map(o => {
+          const items = o.originalItems || o.items
+          const orderTotal = o.total || items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+          const type = o.table ? `داخل الكوفي — طاولة ${o.table}` : o.orderType || 'غير محدد'
+          return <article className="open-order" key={o.id}>
+            <div className="open-order-main"><b dir="ltr">{o.sale?.orderNumber ? `#${o.sale.orderNumber}` : o.name}</b><em className={o.held ? 'held' : ''}>{o.completed ? 'مكتمل' : o.held ? 'معلق' : 'مفتوح'}</em></div>
+            <dl><div><dt>نوع الطلب</dt><dd>{type}</dd></div><div><dt>عدد الأصناف</dt><dd dir="ltr">{items.reduce((sum, item) => sum + item.quantity, 0)}</dd></div><div><dt>الإجمالي</dt><dd dir="ltr">{format(orderTotal)}</dd></div></dl>
+            <button type="button" onClick={() => o.completed ? onHistory(o) : onSelect(o.id)}>{o.completed ? 'عرض التفاصيل' : 'استئناف الطلب'}</button>
+          </article>
+        })}
+        {!list.length && <div className="empty"><b>لا توجد طلبات هنا</b><small>ستظهر الطلبات المحفوظة أو غير المكتملة هنا.</small></div>}
+      </div>
     </Dialog>
   )
 }
@@ -309,34 +337,38 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
 export function ReturnDialog({ order, onClose, onConfirm }) {
   const items = order?.originalItems || order?.items || []
   const [item, setItem] = React.useState(items[0]?.lineId || '')
+  const [quantity, setQuantity] = React.useState(1)
   const [reason, setReason] = React.useState('طلب غير صحيح')
   const selected = items.find(i => i.lineId === item)
+  const maxQuantity = selected?.quantity || 1
+  const returnQuantity = Math.min(maxQuantity, Math.max(1, Number(quantity) || 1))
+  const sale = order?.sale
   return (
     <Dialog onClose={onClose} className="return-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
-      <h2>إرجاع منتج</h2>
-      <p style={{ color: 'var(--muted)', margin: '4px 0 12px', fontSize: 13 }}>
-        سجّل Adjustment منفصلًا، دون حذف البيع الأصلي.
-      </p>
-      <select value={item} onChange={e => setItem(e.target.value)}>
-        {items.map(i => (
-          <option key={i.lineId} value={i.lineId}>{i.name} — {format(i.price)} × {i.quantity}</option>
-        ))}
-      </select>
-      <label>
-        سبب الإرجاع
-        <textarea value={reason} onChange={e => setReason(e.target.value)} />
-      </label>
-      <div className="return-total">
-        المبلغ المراد إرجاعه <b>{format(selected?.price || 0)}</b>
+      <div className="dialog-heading"><h2>إرجاع بيع</h2><p>يسجل الإرجاع كتعديل مستقل ولا يحذف البيع الأصلي.</p></div>
+      <section className="return-original" aria-label="معلومات البيع الأصلي">
+        <div className="section-title">البيع الأصلي</div>
+        <div className="return-meta"><span>رقم الطلب <b dir="ltr">{sale?.orderNumber ? `#${sale.orderNumber}` : '—'}</b></span><span>التاريخ والوقت <b dir="ltr">{sale?.createdAt ? new Date(sale.createdAt).toLocaleString('ar-IQ') : 'غير متوفر'}</b></span></div>
+        <div className="return-items">{items.map(i => <div key={i.lineId}><span>{i.name}</span><b dir="ltr">{i.quantity} × {format(i.price)}</b></div>)}</div>
+      </section>
+      <section className="return-controls" aria-label="تفاصيل الإرجاع">
+        <div className="section-title">تفاصيل الإرجاع</div>
+        <label><span>الصنف المراد إرجاعه</span><select value={item} onChange={e => { setItem(e.target.value); setQuantity(1) }}>{items.map(i => <option key={i.lineId} value={i.lineId}>{i.name}</option>)}</select></label>
+        <div className="return-control-grid"><label><span>الكمية</span><input type="number" min="1" max={maxQuantity} value={quantity} onChange={e => setQuantity(e.target.value)} /></label><div className="return-total"><span>مبلغ الإرجاع</span><b dir="ltr">{format((selected?.price || 0) * returnQuantity)}</b></div></div>
+        <label><span>سبب الإرجاع</span><textarea value={reason} onChange={e => setReason(e.target.value)} /></label>
+      </section>
+      <div className="dialog-actions">
+        <button type="button" className="secondary-action" onClick={onClose}>إلغاء</button>
+        <button
+          type="button"
+          className="primary-action"
+          disabled={!selected}
+          onClick={() => onConfirm({ lineId: selected.lineId, product: selected.name, quantity: returnQuantity, amount: selected.price * returnQuantity, reason })}
+        >
+          تأكيد الإرجاع
+        </button>
       </div>
-      <button
-        className="primary-action"
-        disabled={!selected}
-        onClick={() => onConfirm({ lineId: selected.lineId, product: selected.name, quantity: 1, amount: selected.price, reason })}
-      >
-        تأكيد الإرجاع
-      </button>
     </Dialog>
   )
 }
@@ -347,21 +379,15 @@ export function Receipt({ sale }) {
   const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
   return (
     <div className="receipt-sheet">
-      {/* CENTERED LOGO WRAPPER */}
       <div className="receipt-logo-wrap">
-        <img src={logoUrl} alt="101 COFFEE HOUSE" />
+        <img className="receipt-logo" src={logoUrl} alt="101 COFFEE HOUSE" />
       </div>
-      <p>{new Date(sale.createdAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</p>
-      <hr />
-      {sale.order.items.map(i => (
-        <div className="receipt-line" key={i.lineId}>
-          <span>{i.name} × {i.quantity}</span>
-          <b>{format(i.price * i.quantity)}</b>
-        </div>
-      ))}
-      <hr />
+      <p className="receipt-date" dir="rtl">{new Date(sale.createdAt).toLocaleString('ar-IQ', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+      <section className="receipt-items" dir="rtl"><div className="receipt-table-head"><span>الصنف</span><span>الكمية</span><span>السعر</span></div>{sale.order.items.map(i => (
+        <div className="receipt-line" key={i.lineId}><span>{i.name}</span><b dir="ltr">{i.quantity}</b><b dir="ltr">{format(i.price * i.quantity)}</b></div>
+      ))}</section>
       <div className="receipt-total">
-        الإجمالي <b>{format(sale.total)}</b>
+        <span>الإجمالي</span><b dir="ltr">{format(sale.total)}</b>
       </div>
     </div>
   )

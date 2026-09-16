@@ -861,3 +861,125 @@ input, textarea, select { cursor: text; }
   body .receipt-logo-wrap img { display: block; margin: 0 auto; width: 40mm; max-height: 20mm; object-fit: contain; }
   body .receipt-line, body .receipt-total { display: flex; justify-content: space-between; gap: 4mm; margin: 2mm 0; }
 }
+
+/* ========================================================================
+   Dialog repairs: every label/value owns a separate layout cell.  Keeping
+   these rules together prevents generic dialog styles from collapsing RTL
+   text back into inline runs when a new dialog is added.
+   ======================================================================== */
+.dialog {
+  direction: rtl;
+  text-align: right;
+  min-width: 0;
+}
+.dialog-heading { padding-left: 46px; min-width: 0; }
+.dialog-heading h2 { color: var(--coffee); font-size: 23px; line-height: 1.35; margin: 0; }
+.dialog-heading p { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 3px 0 0; }
+.dialog-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; margin-top: 2px; }
+.dialog-actions > button { width: 100%; min-width: 0; min-height: 46px; border-radius: 9px; font-weight: 700; }
+.secondary-action { background: #f4f1eb; border: 1px solid var(--line-strong); color: var(--coffee); }
+.secondary-action:hover { background: #ede8df; }
+
+/* Discount */
+.discount-dialog { width: min(660px, 100%); display: flex; flex-direction: column; gap: 15px; padding: 26px; overflow: auto; }
+.discount-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.discount-card { min-width: 0; min-height: 96px; padding: 13px 12px; border: 1.5px solid var(--line-strong); border-radius: 12px; background: #fff; color: var(--coffee); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; text-align: center; transition: border-color .14s, background .14s, box-shadow .14s; }
+.discount-card b { font-size: 16px; line-height: 1.35; }
+.discount-card small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.discount-card:hover { border-color: var(--green); background: #f7f9f4; }
+.discount-card.selected { border: 2px solid var(--green); background: #eef4eb; box-shadow: inset 0 0 0 1px rgba(64,83,59,.08); }
+.discount-card.selected b { color: var(--green); }
+.discount-input { display: grid; gap: 6px; color: var(--coffee); font-weight: 600; min-width: 0; }
+.number-input-wrap { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-width: 0; border: 1px solid var(--line-strong); border-radius: 9px; overflow: hidden; background: #fff; }
+.number-input-wrap input { width: 100%; min-width: 0; height: 43px; padding: 8px 11px; direction: ltr; text-align: right; background: transparent; }
+.number-input-wrap b { min-width: 45px; height: 100%; padding: 0 10px; display: grid; place-items: center; background: #f4f1eb; color: var(--muted); font-size: 12px; }
+.discount-validation { color: var(--danger); font-weight: 500; line-height: 1.45; }
+.discount-summary { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.discount-summary > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; min-width: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.discount-summary > div:last-child { border-bottom: 0; }
+.discount-summary span { color: var(--muted); font-size: 13px; }
+.discount-summary b, .discount-summary strong { color: var(--coffee); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.discount-summary-value b { color: var(--danger); }
+.discount-summary-total { background: #eef4eb; }
+.discount-summary-total span, .discount-summary-total strong { color: var(--green); }
+.discount-summary-total strong { font-size: 19px; }
+
+/* Open orders */
+.open-dialog { width: min(690px, 100%); max-height: min(720px, calc(100vh - 32px)); padding: 26px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.order-filters { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 2px; }
+.order-filters button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--muted); font-weight: 600; }
+.order-filters button.active { background: var(--green); border-color: var(--green); color: #fff; }
+.open-orders-list { display: grid; gap: 9px; min-height: 0; overflow: auto; padding-left: 3px; }
+.open-order { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; padding: 13px; border: 1px solid var(--line-strong); border-radius: 11px; background: #fff; }
+.open-order-main { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-width: 0; }
+.open-order-main > b { font-size: 15px; color: var(--coffee); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.open-order em { font-style: normal; width: fit-content; padding: 3px 7px; border-radius: 99px; background: #e6f2ea; color: #236248; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.open-order em.held { background: #fbefdb; color: #8d5d25; }
+.open-order dl { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.open-order dl > div { min-width: 0; padding: 8px; border-radius: 7px; background: #fbfaf8; }
+.open-order dt { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.open-order dd { color: var(--coffee); font-size: 12px; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+.open-order > button { align-self: start; min-height: 36px; padding: 7px 11px; border-radius: 8px; background: #eef2eb; color: var(--green); font-weight: 700; white-space: nowrap; }
+.open-order > button:hover { background: #e2e9de; }
+.empty { min-height: 150px; display: grid; place-content: center; gap: 5px; text-align: center; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 10px; }
+.empty small { font-size: 12px; }
+
+/* Return sale */
+.return-dialog { width: min(690px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 13px; padding: 26px; overflow: auto; }
+.return-original, .return-controls { display: grid; gap: 10px; min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #fbfaf8; }
+.section-title { color: var(--green); font-size: 14px; font-weight: 700; }
+.return-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.return-meta span, .return-total { min-width: 0; display: grid; gap: 4px; padding: 9px; border-radius: 7px; background: #fff; color: var(--muted); font-size: 11px; }
+.return-meta b, .return-total b { color: var(--coffee); font-size: 12px; overflow-wrap: anywhere; }
+.return-items { display: grid; gap: 6px; max-height: 150px; overflow: auto; padding-left: 3px; }
+.return-items > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.return-items > div:last-child { border-bottom: 0; }
+.return-items span { min-width: 0; color: var(--coffee); font-size: 12px; overflow-wrap: anywhere; }
+.return-items b { font-size: 11px; white-space: nowrap; }
+.return-controls label { display: grid; gap: 6px; min-width: 0; color: var(--coffee); font-size: 13px; font-weight: 600; }
+.return-controls select, .return-controls input, .return-controls textarea { width: 100%; min-width: 0; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--coffee); }
+.return-controls select, .return-controls input { min-height: 40px; }
+.return-controls input { direction: ltr; text-align: right; }
+.return-controls textarea { min-height: 60px; resize: vertical; }
+.return-control-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end; }
+.return-total { min-height: 66px; border: 1px solid #d4decb; background: #eef4eb; }
+.return-total b { color: var(--green); font-size: 16px; }
+
+/* Product cards reserve a text lane beneath the image; images can never push
+   names or prices into one another. */
+.product-card { min-height: 255px; justify-content: flex-start; min-width: 0; }
+.img-wrap { flex: 0 0 120px; }
+.p-info { min-width: 0; min-height: 83px; display: flex; flex-direction: column; align-items: stretch; }
+.p-name { min-height: 2.4em; overflow-wrap: anywhere; }
+.p-eng { min-height: 1.5em; overflow-wrap: anywhere; margin-bottom: 5px; }
+.p-price { margin-top: auto; min-height: 22px; align-items: baseline; }
+
+/* A receipt is intentionally absent from screen rendering.  In print it owns
+   the document flow so a long order grows vertically instead of being clipped
+   at the top of an A4 sheet. */
+@media print {
+  @page { size: 80mm auto; margin: 0; }
+  html, body { width: 80mm; height: auto !important; overflow: visible !important; background: #fff !important; }
+  body .receipt-sheet { display: block !important; position: static !important; width: 80mm; min-height: 0; height: auto; margin: 0; padding: 4mm 4mm 8mm; background: #fff; color: #111; font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif; font-size: 11pt; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body .receipt-logo-wrap { margin: 0 0 3mm; text-align: center; }
+  body .receipt-logo { display: inline-block; width: 34mm; max-width: 100%; max-height: 20mm; object-fit: contain; }
+  body .receipt-date { margin: 0 0 3mm; text-align: center; color: #111; font-size: 9pt; }
+  body .receipt-items { display: block; border: .25mm solid #222; border-radius: 0; overflow: visible; }
+  body .receipt-table-head, body .receipt-line { display: grid !important; grid-template-columns: minmax(0, 1fr) 12mm 20mm; gap: 2mm; align-items: start; }
+  body .receipt-table-head { padding: 2mm; border-bottom: .25mm solid #222; color: #111; font-size: 8pt; font-weight: 700; }
+  body .receipt-line { margin: 0; padding: 2mm; border-bottom: .2mm solid #bbb; break-inside: avoid; page-break-inside: avoid; }
+  body .receipt-line:last-child { border-bottom: 0; }
+  body .receipt-line span { min-width: 0; overflow-wrap: anywhere; }
+  body .receipt-line b { font-size: 9pt; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left; }
+  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4mm; align-items: center; margin: 4mm 0 0; padding: 3mm 1mm 0; border-top: .45mm solid #111; color: #111; font-size: 12pt; font-weight: 700; }
+}
+
+@media (max-width: 560px) {
+  .discount-dialog, .open-dialog, .return-dialog { padding: 20px 16px; }
+  .discount-cards, .return-meta, .return-control-grid { grid-template-columns: 1fr; }
+  .discount-card { min-height: 82px; }
+  .open-order { grid-template-columns: 1fr; }
+  .open-order > button { width: 100%; }
+  .open-order dl { grid-template-columns: 1fr; }
+  .dialog-actions { grid-template-columns: 1fr; }
+}

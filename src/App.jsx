@@ -10,6 +10,21 @@ import { Icon } from './components/Icons'
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
+const orderSubtotal = order => order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+const discountValue = (subtotal, discount) => {
+  if (!discount) return 0
+  const raw = Number(discount.input)
+  const input = Number.isFinite(raw) && raw > 0 ? raw : 0
+  const percentage = discount.kind === 'baly' ? 26
+    : discount.kind === 'toters' ? 25
+      : discount.kind === 'percent' ? Math.min(100, input) : null
+  const value = percentage === null ? input : Math.round(subtotal * percentage / 100)
+  return Math.min(subtotal, Math.max(0, value))
+}
+const recalculateDiscount = order => {
+  if (!order.discount) return order
+  return { ...order, discount: { ...order.discount, value: discountValue(orderSubtotal(order), order.discount) } }
+}
 const mockCashiers = [
   { cashierId: 'cashier-ali', name: 'علي', pin: '1010', enabled: true },
   { cashierId: 'cashier-ahmed', name: 'أحمد', pin: '2020', enabled: true }
@@ -30,8 +45,9 @@ export default function App() {
   const saleInFlight = useRef(false)
 
   const activeOrder = orders[active] || orders[0]
-  const subtotal = activeOrder.items.reduce((s, i) => s + i.price * i.quantity, 0)
-  const total = Math.max(0, subtotal - (activeOrder.discount?.value || 0))
+  const subtotal = orderSubtotal(activeOrder)
+  const activeDiscount = discountValue(subtotal, activeOrder.discount)
+  const total = Math.max(0, subtotal - activeDiscount)
 
   const openOrdersCount = orders.filter(o => o.held && !o.completed).length
 
@@ -50,7 +66,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
 
   // Order mutations
-  const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? fn(o) : o)), [active])
+  const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o)) : o)), [active])
   const addProduct = useCallback(p => {
     update(o => ({ ...o, items: [...o.items, { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }] }))
     setCartScrollRequest(v => v + 1)
@@ -77,7 +93,8 @@ export default function App() {
       shiftId: session.shiftId,
       createdAt: Date.now(),
       subtotal,
-      discount: activeOrder.discount?.value || 0,
+      discount: activeDiscount,
+      discountDetails: activeOrder.discount ? { ...activeOrder.discount, value: activeDiscount } : null,
       total,
       paymentMethod: payment.method,
       payment,
@@ -99,7 +116,7 @@ export default function App() {
     } finally {
       window.setTimeout(() => { saleInFlight.current = false }, 350)
     }
-  }, [session, activeOrder, nextNumber, subtotal, total, active, autoPrint])
+  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -146,12 +163,25 @@ export default function App() {
 
   // Auto-print trigger
   useEffect(() => {
-    if (printSale) {
-      // Leave the rendered receipt mounted long enough for Chrome's preview to
-      // capture it before returning the POS to its normal screen.
-      const t = setTimeout(() => { window.print(); setPrintSale(null) }, 500)
-      return () => clearTimeout(t)
+    if (!printSale) return undefined
+    let cancelled = false
+    const waitForReceiptAssets = async () => {
+      const fontReady = document.fonts?.ready || Promise.resolve()
+      const logo = document.querySelector('.receipt-logo')
+      const imageReady = !logo || logo.complete
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            logo.addEventListener('load', resolve, { once: true })
+            logo.addEventListener('error', resolve, { once: true })
+          })
+      await Promise.all([fontReady, imageReady])
+      if (!cancelled) {
+        window.print()
+        setPrintSale(null)
+      }
     }
+    waitForReceiptAssets()
+    return () => { cancelled = true }
   }, [printSale])
 
   const newOrder = useCallback(() => {
