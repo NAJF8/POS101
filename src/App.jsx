@@ -172,7 +172,7 @@ export default function App() {
       window.removeEventListener('print-historical-sale', printHistorical)
       window.removeEventListener('view-historical-sale', viewHistorical)
     }
-  }, [activeOrder.items.length, session, complete, total])
+  }, [activeOrder.items.length, session, initiateComplete, total])
 
   // Auto-print trigger
   useEffect(() => {
