@@ -1,126 +1,124 @@
 import { Icon } from './Icons'
 
-const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
-
-export default function OrderPanel({
-  order, updateQuantity, removeItem,
-  onContinue, onHold, onEdit,
-  onDiscount, onClear, onPrintMenu, onReturn, disabled
+export default function OrderPanel({ 
+  order, updateQuantity, removeItem, onEdit, 
+  onContinue, onHold, onDiscount, onClear, 
+  onPrintMenu, onReturn, disabled 
 }) {
-  const subtotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const discount = order.discount?.value || 0
-  const total = Math.max(0, subtotal - discount)
+  const subtotal = order.items.reduce((s, i) => s + i.price * i.quantity, 0)
+  const discountVal = order.discount?.value || 0
+  const total = Math.max(0, subtotal - discountVal)
 
   return (
-    <aside className="order-panel">
-
-      {/* ── Cart Header ── */}
+    <section className="order-panel" inert={disabled ? '' : undefined}>
+      {/* Top Header */}
       <div className="order-top">
-        <div className="order-top-left">
-          <span className="eyebrow">الطلب الحالي</span>
-          <h2>{order.table ? `داخل الكوفي • طاولة ${order.table}` : order.name}</h2>
+        <div className="order-title">
+          <small>الطلب الحالي</small>
+          <h2>{order.name}</h2>
         </div>
-        <button className="icon-button" aria-label="خيارات الطلب">
-          <span>•••</span>
-        </button>
+        {order.table && <span className="table-badge">طاولة {order.table}</span>}
+        {order.orderType && <span className="type-badge">{order.orderType}</span>}
       </div>
 
-      {/* ── Cart Items — ONLY this scrolls ── */}
-      <div className="order-items">
-        {order.items.length > 0 ? (
-          order.items.map(item => (
-            <article className="cart-item" key={item.lineId}>
-              <div className="cart-row">
-                <div className="cart-main">
-                  <b>{item.name}</b>
-                  {item.options && <small>{item.options}</small>}
-                </div>
-                <strong>{format(item.price * item.quantity)}</strong>
-              </div>
-              <div className="cart-row cart-actions">
-                <div className="quantity">
-                  <button onClick={() => updateQuantity(item.lineId, -1)} aria-label="تقليل الكمية">
-                    <Icon name="minus" size={15} />
-                  </button>
-                  <b>{item.quantity}</b>
-                  <button onClick={() => updateQuantity(item.lineId, 1)} aria-label="زيادة الكمية">
-                    <Icon name="plus" size={15} />
-                  </button>
-                </div>
-                <div>
-                  <button className="mini-edit" onClick={() => onEdit(item)}>
-                    <Icon name="edit" size={14} /> تعديل
-                  </button>
-                  <button className="mini-delete" onClick={() => removeItem(item.lineId)} aria-label="حذف">
-                    <Icon name="trash" size={15} />
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))
-        ) : (
-          <div className="cart-empty">
-            <div className="coffee-empty">
-              <Icon name="coffee" size={28} />
+      {/* Cart Items Area */}
+      <div className="order-items-wrapper">
+        <div className="items-header">
+          <span className="col-del"></span>
+          <span className="col-total">المجموع</span>
+          <span className="col-qty">الكمية</span>
+          <span className="col-price">السعر</span>
+          <span className="col-prod">المنتج</span>
+          <span className="col-num">#</span>
+        </div>
+        <div className="order-items">
+          {order.items.length === 0 ? (
+            <div className="empty-cart">
+              <Icon name="coffee" size={40} />
+              <p>السلة فارغة</p>
             </div>
-            <b>اختر منتجًا لبدء الطلب</b>
-            <span>ستظهر تفاصيل الطلب هنا</span>
-          </div>
-        )}
+          ) : (
+            order.items.map((item, index) => (
+              <div key={item.lineId} className="cart-item">
+                <button className="del-btn" onClick={() => removeItem(item.lineId)}>
+                  <Icon name="trash" size={18} />
+                </button>
+                <div className="i-total">
+                  <span>{(item.price * item.quantity).toLocaleString()}</span>
+                  <small>د.ع</small>
+                </div>
+                <div className="qty-ctrl">
+                  <button onClick={() => updateQuantity(item.lineId, -1)}><Icon name="minus" size={16}/></button>
+                  <span>{item.quantity}</span>
+                  <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={16}/></button>
+                </div>
+                <div className="i-price">
+                  <span>{item.price.toLocaleString()}</span>
+                  <small>د.ع</small>
+                </div>
+                <div className="i-prod" onClick={() => item.configurable && onEdit(item)}>
+                  <div className="i-prod-text">
+                    <b>{item.name}</b>
+                    <small>{item.english}</small>
+                    {item.options?.map((o, i) => <div className="opt" key={i}>+ {o.name}</div>)}
+                  </div>
+                  <div className="i-prod-img">
+                    {item.image ? <img src={item.image} alt={item.name} /> : <div className="no-img">١٠١</div>}
+                  </div>
+                </div>
+                <div className="i-num">{index + 1}</div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      {/* ── Cart Footer — NEVER scrolls, always visible ── */}
+      {/* Bottom Pinned Area */}
       <div className="order-bottom">
-
-        {/* Discount */}
-        <div className="cart-tools">
-          <button
-            className="discount"
-            onClick={onDiscount}
-            disabled={disabled || !order.items.length}
-          >
-            <Icon name="plus" size={15} />
+        <div className="discount-row">
+          <button className="discount-btn" onClick={onDiscount}>
+            <Icon name="card" size={18} />
             <span>إضافة خصم</span>
+            <span className="pct">%</span>
           </button>
         </div>
 
-        {/* Totals */}
-        <div className="totals">
-          <span>المجموع الفرعي <b>{format(subtotal)}</b></span>
-          <span>الخصم <b>{format(discount)}</b></span>
-          <div>
-            <strong>الإجمالي</strong>
-            <b>{format(total)}</b>
+        <div className="totals-box">
+          <div className="total-line">
+            <span>{subtotal.toLocaleString()} <small>د.ع</small></span>
+            <span>المجموع الفرعي</span>
+          </div>
+          <div className="total-line discount-val">
+            <span>{discountVal > 0 ? `-${discountVal.toLocaleString()}` : '0'} <small>د.ع</small></span>
+            <span>الخصم</span>
+          </div>
+          <div className="divider" />
+          <div className="grand-total">
+            <span className="amount">{total.toLocaleString()} <small>د.ع</small></span>
+            <span className="label">الإجمالي</span>
           </div>
         </div>
 
-        {/* Primary actions */}
-        <div className="action-bar">
-          <button
-            className="primary-action"
-            disabled={disabled || !order.items.length}
-            onClick={onContinue}
-          >
-            بيع <Icon name="arrow" size={17} />
+        <div className="action-row main-actions">
+          <button className="btn-print" onClick={onPrintMenu}>
+            <Icon name="printer" size={24} />
+            <span>طباعة</span>
           </button>
-          <button className="return-action" onClick={onReturn}>
-            <Icon name="return" size={16} /> إرجاع بيع
+          <button className="btn-return" onClick={onReturn}>
+            <Icon name="return" size={20} />
+            <span>إرجاع بيع</span>
           </button>
-          <button className="print-action" onClick={onPrintMenu}>
-            <Icon name="printer" size={16} /> طباعة
+          <button className="btn-sell" onClick={onContinue} disabled={!order.items.length}>
+            <span>بيع</span>
+            <Icon name="arrow" size={24} />
           </button>
         </div>
 
-        {/* Cancel */}
-        <button
-          className="cancel-action"
-          onClick={onClear}
-          disabled={disabled || !order.items.length}
-        >
-          <Icon name="trash" size={15} /> إلغاء الطلب
+        <button className="btn-cancel-order" onClick={onClear} disabled={!order.items.length}>
+          <Icon name="trash" size={20} />
+          <span>إلغاء الطلب</span>
         </button>
-
       </div>
-    </aside>
+    </section>
   )
 }

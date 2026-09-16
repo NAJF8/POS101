@@ -12,60 +12,72 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, onCashierMenu }) {
+export default function Header({ onOpenOrders, session, onCashierMenu, onLogout, openOrdersCount = 0 }) {
   const now = useLiveClock()
 
   const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })
-  const dateStr = now.toLocaleDateString('ar-IQ', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+  const dateStr = now.toLocaleDateString('ar-IQ', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+
+  const getShiftDuration = (openedAt) => {
+    const diffMs = Date.now() - openedAt;
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    if (hours > 0) return `منذ ${hours} ساعات`;
+    const minutes = Math.floor(diffMs / (1000 * 60));
+    return `منذ ${minutes} دقيقة`;
+  }
 
   return (
     <header className="app-header">
-      {/* Brand */}
-      <div className="brand">
-        <img src={logoUrl} alt="101 COFFEE HOUSE" />
-        <span className="brand-divider" />
-        <div>
-          <strong>101 COFFEE HOUSE</strong>
-          <span className="brand-sub">نظام نقاط البيع</span>
+      <div className="header-left">
+        <div className="brand">
+          <img src={logoUrl} alt="101 COFFEE HOUSE" />
         </div>
-      </div>
-
-      {/* Center — status chips */}
-      <div className="header-center">
-        {session && (
-          <div className="shift-status">
-            <i />
-            <span>الوردية مفتوحة</span>
-            <small>منذ {new Date(session.openedAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</small>
-          </div>
-        )}
-        <button className="open-orders-btn" onClick={onOpenOrders}>
-          <Icon name="receipt" size={16} />
-          <span>الطلبات المفتوحة</span>
-        </button>
-      </div>
-
-      {/* Right — time + cashier + actions */}
-      <div className="header-actions">
-        <div className="header-time">
-          <span className="time-val">{timeStr}</span>
-          <span className="time-date">{dateStr}</span>
-        </div>
-
+        
         {session && (
           <button className="cashier-btn" onClick={onCashierMenu} title="إعدادات الكاشير">
-            <div className="cashier-avatar">{session.cashierNameSnapshot[0]}</div>
+            <Icon name="user" size={24} />
             <div className="cashier-info">
               <b>{session.cashierNameSnapshot}</b>
               <small>الكاشير</small>
             </div>
-            <Icon name="user" size={15} />
           </button>
         )}
+      </div>
 
-        {!session && (
-          <button className="header-icon-btn" title="إعدادات">
-            <Icon name="grid" size={17} />
+      <div className="header-right">
+        <div className="header-block time-block">
+          <Icon name="clock" size={22} />
+          <div className="block-info">
+            <b>{timeStr}</b>
+            <small>{dateStr}</small>
+          </div>
+        </div>
+
+        {session && (
+          <div className="header-block shift-block">
+            <i className="status-dot green"></i>
+            <div className="block-info">
+              <b>الوردية مفتوحة</b>
+              <small>{getShiftDuration(session.openedAt)}</small>
+            </div>
+          </div>
+        )}
+
+        <button className="header-btn" onClick={onOpenOrders}>
+          <Icon name="receipt" size={20} />
+          <span>الطلبات المفتوحة</span>
+          {openOrdersCount > 0 && <span className="badge">{openOrdersCount}</span>}
+        </button>
+
+        <button className="header-btn">
+          <Icon name="settings" size={20} />
+          <span>الإعدادات</span>
+        </button>
+
+        {session && (
+          <button className="header-btn logout-btn" onClick={onLogout}>
+            <Icon name="logout" size={20} />
+            <span>تسجيل خروج</span>
           </button>
         )}
       </div>

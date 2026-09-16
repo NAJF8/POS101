@@ -30,6 +30,8 @@ export default function App() {
   const subtotal = activeOrder.items.reduce((s, i) => s + i.price * i.quantity, 0)
   const total = Math.max(0, subtotal - (activeOrder.discount?.value || 0))
 
+  const openOrdersCount = orders.filter(o => o.held && !o.completed).length
+
   const visibleProducts = useMemo(
     () => products.filter(p =>
       (category === 'الكل' || p.category === category) &&
@@ -43,29 +45,6 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.nextNumber', nextNumber), [nextNumber])
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const key = e => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
-      if (e.key === 'Escape') { setModal(null); return }
-      if (!session) return
-      if (e.key === 'F7') { e.preventDefault(); activeOrder.items.length ? setModal('quickCash') : window.alert('أضف منتجًا أولًا قبل الدفع السريع') }
-      if (e.key === 'F8') { e.preventDefault(); activeOrder.items.length && setModal('payment-electronic') }
-      if (e.key === 'F9') { e.preventDefault(); hold() }
-      if (e.key === 'F10') { e.preventDefault(); setModal('openOrders') }
-    }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [activeOrder.items.length, session])
-
-  // Auto-print trigger
-  useEffect(() => {
-    if (printSale) {
-      const t = setTimeout(() => window.print(), 100)
-      return () => clearTimeout(t)
-    }
-  }, [printSale])
 
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? fn(o) : o)), [active])
@@ -98,14 +77,51 @@ export default function App() {
       order: { ...activeOrder, items: originalItems }
     }
     setNextNumber(n => n + 1)
+    
+    // Clear only current order, remain on same tab
     setOrders(v => v.map((o, i) => i === active
-      ? ({ ...blankOrder(o.id), name: o.name, completed: true, sale, lastSale: sale, originalItems, adjustments: o.adjustments || [] })
+      ? blankOrder(o.id)
       : o
     ))
-    setSelected(sale)
-    if (autoPrint) setPrintSale(sale)
+    
+    // We don't save 'sale' to the active order since it's cleared, but we could save to history
+    // For now, print it directly
+    if (autoPrint || payment.forcePrint) setPrintSale(sale)
     setModal(null)
   }, [session, activeOrder, nextNumber, subtotal, total, active, autoPrint])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const key = e => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (e.key === 'Escape') { setModal(null); return }
+      if (!session) return
+      
+      // F6: Direct Sell + Print
+      if (e.key === 'F6') {
+        e.preventDefault()
+        if (activeOrder.items.length) {
+          // Trigger complete with a default method (e.g., Cash) and force print
+          complete({ method: 'نقدي', received: total, change: 0, forcePrint: true })
+        }
+      }
+      
+      if (e.key === 'F7') { e.preventDefault(); activeOrder.items.length ? setModal('quickCash') : window.alert('أضف منتجًا أولًا قبل الدفع السريع') }
+      if (e.key === 'F8') { e.preventDefault(); /* Unassigned */ }
+      if (e.key === 'F9') { e.preventDefault(); hold() }
+      if (e.key === 'F10') { e.preventDefault(); setModal('openOrders') }
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [activeOrder.items.length, session, complete, total])
+
+  // Auto-print trigger
+  useEffect(() => {
+    if (printSale) {
+      const t = setTimeout(() => { window.print(); setPrintSale(null) }, 100)
+      return () => clearTimeout(t)
+    }
+  }, [printSale])
 
   const newOrder = useCallback(() => {
     const i = orders.findIndex(o => !o.items.length && !o.completed)
@@ -146,33 +162,18 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <Header session={session} onOpenOrders={() => setModal('openOrders')} onCashierMenu={() => setModal('cashier-menu')} />
+      <Header 
+        session={session} 
+        onOpenOrders={() => setModal('openOrders')} 
+        onCashierMenu={() => setModal('cashier-menu')} 
+        onLogout={logout}
+        openOrdersCount={openOrdersCount}
+      />
 
-      {/* Quick Order Tabs */}
-      <div className="quick-orders">
-        {orders.slice(0, 4).map((o, i) => (
-          <button onClick={() => session && setActive(i)} key={o.id} className={active === i ? 'active' : ''}>
-            <span>طلب {o.id}</span>
-            {o.table && <small>طاولة {o.table}</small>}
-            {o.items.length > 0 && <i>{o.items.reduce((s, x) => s + x.quantity, 0)}</i>}
-          </button>
-        ))}
-        <button className="quick-add" onClick={() => session && newOrder()} aria-label="فتح مساحة طلب جديدة">
-          <Icon name="plus" size={16} />
-        </button>
-      </div>
-
-      {/* POS Body */}
+      {/* POS Body - Two Main Panels */}
       <div className="pos-body">
-        <ProductGrid
-          products={visibleProducts}
-          category={category}
-          setCategory={setCategory}
-          categories={categories}
-          query={query}
-          setQuery={setQuery}
-          onSelect={session ? selectProduct : () => setModal('login')}
-        />
+        
+        {/* Left Panel: Cart */}
         <OrderPanel
           order={activeOrder}
           updateQuantity={updateQuantity}
@@ -186,21 +187,24 @@ export default function App() {
           onReturn={() => setModal('openOrders')}
           disabled={!session}
         />
-      </div>
 
-      {/* Status Footer */}
-      <footer className="app-footer">
-        <div className="footer-brand">
-          <b>101 COFFEE HOUSE</b>
-          <span>النجف - العراق</span>
-        </div>
-        <div className="footer-center">قهوة أفضل .. أجواء أجمل &nbsp;·&nbsp; BETTER COFFEE .. BRIGHTER DAYS</div>
-        <div className="footer-right">
-          <div className="footer-status-chip chip-green"><i /><span>متصل</span></div>
-          <div className="footer-status-chip chip-amber"><i /><span>الطباعة: {autoPrint ? 'تشغيل' : 'إيقاف'}</span></div>
-          <span className="version">v1.0.0</span>
-        </div>
-      </footer>
+        {/* Right Panel: Catalog */}
+        <ProductGrid
+          products={visibleProducts}
+          category={category}
+          setCategory={setCategory}
+          categories={categories}
+          query={query}
+          setQuery={setQuery}
+          onSelect={session ? selectProduct : () => setModal('login')}
+          orders={orders}
+          activeOrderIndex={active}
+          setActiveOrderIndex={setActive}
+          onNewOrder={newOrder}
+          session={session}
+        />
+        
+      </div>
 
       {/* Login gate */}
       {!session && (

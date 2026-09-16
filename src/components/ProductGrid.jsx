@@ -1,98 +1,93 @@
 import { Icon } from './Icons'
 
-const productMarks = {
-  'قهوة مختصة': 'V',
-  'قهوة ساخنة': '☕',
-  'مشروبات باردة': '❄',
-  'مشروبات 101': '١٠١',
-  'حلويات': '◒',
-  'ساندويتشات': '—',
-  'إضافات/أخرى': '+'
+// Mapping categories to icons
+const getCategoryIcon = (category) => {
+  switch (category) {
+    case 'الكل': return 'grid';
+    case 'قهوة مختصة': return 'coffee';
+    case 'قهوة ساخنة': return 'hot';
+    case 'مشروبات باردة': return 'cold';
+    case 'مشروبات 101': return 'star';
+    case 'حلويات': return 'cake';
+    case 'ساندويتشات': return 'sandwich';
+    case 'إضافات/أخرى': return 'plus';
+    default: return 'grid';
+  }
 }
 
-export default function ProductGrid({
-  products, category, setCategory,
-  categories, query, setQuery, onSelect
+export default function ProductGrid({ 
+  products, category, setCategory, categories, query, setQuery, onSelect,
+  orders, activeOrderIndex, setActiveOrderIndex, onNewOrder, session
 }) {
   return (
-    <section className="catalog">
-
-      {/* Toolbar: search */}
-      {categories.length > 0 && (
-        <div className="catalog-toolbar">
-          <label className="search">
-            <Icon name="search" size={17} />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="إبحث عن منتج..."
-            />
-          </label>
-          <span style={{ color: 'var(--muted)', fontSize: 11 }}>
-            {products.length} منتج
-          </span>
-        </div>
-      )}
-
-      {/* Category tabs */}
-      {categories.length > 0 && (
-        <nav className="category-tabs" aria-label="الأقسام">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              className={category === cat ? 'selected' : ''}
-              onClick={() => setCategory(cat)}
-            >
-              {cat === 'الكل' && <Icon name="grid" size={15} />}
-              {cat}
+    <section className="catalog-panel">
+      {/* Top Toolbar: Quick Orders + Search */}
+      <div className="catalog-toolbar">
+        {orders && (
+          <div className="quick-orders">
+            {orders.slice(0, 4).map((o, i) => (
+              <button 
+                onClick={() => session && setActiveOrderIndex(i)} 
+                key={o.id} 
+                className={activeOrderIndex === i ? 'active' : ''}
+              >
+                <span>طلب {o.id}</span>
+                {o.table && <small>طاولة {o.table}</small>}
+                {o.items.length > 0 && <i>{o.items.reduce((s, x) => s + x.quantity, 0)}</i>}
+              </button>
+            ))}
+            <button className="quick-add" onClick={() => session && onNewOrder()} aria-label="فتح مساحة طلب جديدة">
+              <Icon name="plus" size={18} />
             </button>
-          ))}
-        </nav>
-      )}
-
-      {/* Products scroll area */}
-      <div className="products-area">
-        <div className="product-grid">
-          {products.map(product => (
-            <button
-              className={`product-card ${product.unavailable ? 'unavailable' : ''}`}
-              key={product.id}
-              onClick={() => !product.unavailable && onSelect(product)}
-              disabled={product.unavailable}
-            >
-              <div className={`product-image shade-${product.id % 5}`}>
-                {product.image ? (
-                  <img
-                    src={product.image}
-                    alt=""
-                    onError={e => { e.currentTarget.style.display = 'none' }}
-                  />
-                ) : (
-                  <span>{productMarks[product.category] || '☕'}</span>
-                )}
-                {product.favorite && (
-                  <i className="fav"><Icon name="star" size={12} /></i>
-                )}
-                {product.unavailable && <em>غير متوفر</em>}
-              </div>
-              <div className="product-info">
-                <b>{product.name}</b>
-                <small>{product.english}</small>
-                <strong>
-                  {product.price ? `${product.price.toLocaleString('ar-IQ')} د.ع` : 'قريبًا'}
-                </strong>
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {!products.length && (
-          <div className="empty">
-            <Icon name="search" size={26} />
-            <b>لم يتم العثور على منتج</b>
-            <span>جرّب كتابة اسم مختلف</span>
           </div>
         )}
+
+        <div className="search-box">
+          <Icon name="search" />
+          <input 
+            type="search" 
+            placeholder="ابحث عن منتج..." 
+            value={query} 
+            onChange={e => setQuery(e.target.value)} 
+          />
+        </div>
+      </div>
+
+      {/* Category Tabs */}
+      <div className="category-tabs">
+        {categories.map(c => (
+          <button 
+            key={c} 
+            className={`cat-btn ${category === c ? 'active' : ''}`} 
+            onClick={() => setCategory(c)}
+          >
+            <Icon name={getCategoryIcon(c)} size={20} />
+            <span>{c}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Products Area */}
+      <div className="products-area">
+        <div className="product-grid">
+          {products.map(p => (
+            <button key={p.id} className="product-card" onClick={() => onSelect(p)}>
+              <div className="img-wrap">
+                {p.image ? <img src={p.image} alt={p.name} loading="lazy" /> : <div className="no-img">١٠١</div>}
+                {p.category === 'مشروبات 101' && <span className="product-mark"><Icon name="star" size={12}/></span>}
+              </div>
+              <div className="p-info">
+                <b className="p-name">{p.name}</b>
+                <small className="p-eng">{p.english}</small>
+                <div className="p-price">
+                  <span>{p.price.toLocaleString()}</span>
+                  <small>د.ع</small>
+                </div>
+              </div>
+            </button>
+          ))}
+          {products.length === 0 && <div className="empty-state">لا يوجد منتجات تطابق البحث</div>}
+        </div>
       </div>
     </section>
   )

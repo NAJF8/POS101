@@ -1,4 +1,4 @@
-export const Icon = ({ name, size = 20, stroke = 1.9 }) => {
+export const Icon = ({ name, size = 20, stroke = 1.9, className = '' }) => {
   const paths = {
     search: 'M20 20l-4.5-4.5m2.5-5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0',
     plus: 'M12 5v14M5 12h14',
@@ -20,9 +20,16 @@ export const Icon = ({ name, size = 20, stroke = 1.9 }) => {
     return: 'M9 14l-5-5 5-5M4 9h11a5 5 0 0 1 0 10H11',
     settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0-9V3m0 18v-3m9-6h-3M6 12H3m15.36-6.36-2.12 2.12M6.76 17.24l-2.12 2.12M18.36 17.24l-2.12-2.12M6.76 6.76 4.64 4.64',
     wifi: 'M5 13a10 10 0 0 1 14 0M1.5 9.5a15 15 0 0 1 21 0M8.5 16.5a5 5 0 0 1 7 0M12 20h.01',
+    logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+    hot: 'M4 8h12v7a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8zm12 3h2a2 2 0 0 1 0 4h-2M6 3v2M10 3v2M14 3v2',
+    cold: 'M7 7h10l-1 14H8L7 7z M12 2v5 M15 3l-3 4',
+    cake: 'M20 21H4v-8h16v8zM4 13l8-6 8 6M12 7V3',
+    sandwich: 'M2 17h20v2H2z M3 13h18v3H3z M2 9h20v3H2z M4 5h16v3H4z',
+    clock: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 6v6l4 2'
   }
   return (
     <svg
+      className={className}
       width={size}
       height={size}
       viewBox="0 0 24 24"
