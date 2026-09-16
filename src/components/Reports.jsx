@@ -5,7 +5,7 @@ const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 document.  They must never inherit the POS
 // screen's thermal-receipt print rules.
-const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`
+const logoUrl = new URL(`${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`, window.location.href).href
 const formatDate = value => new Date(value).toLocaleString('ar-IQ', { dateStyle: 'short', timeStyle: 'short' })
 
 const a4PrintStyles = `
@@ -22,6 +22,7 @@ const a4PrintStyles = `
   .print-table { width: 100%; border-collapse: collapse; margin: 0 0 6mm; }
   .print-table th, .print-table td { border: .25mm solid #a9a9a9; padding: 2.3mm; text-align: right; vertical-align: top; }
   .print-table th { background: #eef3eb; color: #263b25; font-weight: 700; }
+  .print-table tfoot td { background: #f5f5f5; font-weight: 700; }
   .number-cell { direction: ltr; text-align: left; white-space: nowrap; }
   .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .25mm solid #a9a9a9; font-weight: 700; }
   thead { display: table-header-group; }
@@ -61,7 +62,7 @@ export default function Reports({ onNavigate }) {
       return
     }
     printWindow.document.open()
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${a4PrintStyles}</style></head><body>${paper.outerHTML}</body></html>`)
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${a4PrintStyles}</style></head><body>${paper.outerHTML}</body></html>`)
     printWindow.document.close()
 
     const waitForAssetsAndPrint = async () => {
@@ -74,6 +75,7 @@ export default function Reports({ onNavigate }) {
         })
       }))
       await (printWindow.document.fonts?.ready || Promise.resolve())
+      await new Promise(resolve => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
       printWindow.focus()
       printWindow.print()
     }
