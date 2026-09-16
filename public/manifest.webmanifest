@@ -1,9 +1,11 @@
 {
-  "name": "101 POS | 101 COFFEE HOUSE",
+  "name": "101 COFFEE HOUSE",
   "short_name": "101 POS",
+  "description": "نظام نقاط البيع — 101 COFFEE HOUSE",
   "start_url": "/POS101/",
   "display": "standalone",
-  "background_color": "#f7f5ef",
+  "orientation": "landscape",
+  "background_color": "#40533b",
   "theme_color": "#40533b",
   "icons": [
     {"src":"/POS101/assets/icons/icon-192x192.png","sizes":"192x192","type":"image/png"},
