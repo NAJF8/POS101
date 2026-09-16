@@ -1,5 +1,6 @@
 import React from 'react'
 import { Icon } from './Icons'
+import { productNames } from '../data/menu'
 
 const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
 
@@ -18,10 +19,12 @@ export function ProductOptions({ product, onClose, onAdd }) {
     <Dialog onClose={onClose} className="options-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <div className="options-hero">
-        <div className="options-product shade-1">☕</div>
+        <div className="options-product">
+          {product.image ? <img src={product.image} alt="" /> : <span>101</span>}
+        </div>
         <div>
           <p>{product.category}</p>
-          <h2>{product.name}</h2>
+          <h2>{productNames(product).arabic}</h2>
           <span>{format(product.price)}</span>
         </div>
       </div>
@@ -30,7 +33,7 @@ export function ProductOptions({ product, onClose, onAdd }) {
         <div className="choice-row">
           {[['صغير', -500], ['عادي', 0], ['كبير', 1000]].map(([label, add]) => (
             <button key={label} onClick={() => setSize(label)} className={size === label ? 'active' : ''}>
-              {label}
+              <strong>{label}</strong>
               <small>{add ? `${add > 0 ? '+' : ''}${format(add)}` : 'السعر الأساسي'}</small>
             </button>
           ))}
@@ -40,10 +43,10 @@ export function ProductOptions({ product, onClose, onAdd }) {
         <h3>الإضافات</h3>
         <div className="addon-list">
           {[['شوت إضافي', true], ['فانيلا', true], ['كراميل', true], ['حليب خالي اللاكتوز', false]].map(([name, isPaid]) => (
-            <label key={name}>
+            <label className="addon-option" key={name}>
               <input type="checkbox" checked={addons.some(x => x.name === name)} onChange={() => toggle(name, isPaid)} />
-              <span>{name}</span>
-              <b>{isPaid ? '+٥٠٠ د.ع' : 'مجاني'}</b>
+              <span className="addon-name">{name}</span>
+              <b>{isPaid ? '+500 د.ع' : 'مجاني'}</b>
             </label>
           ))}
         </div>
@@ -53,13 +56,14 @@ export function ProductOptions({ product, onClose, onAdd }) {
         <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="مثال: بدون سكر، ثلج قليل" />
       </section>
       <div className="dialog-footer">
+        <span className="quantity-label">الكمية</span>
         <div className="quantity">
           <button onClick={() => setQuantity(Math.max(1, quantity - 1))}><Icon name="minus" size={15} /></button>
           <b>{quantity}</b>
           <button onClick={() => setQuantity(quantity + 1)}><Icon name="plus" size={15} /></button>
         </div>
         <button className="primary-action" onClick={() => onAdd({
-          ...product, quantity, options: [size, ...addons.map(x => x.name)].join(' • '), notes,
+          ...product, quantity, options: [size, ...addons.map(x => x.name)], notes,
           unitPrice: product.price + (size === 'كبير' ? 1000 : size === 'صغير' ? -500 : 0) + paid
         })}>
           إضافة للطلب <b>{format(total)}</b>

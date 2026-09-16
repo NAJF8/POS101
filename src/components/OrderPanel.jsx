@@ -61,11 +61,10 @@ export default function OrderPanel({
                 <div className="i-prod" onClick={() => item.configurable && onEdit(item)}>
                   <div className="i-prod-text">
                     <b>{names.arabic}</b>
-                    {names.english && <small>{names.english}</small>}
-                    {item.options?.map((o, i) => <div className="opt" key={i}>+ {o.name}</div>)}
+                    {item.options?.map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o.name}</div>)}
                   </div>
                   <div className="i-prod-img">
-                    {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img">١٠١</div>}
+                    {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img"><strong>101</strong><small>بدون صورة</small></div>}
                   </div>
                 </div>
                 <div className="i-num">{index + 1}</div>

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 
-// Use the supplied 101 COFFEE HOUSE mark, not the POS promotional artwork.
-const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
+// Use the supplied transparent 101 COFFEE HOUSE mark in the POS header.
+const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
 
 function useLiveClock() {
   const [now, setNow] = useState(() => new Date())

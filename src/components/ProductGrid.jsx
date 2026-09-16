@@ -75,7 +75,7 @@ export default function ProductGrid({
             const names = productNames(p)
             return <button key={p.id} className={`product-card ${p.unavailable ? 'unavailable' : ''}`} disabled={p.unavailable} onClick={() => onSelect(p)}>
               <div className="img-wrap">
-                {p.image ? <img src={p.image} alt={names.arabic} loading="lazy" /> : <div className="no-img" aria-label="صورة 101 البديلة">١٠١</div>}
+                {p.image ? <img src={p.image} alt={names.arabic} loading="lazy" /> : <div className="no-img" aria-label="صورة 101 البديلة"><strong>101</strong><small>بدون صورة</small></div>}
                 {p.category === 'مشروبات 101' && <span className="product-mark"><Icon name="star" size={12}/></span>}
               </div>
               <div className="p-info">
