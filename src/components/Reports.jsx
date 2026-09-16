@@ -61,7 +61,7 @@ export default function Reports({ onNavigate }) {
       return
     }
     printWindow.document.open()
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>معاينة التقرير</title><style>${a4PrintStyles}</style></head><body>${paper.outerHTML}</body></html>`)
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${a4PrintStyles}</style></head><body>${paper.outerHTML}</body></html>`)
     printWindow.document.close()
 
     const waitForAssetsAndPrint = async () => {
