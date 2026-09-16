@@ -45,25 +45,6 @@
 .print-status button { border: 0; border-radius: 7px; padding: 7px 10px; background: var(--green); color: #fff; font-weight: 700; white-space: nowrap; }
 .print-status button:last-child { padding: 2px 7px; background: transparent; color: var(--muted); font-size: 20px; }
 
-@media print {
-  @page { size: 80mm auto; margin: 0; }
-  html, body { width: 80mm; height: auto !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important; background: #fff !important; }
-  body * { visibility: hidden !important; }
-  body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
-  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box; width: 80mm !important; min-height: 0; height: auto !important; margin: 0 !important; padding: 3mm 4mm 6mm !important; background: #fff !important; color: #111 !important; font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif; font-size: 10pt; line-height: 1.35; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body .receipt-logo-wrap { margin: 0 0 3mm; text-align: center; }
-  body .receipt-logo { display: block; height: 35mm; width: auto; max-width: 100%; margin: 0 auto; object-fit: contain; }
-  body .receipt-date { margin: 0 0 3mm; text-align: center; color: #111; font-size: 9pt; }
-  body .receipt-items { display: block; border: .25mm solid #222; border-radius: 0; overflow: visible; }
-  body .receipt-table-head, body .receipt-line { display: grid !important; grid-template-columns: minmax(0, 1fr) 12mm 20mm; gap: 2mm; align-items: start; }
-  body .receipt-table-head { padding: 2mm; border-bottom: .25mm solid #222; color: #111; font-size: 8pt; font-weight: 700; }
-  body .receipt-line { margin: 0; padding: 2mm; border-bottom: .2mm solid #bbb; break-inside: avoid; page-break-inside: avoid; }
-  body .receipt-line:last-child { border-bottom: 0; }
-  body .receipt-line span { min-width: 0; overflow-wrap: anywhere; }
-  body .receipt-line b { font-size: 9pt; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left; }
-  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4mm; align-items: center; margin: 4mm 0 0; padding: 3mm 1mm 0; border-top: .45mm solid #111; color: #111; font-size: 12pt; font-weight: 700; }
-  .print-status { display: none !important; }
-}
 @media (min-width: 1600px) { :root { --cart-w: 500px; } }
 
 /* â”€â”€ Reset â”€â”€ */
@@ -1359,16 +1340,20 @@ input, textarea, select { cursor: text; }
   .expenses-header { align-items: stretch; flex-direction: column; }
 }
 
-/* Thermal receipt print contract: 80mm wide, portrait, roll height automatic. */
+/* Thermal receipt print contract: 80mm wide, content-driven roll length.
+   The Windows driver may still impose a fixed paper length; CSS cannot
+   override that hardware/driver constraint. */
 @media print {
   @page { size: 80mm auto; margin: 0; }
   html, body, #root { width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
   body { display: block !important; position: static !important; }
+  body > #root > .app-shell { display: block !important; position: static !important; width: 80mm !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }
+  body > #root > .app-shell > :not(.receipt-sheet) { display: none !important; }
   body * { visibility: hidden !important; }
   body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
-  body .receipt-sheet { display: block !important; position: static !important; width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 4mm 5mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 11pt !important; font-weight: 600 !important; line-height: 1.3 !important; transform: none !important; }
+  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box !important; width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 2mm 4mm 5mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 11pt !important; font-weight: 600 !important; line-height: 1.3 !important; break-after: avoid-page !important; page-break-after: avoid !important; transform: none !important; }
   body .receipt-logo-wrap { display: block !important; margin: 0 0 2mm !important; padding: 0 !important; text-align: center !important; }
-  body .receipt-logo { display: block !important; width: auto !important; height: 22mm !important; max-width: 100% !important; margin: 0 auto !important; object-fit: contain !important; filter: grayscale(1) contrast(2.4) brightness(.72) !important; }
+  body .receipt-logo { display: block !important; width: auto !important; height: 22mm !important; max-width: 100% !important; margin: 0 auto !important; object-fit: contain !important; filter: brightness(0) !important; }
   body .receipt-date { margin: 0 0 2mm !important; padding: 0 !important; color: #000 !important; font-size: 10pt !important; font-weight: 700 !important; }
   body .receipt-items { margin: 0 !important; border: .35mm solid #000 !important; overflow: visible !important; }
   body .receipt-table-head, body .receipt-line { display: grid !important; grid-template-columns: minmax(0, 1fr) 12mm 20mm !important; gap: 1.5mm !important; align-items: start !important; }
@@ -1377,7 +1362,7 @@ input, textarea, select { cursor: text; }
   body .receipt-line:last-child { border-bottom: 0 !important; }
   body .receipt-line span { min-width: 0 !important; overflow-wrap: anywhere !important; }
   body .receipt-line b { color: #000 !important; font-size: 10pt !important; font-weight: 800 !important; white-space: nowrap !important; }
-  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto !important; gap: 3mm !important; margin: 3mm 0 0 !important; padding: 2mm 1mm 0 !important; border-top: .6mm solid #000 !important; color: #000 !important; font-size: 14pt !important; font-weight: 900 !important; }
+  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto !important; gap: 3mm !important; margin: 3mm 0 0 !important; padding: 2mm 1mm 0 !important; border-top: .6mm solid #000 !important; color: #000 !important; font-size: 14pt !important; font-weight: 900 !important; break-inside: avoid !important; page-break-inside: avoid !important; }
   body .receipt-total b { color: #000 !important; font-size: 14pt !important; font-weight: 900 !important; }
   .print-status { display: none !important; }
 }
