@@ -1189,10 +1189,14 @@ input, textarea, select { cursor: text; }
 .report-view-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   max-width: 800px;
   margin-bottom: 2rem;
 }
+
+.report-print-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 
 .report-paper {
   background: white;

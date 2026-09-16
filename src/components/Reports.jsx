@@ -8,23 +8,23 @@ const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(k
 const logoUrl = new URL(`${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`, window.location.href).href
 const formatDate = value => new Date(value).toLocaleString('ar-IQ', { dateStyle: 'short', timeStyle: 'short' })
 
-const a4PrintStyles = `
-  @page { size: A4 portrait; margin: 12mm; }
+const reportPrintStyles = mode => `
+  @page { size: ${mode === 'thermal' ? '80mm auto' : 'A4 portrait'}; margin: ${mode === 'thermal' ? '0' : '12mm'}; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: Tahoma, Arial, sans-serif; }
-  body { direction: rtl; font-size: 12pt; line-height: 1.5; }
-  .report-paper { width: 100%; max-width: none; margin: 0; padding: 0; background: #fff; }
+  body { direction: rtl; font-size: ${mode === 'thermal' ? '10pt' : '12pt'}; line-height: 1.5; }
+  .report-paper { width: 100%; max-width: none; margin: 0; padding: ${mode === 'thermal' ? '3mm' : '0'}; background: #fff; }
   .report-paper-header { text-align: center; padding-bottom: 6mm; margin-bottom: 7mm; border-bottom: .4mm solid #40533b; }
-  .report-logo { display: block; width: 40mm; height: 29mm; object-fit: contain; margin: 0 auto 3mm; filter: brightness(0); }
-  h2 { margin: 0 0 2mm; font-size: 20pt; color: #000; }
-  h3 { margin: 7mm 0 3mm; font-size: 15pt; color: #000; }
+  .report-logo { display: block; width: ${mode === 'thermal' ? '30mm' : '40mm'}; height: ${mode === 'thermal' ? '22mm' : '29mm'}; object-fit: contain; margin: 0 auto 3mm; }
+  h2 { margin: 0 0 2mm; font-size: ${mode === 'thermal' ? '15pt' : '20pt'}; color: #000; }
+  h3 { margin: 7mm 0 3mm; font-size: ${mode === 'thermal' ? '12pt' : '15pt'}; color: #000; }
   p { margin: 0; }
-  .print-table { width: 100%; border-collapse: collapse; margin: 0 0 6mm; }
-  .print-table th, .print-table td { border: .35mm solid #000; padding: 2.8mm; color: #000; text-align: right; vertical-align: top; }
+  .print-table { width: 100%; border-collapse: collapse; margin: 0 0 6mm; ${mode === 'thermal' ? 'table-layout: fixed;' : ''} }
+  .print-table th, .print-table td { border: .35mm solid #000; padding: ${mode === 'thermal' ? '1.5mm 1mm' : '2.8mm'}; color: #000; text-align: right; vertical-align: top; overflow-wrap: anywhere; }
   .print-table th { background: #fff; color: #000; font-weight: 800; }
   .print-table tfoot td { background: #fff; color: #000; font-weight: 800; }
   .number-cell { direction: ltr; text-align: left; white-space: nowrap; }
-  .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; }
+  .report-paper-footer { display: ${mode === 'thermal' ? 'block' : 'flex'}; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; ${mode === 'thermal' ? 'text-align: center;' : ''} }
   thead { display: table-header-group; }
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
 `
@@ -50,7 +50,7 @@ export default function Reports({ onNavigate }) {
     return expenses.filter(e => e.date >= startMs && e.date <= endMs)
   }, [expenses, startMs, endMs])
 
-  const printReport = () => {
+  const printReport = mode => {
     const paper = document.querySelector('.report-paper')
     if (!paper) return
 
@@ -62,7 +62,8 @@ export default function Reports({ onNavigate }) {
       return
     }
     printWindow.document.open()
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${a4PrintStyles}</style></head><body>${paper.outerHTML}</body></html>`)
+    const printPaper = paper.cloneNode(true)
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${reportPrintStyles(mode)}</style></head><body>${printPaper.outerHTML}</body></html>`)
     printWindow.document.close()
 
     const waitForAssetsAndPrint = async () => {
@@ -287,7 +288,10 @@ export default function Reports({ onNavigate }) {
       <div className="report-view-container" dir="rtl">
         <div className="report-view-header non-printable">
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
-          <button className="primary-action" type="button" onClick={printReport}><Icon name="printer" size={20} /> طباعة</button>
+          <div className="report-print-actions">
+            <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4</button>
+            <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
+          </div>
         </div>
         
         <div className="report-paper">
