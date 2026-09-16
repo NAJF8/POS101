@@ -3,6 +3,7 @@ import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
 import { ProductOptions, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, CashierLogin, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
+import OrderHistoryMenu from './components/OrderHistoryMenu'
 import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
 
@@ -100,7 +101,7 @@ export default function App() {
     }
   }, [session, activeOrder, nextNumber, subtotal, total, active, autoPrint])
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts and custom events
   useEffect(() => {
     const key = e => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
@@ -111,7 +112,6 @@ export default function App() {
       if (e.key === 'F6') {
         e.preventDefault()
         if (activeOrder.items.length) {
-          // Trigger complete with a default method (e.g., Cash) and force print
           complete({ method: 'cash', received: total, change: 0, forcePrint: true })
         }
       }
@@ -121,8 +121,27 @@ export default function App() {
       if (e.key === 'F9') { e.preventDefault(); hold() }
       if (e.key === 'F10') { e.preventDefault(); setModal('openOrders') }
     }
+    const openHistory = () => {
+      if (!session) { setModal('login'); return }
+      setModal('history')
+    }
+    const printHistorical = e => {
+      setPrintSale(e.detail)
+    }
+    const viewHistorical = e => {
+      setSelected(e.detail)
+      setModal('history')
+    }
     window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
+    window.addEventListener('open-history', openHistory)
+    window.addEventListener('print-historical-sale', printHistorical)
+    window.addEventListener('view-historical-sale', viewHistorical)
+    return () => {
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('open-history', openHistory)
+      window.removeEventListener('print-historical-sale', printHistorical)
+      window.removeEventListener('view-historical-sale', viewHistorical)
+    }
   }, [activeOrder.items.length, session, complete, total])
 
   // Auto-print trigger
@@ -146,7 +165,7 @@ export default function App() {
   const recordAdjustment = useCallback(a => {
     const adjustment = { ...a, id: crypto.randomUUID(), type: 'refund', time: Date.now(), originalSaleId: selected.sale?.id }
     setOrders(v => v.map(o => o.id === selected.id ? ({ ...o, adjustments: [...(o.adjustments || []), adjustment] }) : o))
-    setModal('history')
+    setModal('single-history')
     setSelected(v => ({ ...v, adjustments: [...(v.adjustments || []), adjustment] }))
   }, [selected])
 
@@ -154,10 +173,10 @@ export default function App() {
     const adjustment = { id: crypto.randomUUID(), type: 'add', product: p.name, quantity: p.quantity, amount: p.price, time: Date.now(), originalSaleId: selected.sale?.id }
     setOrders(v => v.map(o => o.id === selected.id ? ({ ...o, adjustments: [...(o.adjustments || []), adjustment] }) : o))
     setSelected(v => ({ ...v, adjustments: [...(v.adjustments || []), adjustment] }))
-    setModal('history')
+    setModal('single-history')
   }, [selected])
 
-  const history = useCallback(o => { setSelected(o); setModal('history') }, [])
+  const history = useCallback(o => { setSelected(o); setModal('single-history') }, [])
   const print = useCallback(() => setPrintSale(selected?.sale || selected), [selected])
   const login = useCallback(cashier => {
     setSession({ cashierId: cashier.cashierId, cashierNameSnapshot: cashier.name, shiftId: crypto.randomUUID(), openedAt: Date.now(), status: 'open' })
@@ -217,6 +236,7 @@ export default function App() {
           session={session}
         />
         
+        {modal === 'history' && <OrderHistoryMenu onClose={() => setModal(null)} />}
       </div>
 
       {/* Login gate */}
@@ -239,12 +259,12 @@ export default function App() {
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={complete} />}
       {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} onClose={() => setModal(null)} onApply={applyDiscount} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}
-      {modal === 'history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}
-      {modal === 'return' && <ReturnDialog order={selected} onClose={() => setModal('history')} onConfirm={recordAdjustment} />}
+      {modal === 'single-history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}
+      {modal === 'return' && <ReturnDialog order={selected} onClose={() => setModal('single-history')} onConfirm={recordAdjustment} />}
       {modal === 'add-existing' && (
         <div className="overlay">
           <div className="dialog add-existing-dialog">
-            <button className="close" onClick={() => setModal('history')}><Icon name="x" /></button>
+            <button className="close" onClick={() => setModal('single-history')}><Icon name="x" /></button>
             <h2>إضافة منتج إلى الطلب المكتمل</h2>
             <ProductGrid products={products.filter(p => !p.unavailable)} category="الكل" setCategory={() => {}} categories={[]} query="" setQuery={() => {}} onSelect={p => addToCompleted({ ...p, quantity: 1 })} />
           </div>
@@ -256,3 +276,4 @@ export default function App() {
     </main>
   )
 }
+

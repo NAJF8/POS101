@@ -12,8 +12,6 @@ export default function OrderPanel({
   const discountVal = order.discount?.value || 0
   const total = Math.max(0, subtotal - discountVal)
 
-  // Keep the cashier's focus on the item just added without moving the page
-  // or the catalog.  The request changes only after a successful cart add.
   useEffect(() => {
     const area = itemsAreaRef.current
     if (!area || !scrollRequest) return
@@ -28,19 +26,17 @@ export default function OrderPanel({
           <small>الطلب الحالي</small>
           <h2>{order.name}</h2>
         </div>
-        {order.table && <span className="table-badge">طاولة {order.table}</span>}
-        {order.orderType && <span className="type-badge">{order.orderType}</span>}
       </div>
 
       {/* Cart Items Area */}
       <div className="order-items-wrapper">
         <div className="items-header">
-          <span className="col-del"></span>
-          <span className="col-total">المجموع</span>
-          <span className="col-qty">الكمية</span>
-          <span className="col-price">السعر</span>
-          <span className="col-prod">المنتج</span>
           <span className="col-num">#</span>
+          <span className="col-prod">المنتج</span>
+          <span className="col-price">السعر</span>
+          <span className="col-qty">الكمية</span>
+          <span className="col-total">المجموع</span>
+          <span className="col-actions"></span>
         </div>
         <div className="order-items" ref={itemsAreaRef}>
           {order.items.length === 0 ? (
@@ -52,32 +48,33 @@ export default function OrderPanel({
             order.items.map((item, index) => {
               const names = productNames(item)
               return <div key={item.lineId} className="cart-item">
-                <button className="del-btn" onClick={() => removeItem(item.lineId)}>
-                  <Icon name="trash" size={18} />
-                </button>
-                <div className="i-total">
-                  <span>{(item.price * item.quantity).toLocaleString()}</span>
-                  <small>د.ع</small>
-                </div>
-                <div className="qty-ctrl">
-                  <button onClick={() => updateQuantity(item.lineId, -1)}><Icon name="minus" size={16}/></button>
-                  <span>{item.quantity}</span>
-                  <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={16}/></button>
+                <div className="i-num">{index + 1}</div>
+                <div className="i-prod">
+                  <div className="i-prod-img">
+                    {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img"></div>}
+                  </div>
+                  <div className="i-prod-text">
+                    <b>{names.arabic}</b>
+                    {item.options?.map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o.name}</div>)}
+                  </div>
                 </div>
                 <div className="i-price">
                   <span>{item.price != null ? item.price.toLocaleString() : '—'}</span>
                   {item.price != null && <small>د.ع</small>}
                 </div>
-                <div className="i-prod" onClick={() => item.configurable && onEdit(item)}>
-                  <div className="i-prod-text">
-                    <b>{names.arabic}</b>
-                    {item.options?.map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o.name}</div>)}
-                  </div>
-                  <div className="i-prod-img">
-                    {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img"><strong>101</strong><small>بدون صورة</small></div>}
-                  </div>
+                <div className="qty-ctrl">
+                  <button onClick={() => updateQuantity(item.lineId, -1)}><Icon name="minus" size={14}/></button>
+                  <span>{item.quantity}</span>
+                  <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={14}/></button>
                 </div>
-                <div className="i-num">{index + 1}</div>
+                <div className="i-total">
+                  <span>{(item.price * item.quantity).toLocaleString()}</span>
+                  <small>د.ع</small>
+                </div>
+                <div className="i-actions">
+                  <button className="edit-btn" onClick={() => onEdit(item)}><Icon name="edit" size={16} /></button>
+                  <button className="del-btn" onClick={() => removeItem(item.lineId)}><Icon name="trash" size={16} /></button>
+                </div>
               </div>
             })
           )}
@@ -88,31 +85,31 @@ export default function OrderPanel({
       <div className="order-bottom">
         <div className="discount-row">
           <button className="discount-btn" onClick={onDiscount}>
-            <Icon name="card" size={18} />
+            <div className="discount-icon-circle">%</div>
             <span>إضافة خصم</span>
-            <span className="pct">%</span>
+            <Icon name="arrow" className="down-chevron" size={16} />
           </button>
         </div>
 
         <div className="totals-box">
           <div className="total-line">
+            <span className="label">المجموع الفرعي</span>
             <span>{subtotal.toLocaleString()} <small>د.ع</small></span>
-            <span>المجموع الفرعي</span>
           </div>
           <div className="total-line discount-val">
-            <span>{discountVal > 0 ? `-${discountVal.toLocaleString()}` : '0'} <small>د.ع</small></span>
-            <span>الخصم</span>
+            <span className="label">الخصم</span>
+            <span>{discountVal.toLocaleString()} <small>د.ع</small></span>
           </div>
           <div className="divider" />
           <div className="grand-total">
-            <span className="amount">{total.toLocaleString()} <small>د.ع</small></span>
             <span className="label">الإجمالي</span>
+            <span className="amount">{total.toLocaleString()} <small>د.ع</small></span>
           </div>
         </div>
 
         <div className="action-row main-actions">
           <button className="btn-print" onClick={onPrintMenu}>
-            <Icon name="printer" size={24} />
+            <Icon name="printer" size={20} />
             <span>طباعة</span>
           </button>
           <button className="btn-return" onClick={onReturn}>
@@ -120,13 +117,13 @@ export default function OrderPanel({
             <span>إرجاع بيع</span>
           </button>
           <button className="btn-sell" onClick={onContinue} disabled={!order.items.length}>
+            <Icon name="check" size={20} className="sell-icon" />
             <span>بيع</span>
-            <Icon name="arrow" size={24} />
           </button>
         </div>
 
         <button className="btn-cancel-order" onClick={onClear} disabled={!order.items.length}>
-          <Icon name="trash" size={20} />
+          <Icon name="trash" size={18} />
           <span>إلغاء الطلب</span>
         </button>
       </div>

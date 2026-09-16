@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 
 // Use the supplied transparent 101 COFFEE HOUSE mark in the POS header.
-const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
+const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo.jpg`
 
 function useLiveClock() {
   const [now, setNow] = useState(() => new Date())
@@ -43,9 +43,7 @@ export default function Header({ onOpenOrders, session, onCashierMenu, onLogout,
             </div>
           </button>
         )}
-      </div>
-
-      <div className="header-right">
+        
         <div className="header-block time-block">
           <Icon name="clock" size={22} />
           <div className="block-info">
@@ -53,21 +51,18 @@ export default function Header({ onOpenOrders, session, onCashierMenu, onLogout,
             <small>{dateStr}</small>
           </div>
         </div>
+      </div>
 
+      <div className="header-right">
         {session && (
-          <div className="header-block shift-block">
-            <i className="status-dot green"></i>
-            <div className="block-info">
-              <b>الوردية مفتوحة</b>
-              <small>{getShiftDuration(session.openedAt)}</small>
-            </div>
-          </div>
+          <button className="header-btn logout-btn" onClick={onLogout}>
+            <Icon name="logout" size={20} />
+            <span>تسجيل خروج</span>
+          </button>
         )}
 
-        <button className="header-btn" onClick={onOpenOrders}>
-          <Icon name="receipt" size={20} />
-          <span>الطلبات المفتوحة</span>
-          {openOrdersCount > 0 && <span className="badge">{openOrdersCount}</span>}
+        <button className="header-btn theme-btn">
+          <Icon name="sun" size={20} />
         </button>
 
         <button className="header-btn">
@@ -75,12 +70,21 @@ export default function Header({ onOpenOrders, session, onCashierMenu, onLogout,
           <span>الإعدادات</span>
         </button>
 
-        {session && (
-          <button className="header-btn logout-btn" onClick={onLogout}>
-            <Icon name="logout" size={20} />
-            <span>تسجيل خروج</span>
-          </button>
-        )}
+        <button className="header-btn outline-btn" onClick={() => window.dispatchEvent(new CustomEvent('open-history'))}>
+          <Icon name="receipt" size={20} />
+          <span>سجل الطلبات</span>
+        </button>
+
+        <button className="header-btn outline-btn" onClick={onOpenOrders}>
+          <Icon name="receipt" size={20} />
+          <span>الطلبات المفتوحة</span>
+          <span className="badge">{openOrdersCount}</span>
+        </button>
+
+        <div className="brand-left">
+          <img src={logoUrl} alt="101 COFFEE HOUSE" style={{ height: '36px' }} />
+          <div style={{ fontSize: '12px', fontWeight: 'bold' }}>كوفي هاوس</div>
+        </div>
       </div>
     </header>
   )
