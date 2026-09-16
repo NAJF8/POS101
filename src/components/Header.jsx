@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 
-const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
+const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
 
 function useLiveClock() {
   const [now, setNow] = useState(() => new Date())

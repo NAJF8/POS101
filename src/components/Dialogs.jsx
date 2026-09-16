@@ -376,7 +376,7 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 /* ── Receipt — display:none normally, shown only @media print ── */
 export function Receipt({ sale }) {
   if (!sale) return null
-  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/receipt-logo-original.jpg`
+  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
   return (
     <div className="receipt-sheet">
       <div className="receipt-logo-wrap">
