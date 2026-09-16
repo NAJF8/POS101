@@ -3,6 +3,28 @@ import { Icon } from './Icons'
 
 const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
+const shiftDefinitions = {
+  morning: { id: 'morning', name: 'كاشير صباحي' },
+  evening: { id: 'evening', name: 'كاشير مسائي' }
+}
+// Existing sales created before shift metadata was persisted have no `shift`.
+// Keep those records immutable and classify them by the local cashier day.
+const LEGACY_MORNING_START = 6
+const LEGACY_EVENING_START = 16
+const localDateInput = date => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const shiftForSale = sale => {
+  const value = String(sale.shift || sale.shiftName || sale.shiftId || '').trim().toLocaleLowerCase('ar-IQ')
+  if (value === shiftDefinitions.morning.id || value === shiftDefinitions.morning.name.toLocaleLowerCase('ar-IQ')) return 'morning'
+  if (value === shiftDefinitions.evening.id || value === shiftDefinitions.evening.name.toLocaleLowerCase('ar-IQ')) return 'evening'
+  if (!Number.isFinite(Number(sale.createdAt))) return null
+  const hour = new Date(Number(sale.createdAt)).getHours()
+  return hour >= LEGACY_MORNING_START && hour < LEGACY_EVENING_START ? 'morning' : 'evening'
+}
 // Reports print in their own A4 document.  They must never inherit the POS
 // screen's thermal-receipt print rules.
 const logoUrl = new URL(`${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`, window.location.href).href
@@ -32,15 +54,15 @@ const reportPrintStyles = mode => `
 export default function Reports({ onNavigate }) {
   const [reportType, setReportType] = useState(null)
   
-  const todayStr = new Date().toISOString().substring(0, 10)
+  const todayStr = localDateInput(new Date())
   const [dateFrom, setDateFrom] = useState(todayStr)
   const [dateTo, setDateTo] = useState(todayStr)
   
   const sales = useMemo(() => read('pos101.sales', []), [])
   const expenses = useMemo(() => read('pos101.expenses', []), [])
 
-  const startMs = new Date(dateFrom).setHours(0, 0, 0, 0)
-  const endMs = new Date(dateTo).setHours(23, 59, 59, 999)
+  const startMs = new Date(`${dateFrom}T00:00:00`).getTime()
+  const endMs = new Date(`${dateTo}T23:59:59.999`).getTime()
 
   const filteredSales = useMemo(() => {
     return sales.filter(s => s.createdAt >= startMs && s.createdAt <= endMs && (!s.voided))
@@ -187,12 +209,13 @@ export default function Reports({ onNavigate }) {
     } else if (reportType === 'morning' || reportType === 'evening') {
       const isMorning = reportType === 'morning'
       title = isMorning ? 'تقرير المبيعات - وردية صباحية' : 'تقرير المبيعات - وردية مسائية'
-      const targetShift = isMorning ? 'كاشير صباحي' : 'كاشير مسائي'
+      const targetShift = isMorning ? 'morning' : 'evening'
       
-      const sList = filteredSales.filter(s => s.shift === targetShift)
+      const sList = filteredSales.filter(s => shiftForSale(s) === targetShift)
       const stats = aggregateSales(sList)
       
-      const eList = filteredExpenses.filter(e => e.shift === targetShift)
+      const targetShiftName = shiftDefinitions[targetShift].name
+      const eList = filteredExpenses.filter(e => e.shift === targetShiftName || e.shift === targetShift)
       const expensesTotal = eList.reduce((sum, e) => sum + Number(e.amount), 0)
       
       content = <><table className="print-table"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{stats.count}</td></tr><tr><td>المتوسط لكل طلب</td><td>{format(stats.avg)}</td></tr></tbody></table>{salesDetails(sList)}</>
