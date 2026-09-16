@@ -1,34 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
-import { ProductOptions, OrderType, TableSelection, Payment, Success, OpenOrders, History } from './components/Dialogs'
+import { ProductOptions, OrderType, TableSelection, Payment, Success, OpenOrders, History, ReturnDialog, Receipt } from './components/Dialogs'
 import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
-
-const blankOrder = index => ({ id:index, name:`طلب ${index}`, items:[], table:null })
-const format = value => `${value.toLocaleString('ar-IQ')} د.ع`
-
+const blankOrder = index => ({ id:index, name:`طلب ${index}`, items:[], table:null, orderType:null, held:false, completed:false, adjustments:[] })
+const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 export default function App() {
-  const [orders, setOrders] = useState([1,2,3,4].map(blankOrder))
-  const [active, setActive] = useState(0)
-  const [category, setCategory] = useState('الكل')
-  const [query, setQuery] = useState('')
-  const [modal, setModal] = useState(null)
-  const [selected, setSelected] = useState(null)
-  const activeOrder = orders[active]
-  const total = activeOrder.items.reduce((sum,item) => sum + item.price * item.quantity,0)
-  const visibleProducts = useMemo(() => products.filter(product => (category === 'الكل' || product.category === category) && `${product.name} ${product.english}`.toLowerCase().includes(query.toLowerCase())), [category, query])
-  const amend = callback => setOrders(current => current.map((order,index) => index === active ? callback(order) : order))
-  const addProduct = product => { amend(order => ({...order, items:[...order.items, {...product, lineId:`${product.id}-${Date.now()}`}]})); setModal(null) }
-  const selectProduct = product => { if(product.configurable) { setSelected(product); setModal('options') } else addProduct({...product, quantity:1}) }
-  const updateQuantity = (lineId, delta) => amend(order => ({...order, items: order.items.flatMap(item => item.lineId === lineId ? (item.quantity + delta <= 0 ? [] : [{...item,quantity:item.quantity+delta}]) : [item])}))
-  const removeItem = lineId => amend(order => ({...order,items:order.items.filter(item => item.lineId !== lineId)}))
-  const chooseType = type => { setModal(null); type === 'داخل الكوفي' ? setModal('tables') : setModal('payment') }
-  const chooseTable = table => { amend(order => ({...order,table})); setModal('payment') }
-  const complete = () => { setModal('success') }
-  const newOrder = () => { amend(order=>({...order,items:[],table:null})); setModal(null) }
-  return <main className="app-shell"><Header onOpenOrders={() => setModal('openOrders')} /><div className="quick-orders">{orders.map((order,index) => <button onClick={() => setActive(index)} key={order.id} className={active === index ? 'active' : ''}><span>طلب {order.id}</span>{order.table && <small>طاولة {order.table}</small>}{order.items.length > 0 && <i>{order.items.reduce((sum,item)=>sum+item.quantity,0)}</i>}</button>)}<button className="quick-add" aria-label="فتح مساحة طلب جديدة"><Icon name="plus" size={18}/></button></div><div className="pos-layout"><ProductGrid products={visibleProducts} category={category} setCategory={setCategory} categories={categories} query={query} setQuery={setQuery} onSelect={selectProduct}/><OrderPanel order={activeOrder} updateQuantity={updateQuantity} removeItem={removeItem} onEdit={item => { setSelected(item); setModal('options') }} onContinue={() => setModal('orderType')} onHold={() => setModal('openOrders')}/></div>
-    {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct}/>} {modal === 'orderType' && <OrderType onClose={() => setModal(null)} onChoose={chooseType}/>} {modal === 'tables' && <TableSelection onClose={() => setModal(null)} onChoose={chooseTable}/>} {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={complete}/>} {modal === 'success' && <Success total={total} onClose={newOrder} onReceipt={() => setModal('history')}/>} {modal === 'openOrders' && <OpenOrders onClose={() => setModal(null)} onHistory={() => setModal('history')}/>} {modal === 'history' && <History onClose={() => setModal(null)}/>}
-  </main>
+  const [orders,setOrders] = useState(() => read('pos101.orders',[1,2,3,4].map(blankOrder)))
+  const [nextNumber,setNextNumber] = useState(() => read('pos101.nextNumber',1015)), [active,setActive] = useState(0), [category,setCategory] = useState('الكل'), [query,setQuery] = useState(''), [modal,setModal] = useState(null), [selected,setSelected] = useState(null), [printSale,setPrintSale] = useState(null)
+  const activeOrder = orders[active] || orders[0]; const total = activeOrder.items.reduce((s,i)=>s+i.price*i.quantity,0)
+  const visibleProducts = useMemo(() => products.filter(p=>(category==='الكل'||p.category===category)&&`${p.name} ${p.english}`.toLowerCase().includes(query.toLowerCase())),[category,query])
+  useEffect(()=>localStorage.setItem('pos101.orders',JSON.stringify(orders)),[orders]); useEffect(()=>localStorage.setItem('pos101.nextNumber',nextNumber),[nextNumber])
+  useEffect(()=>{ const key=e=>{ if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return; if(e.key==='Escape'){setModal(null);return} if(e.key==='F7'){e.preventDefault();setModal('payment')} if(e.key==='F8'){e.preventDefault();setModal('payment-electronic')} if(e.key==='F9'){e.preventDefault();hold()} if(e.key==='F10'){e.preventDefault();setModal('openOrders')} }; window.addEventListener('keydown',key); return()=>window.removeEventListener('keydown',key) })
+  useEffect(()=>{ if(printSale){const t=setTimeout(()=>window.print(),100); return()=>clearTimeout(t)} },[printSale])
+  const update = fn => setOrders(v=>v.map((o,i)=>i===active?fn(o):o)); const addProduct = p => { update(o=>({...o,items:[...o.items,{...p,price:p.unitPrice||p.price,lineId:`${p.id}-${Date.now()}`}]}));setModal(null) }
+  const selectProduct = p => p.configurable?(setSelected(p),setModal('options')):addProduct({...p,quantity:1})
+  const updateQuantity=(lineId,delta)=>update(o=>({...o,items:o.items.flatMap(i=>i.lineId===lineId?(i.quantity+delta<=0?[]:[{...i,quantity:i.quantity+delta}]):[i])}))
+  const removeItem=lineId=>update(o=>({...o,items:o.items.filter(i=>i.lineId!==lineId)})); const chooseType=t=>{update(o=>({...o,orderType:t}));setModal(t==='داخل الكوفي'?'tables':'payment')}; const chooseTable=t=>{update(o=>({...o,table:t}));setModal('payment')}
+  const hold=()=>{if(!activeOrder.items.length)return;update(o=>({...o,held:true}));setModal('openOrders')}; const openOrder=id=>{const idx=orders.findIndex(o=>o.id===id);if(idx>=0){setActive(idx);setOrders(v=>v.map(o=>o.id===id?({...o,held:false}):o));setModal(null)}}
+  const complete=payment=>{if(!activeOrder.items.length)return;const sale={id:crypto.randomUUID(),orderNumber:nextNumber,total,payment,createdAt:Date.now(),order:{...activeOrder,items:activeOrder.items.map(i=>({...i}))}};setNextNumber(n=>n+1);setOrders(v=>v.map((o,i)=>i===active?({...o,completed:true,held:false,total,sale}):o));setSelected(sale);setModal('success')}
+  const newOrder=()=>{const i=orders.findIndex(o=>!o.items.length&&!o.completed);if(i>=0){setActive(i);setModal(null)}else{setOrders(v=>[...v,blankOrder(v.length+1)]);setActive(orders.length);setModal(null)}}
+  const recordAdjustment=a=>{const adjustment={...a,id:crypto.randomUUID(),type:'refund'};setOrders(v=>v.map(o=>o.id===selected.id?({...o,adjustments:[...(o.adjustments||[]),adjustment]}):o));setModal('history');setSelected(v=>({...v,adjustments:[...(v.adjustments||[]),adjustment]}))}
+  const addExisting=()=>{setSelected(selected);setModal('add-existing')}; const addToCompleted=p=>{setOrders(v=>v.map(o=>o.id===selected.id?({...o,adjustments:[...(o.adjustments||[]),{id:crypto.randomUUID(),type:'add',product:p.name,quantity:p.quantity,amount:p.price}]}):o));setModal('history')}
+  const history=o=>{setSelected(o);setModal('history')}; const print=()=>setPrintSale(selected?.sale||selected); const onReceipt=s=>{setPrintSale(s);setModal(null)}
+  return <main className="app-shell"><Header onOpenOrders={()=>setModal('openOrders')}/><div className="quick-orders">{orders.slice(0,4).map((o,i)=><button onClick={()=>setActive(i)} key={o.id} className={active===i?'active':''}><span>طلب {o.id}</span>{o.table&&<small>طاولة {o.table}</small>}{o.items.length>0&&<i>{o.items.reduce((s,x)=>s+x.quantity,0)}</i>}</button>)}<button className="quick-add" onClick={newOrder} aria-label="فتح مساحة طلب جديدة"><Icon name="plus" size={18}/></button></div><div className="pos-layout"><ProductGrid products={visibleProducts} category={category} setCategory={setCategory} categories={categories} query={query} setQuery={setQuery} onSelect={selectProduct}/><OrderPanel order={activeOrder} updateQuantity={updateQuantity} removeItem={removeItem} onEdit={i=>(setSelected(i),setModal('options'))} onContinue={()=>setModal('orderType')} onHold={hold}/></div>
+    {modal==='options'&&<ProductOptions product={selected} onClose={()=>setModal(null)} onAdd={addProduct}/>} {modal==='orderType'&&<OrderType onClose={()=>setModal(null)} onChoose={chooseType}/>} {modal==='tables'&&<TableSelection orders={orders} onClose={()=>setModal(null)} onChoose={chooseTable}/>} {modal==='payment'&&<Payment total={total} onClose={()=>setModal(null)} onSuccess={complete}/>} {modal==='payment-electronic'&&<Payment initialMethod="إلكتروني" total={total} onClose={()=>setModal(null)} onSuccess={complete}/>} {modal==='success'&&<Success sale={selected} onClose={newOrder} onReceipt={onReceipt}/>} {modal==='openOrders'&&<OpenOrders orders={orders} onClose={()=>setModal(null)} onSelect={openOrder} onHistory={history}/>} {modal==='history'&&<History order={selected} onClose={()=>setModal(null)} onReturn={()=>setModal('return')} onAdd={addExisting} onReprint={print}/>} {modal==='return'&&<ReturnDialog order={selected} onClose={()=>setModal('history')} onConfirm={recordAdjustment}/>} {modal==='add-existing'&&<div className="overlay"><div className="dialog add-existing-dialog"><button className="close" onClick={()=>setModal('history')}><Icon name="x"/></button><h2>إضافة منتج إلى الطلب المكتمل</h2><ProductGrid products={products.filter(p=>!p.unavailable)} category="الكل" setCategory={()=>{}} categories={[]} query="" setQuery={()=>{}} onSelect={p=>addToCompleted({...p,quantity:1})}/></div></div>} {printSale&&<Receipt sale={printSale}/>}</main>
 }
