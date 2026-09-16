@@ -11,20 +11,20 @@ const formatDate = value => new Date(value).toLocaleString('ar-IQ', { dateStyle:
 const a4PrintStyles = `
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #171717; font-family: Tahoma, Arial, sans-serif; }
-  body { direction: rtl; font-size: 11pt; line-height: 1.5; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: Tahoma, Arial, sans-serif; }
+  body { direction: rtl; font-size: 12pt; line-height: 1.5; }
   .report-paper { width: 100%; max-width: none; margin: 0; padding: 0; background: #fff; }
   .report-paper-header { text-align: center; padding-bottom: 6mm; margin-bottom: 7mm; border-bottom: .4mm solid #40533b; }
-  .report-logo { display: block; width: 34mm; height: 25mm; object-fit: contain; margin: 0 auto 3mm; }
-  h2 { margin: 0 0 2mm; font-size: 18pt; color: #263b25; }
-  h3 { margin: 7mm 0 3mm; font-size: 13pt; color: #263b25; }
+  .report-logo { display: block; width: 40mm; height: 29mm; object-fit: contain; margin: 0 auto 3mm; filter: brightness(0); }
+  h2 { margin: 0 0 2mm; font-size: 20pt; color: #000; }
+  h3 { margin: 7mm 0 3mm; font-size: 15pt; color: #000; }
   p { margin: 0; }
   .print-table { width: 100%; border-collapse: collapse; margin: 0 0 6mm; }
-  .print-table th, .print-table td { border: .25mm solid #a9a9a9; padding: 2.3mm; text-align: right; vertical-align: top; }
-  .print-table th { background: #eef3eb; color: #263b25; font-weight: 700; }
-  .print-table tfoot td { background: #f5f5f5; font-weight: 700; }
+  .print-table th, .print-table td { border: .35mm solid #000; padding: 2.8mm; color: #000; text-align: right; vertical-align: top; }
+  .print-table th { background: #fff; color: #000; font-weight: 800; }
+  .print-table tfoot td { background: #fff; color: #000; font-weight: 800; }
   .number-cell { direction: ltr; text-align: left; white-space: nowrap; }
-  .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .25mm solid #a9a9a9; font-weight: 700; }
+  .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; }
   thead { display: table-header-group; }
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
 `
