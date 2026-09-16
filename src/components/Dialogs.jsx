@@ -376,11 +376,11 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 /* ── Receipt — display:none normally, shown only @media print ── */
 export function Receipt({ sale }) {
   if (!sale) return null
-  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
+  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`
   return (
     <div className="receipt-sheet">
       <div className="receipt-logo-wrap">
-        <img className="receipt-logo" src={logoUrl} alt="101 COFFEE HOUSE" />
+        <img className="receipt-logo" src={logoUrl} alt="شعار 101" />
       </div>
       <p className="receipt-date" dir="rtl">{new Date(sale.createdAt).toLocaleString('ar-IQ', { dateStyle: 'medium', timeStyle: 'short' })}</p>
       <section className="receipt-items" dir="rtl"><div className="receipt-table-head"><span>الصنف</span><span>الكمية</span><span>السعر</span></div>{sale.order.items.map(i => (
