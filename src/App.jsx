@@ -236,7 +236,7 @@ export default function App() {
           session={session}
         />
         
-        {modal === 'history' && <OrderHistoryMenu onClose={() => setModal(null)} />}
+        {modal === 'history' && <OrderHistoryMenu session={session} onClose={() => setModal(null)} />}
       </div>
 
       {/* Login gate */}
