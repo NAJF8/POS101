@@ -577,6 +577,57 @@ input, textarea, select { cursor: text; }
 }
 .dialog .close { position: absolute; top: 16px; left: 16px; background: #f0eee8; padding: 6px; border-radius: 8px; }
 
+/* Cashier entry is a compact, self-contained touch dialog.  Keep its logo
+   sizing local so the global product and banknote image rules are untouched. */
+.cashier-login {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 32px));
+  padding: 26px 32px 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  text-align: right;
+  direction: rtl;
+}
+.cashier-login > img {
+  display: block;
+  width: min(230px, 72%);
+  height: 145px;
+  margin: 0 auto 2px;
+  object-fit: contain;
+}
+.cashier-login h2 { color: var(--coffee); font-size: 24px; line-height: 1.3; }
+.cashier-login > p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.cashier-login form { display: grid; gap: 12px; margin-top: 4px; }
+.cashier-login form label { display: grid; gap: 6px; color: var(--coffee); font-weight: 600; }
+.cashier-login form select, .cashier-login form input {
+  width: 100%; min-height: 46px; padding: 9px 11px;
+  border: 1px solid var(--line-strong); border-radius: 9px;
+  background: #fff; color: var(--coffee);
+}
+.cashier-login form input { direction: ltr; text-align: right; }
+.cashier-login form .primary-action { width: 100%; min-height: 50px; margin-top: 4px; }
+
+/* Confirmation content owns three separate rows: heading, message, footer. */
+.confirm-dialog {
+  width: min(600px, calc(100vw - 32px));
+  padding: 30px 32px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  direction: rtl;
+}
+.confirm-dialog .dialog-heading { padding-left: 0; padding-right: 0; }
+.confirm-dialog .dialog-heading h2 { font-size: 24px; }
+.confirm-dialog .dialog-heading p { margin-top: 7px; }
+.confirm-actions { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); gap: 10px; }
+.confirm-actions button { width: 100%; min-height: 48px; padding: 9px 12px; border-radius: 9px; font-weight: 700; }
+.confirm-actions button:first-child { background: #f4f1eb; border: 1px solid var(--line-strong); color: var(--coffee); }
+.confirm-actions button:first-child:hover { background: #ede8df; }
+.danger-button { background: var(--danger); color: #fff; }
+.danger-button:hover:not(:disabled) { background: #963f3a; }
+
 /* Product options: compact, touch-safe RTL layout. */
 .options-dialog { direction: rtl; display: flex; flex-direction: column; gap: 14px; padding: 20px; overflow: hidden; }
 .options-dialog > section { border-top: 1px solid var(--line); padding-top: 12px; }
@@ -846,6 +897,33 @@ input, textarea, select { cursor: text; }
 @media (max-width: 640px) { .type-grid { grid-template-columns: 1fr; } }
 
 /* Print mode */
+
+/* F7 Quick Cash: compact local-banknote keypad for POS screens. */
+.quick-cash-dialog { width: min(700px, 100%); padding: 20px; }
+.quick-cash-dialog > h2 { margin-bottom: 10px; }
+.cash-summary, .change { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: 9px; background: #eef2eb; color: var(--green); }
+.cash-summary { margin-bottom: 10px; }
+.cash-summary b, .change b { font-size: 17px; }
+.banknote-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.banknote { min-height: 94px; padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 4px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--coffee); overflow: hidden; }
+.banknote:hover { border-color: var(--green); background: #f7f9f4; }
+.banknote img { display: block; width: 100%; height: 58px; object-fit: contain; }
+.banknote strong { font-size: 11px; color: var(--green); white-space: nowrap; }
+.cash-tools { display: flex; gap: 8px; margin: 10px 0; }
+.cash-tools button { flex: 1; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--coffee); font-size: 12px; }
+.cash-tools button:last-child { color: var(--danger); background: var(--danger-bg); border-color: #f0caca; }
+.change { margin-bottom: 10px; }
+.change.due { color: #8d5d25; background: #fbefdb; }
+.quick-cash-dialog > .primary-action { width: 100%; }
+@media (max-height: 800px) {
+  .quick-cash-dialog { padding: 16px; }
+  .banknote { min-height: 76px; }
+  .banknote img { height: 42px; }
+  .cash-tools { margin: 7px 0; }
+}
+@media (max-width: 640px) { .type-grid { grid-template-columns: 1fr; } }
+
+/* Print mode */
 .receipt-sheet { display: none; }
 @media print {
   @page { margin: 0; size: 80mm auto; }
@@ -853,7 +931,7 @@ input, textarea, select { cursor: text; }
   body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
   body .receipt-sheet {
     display: block !important;
-    position: fixed; left: 0; top: 0; width: 80mm;
+    position: static; left: 0; top: 0; width: 80mm; height: auto;
     background: #fff; color: #000; font-size: 12px;
     padding: 0 4mm 10mm;
   }
@@ -982,4 +1060,283 @@ input, textarea, select { cursor: text; }
   .open-order > button { width: 100%; }
   .open-order dl { grid-template-columns: 1fr; }
   .dialog-actions { grid-template-columns: 1fr; }
+}
+
+/* Dashboard & Reports Layouts */
+.dashboard-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 64px);
+  padding: 2rem;
+  background-color: var(--background);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  max-width: 1200px;
+  width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 768px) {
+  .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.dashboard-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-color);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.dashboard-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 12px rgba(0,0,0,0.1);
+}
+
+.dashboard-card .card-icon {
+  color: var(--accent);
+}
+
+.dashboard-card h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* Reports */
+.reports-container {
+  display: flex;
+  gap: 2rem;
+  padding: 2rem;
+  min-height: calc(100vh - 64px);
+}
+
+.reports-sidebar {
+  width: 300px;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.date-filter label {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1rem;
+  font-weight: 600;
+}
+
+.date-filter input {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.reports-main {
+  flex: 1;
+}
+
+.reports-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.report-card-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.report-card-btn:hover {
+  border-color: var(--accent);
+  background: var(--background);
+}
+
+.report-card-btn b {
+  font-size: 1.2rem;
+  margin-top: 0.5rem;
+}
+
+.report-card-btn small {
+  color: var(--text-muted);
+}
+
+.report-view-container {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.report-view-header {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 800px;
+  margin-bottom: 2rem;
+}
+
+.report-paper {
+  background: white;
+  color: black;
+  width: 100%;
+  max-width: 800px;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.report-paper-header {
+  text-align: center;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #ddd;
+  padding-bottom: 1rem;
+}
+
+.report-logo {
+  max-width: 150px;
+  margin-bottom: 1rem;
+}
+
+.print-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2rem;
+}
+
+.print-table th, .print-table td {
+  border: 1px solid #ccc;
+  padding: 0.75rem;
+  text-align: right;
+}
+
+.print-table th {
+  background: #f8f8f8;
+  font-weight: bold;
+}
+
+.report-paper-footer {
+  display: flex;
+  justify-content: space-between;
+  border-top: 2px solid #ddd;
+  padding-top: 1rem;
+  font-weight: bold;
+}
+
+/* Print Styles */
+@media print {
+  .app-header, .non-printable, .dashboard-container, .reports-sidebar {
+    display: none !important;
+  }
+  
+  .report-paper {
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  body {
+    background: white;
+  }
+  
+  /* Thermal Print adjustments (80mm) */
+  .receipt-sheet {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 5mm !important;
+  }
+
+  .receipt-logo {
+    max-width: 60%;
+  }
+}
+
+/* Fixes for overlapping text in dialogs */
+.discount-dialog, .return-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.discount-dialog h2, .return-dialog h2 {
+  margin-bottom: 0.5rem;
+}
+
+.discount-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+}
+
+.return-meta dl, .open-order dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+
+.return-meta dt, .open-order dt {
+  font-weight: bold;
+}
+
+.return-meta dd, .open-order dd {
+  margin: 0;
+}
+
+.form-error {
+  color: #d32f2f;
+  background: #ffebee;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+/* More fixes for overlapping Arabic text */
+.history-filters label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.discount-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.history-details-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }

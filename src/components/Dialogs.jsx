@@ -376,7 +376,7 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 /* ── Receipt — display:none normally, shown only @media print ── */
 export function Receipt({ sale }) {
   if (!sale) return null
-  const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
+  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
   return (
     <div className="receipt-sheet">
       <div className="receipt-logo-wrap">
@@ -393,41 +393,52 @@ export function Receipt({ sale }) {
   )
 }
 
-/* ── Cashier Login ── */
-export function CashierLogin({ cashiers, onClose, onLogin }) {
-  const [cashierId, setCashierId] = React.useState(cashiers[0]?.cashierId || '')
-  const [pin, setPin] = React.useState('')
-  const [error, setError] = React.useState('')
-  const logoUrl = `${import.meta.env.BASE_URL}assets/logo.jpg`
+/* ── Shift Login ── */
+export function ShiftLogin({ shifts, onClose, onLogin }) {
+  const [shiftId, setShiftId] = React.useState(shifts[0]?.shiftId || '')
+  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
 
   const submit = e => {
     e.preventDefault()
-    const cashier = cashiers.find(c => c.cashierId === cashierId && c.enabled && c.pin === pin)
-    if (!cashier) { setError('رمز الدخول غير صحيح أو الحساب معطل'); return }
-    onLogin(cashier)
+    const shift = shifts.find(c => c.shiftId === shiftId)
+    if (!shift) return
+    onLogin(shift)
   }
 
   return (
     <Dialog onClose={onClose} className="cashier-login">
-      <img src={logoUrl} alt="101 COFFEE HOUSE" />
-      <h2>دخول الكاشير</h2>
-      <p>نموذج محلي مؤقت — سيستبدل بتحقق ACC-101 لاحقًا.</p>
+      <img src={logoUrl} alt="101 COFFEE HOUSE" style={{ maxHeight: '100px', objectFit: 'contain', marginBottom: '1rem' }} />
+      <h2>اختيار الوردية</h2>
       <form onSubmit={submit}>
         <label>
-          الكاشير
-          <select value={cashierId} onChange={e => setCashierId(e.target.value)}>
-            {cashiers.filter(c => c.enabled).map(c => (
-              <option key={c.cashierId} value={c.cashierId}>{c.name}</option>
+          الوردية
+          <select value={shiftId} onChange={e => setShiftId(e.target.value)}>
+            {shifts.map(c => (
+              <option key={c.shiftId} value={c.shiftId}>{c.name}</option>
             ))}
           </select>
         </label>
-        <label>
-          رمز الدخول
-          <input autoFocus type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} />
-        </label>
-        {error && <div className="form-error">{error}</div>}
         <button className="primary-action" type="submit">دخول</button>
       </form>
+    </Dialog>
+  )
+}
+
+/* ── Seller Selection ── */
+export function SellerSelection({ onClose, onSelect }) {
+  const sellers = ['علي', 'روان', 'محمد', 'ميس']
+  return (
+    <Dialog onClose={onClose} className="type-dialog">
+      <button className="close" onClick={onClose}><Icon name="x" /></button>
+      <h2>اختر اسم الكابتن</h2>
+      <div className="type-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        {sellers.map(name => (
+          <button onClick={() => onSelect(name)} key={name}>
+            <span><Icon name="user" size={27} /></span>
+            <b>{name}</b>
+          </button>
+        ))}
+      </div>
     </Dialog>
   )
 }
@@ -436,7 +447,7 @@ export function CashierLogin({ cashiers, onClose, onLogin }) {
 export function CashierMenu({ session, onClose, onLogout }) {
   return (
     <Dialog onClose={onClose} className="cashier-menu">
-      <h2>{session.cashierNameSnapshot}</h2>
+      <h2>{session.shiftName}</h2>
       <p>الوردية مفتوحة منذ {new Date(session.openedAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</p>
       <button className="primary-action" onClick={onLogout}>إغلاق الوردية وتسجيل الخروج</button>
     </Dialog>
@@ -445,13 +456,23 @@ export function CashierMenu({ session, onClose, onLogout }) {
 
 /* ── Confirm Dialog ── */
 export function ConfirmDialog({ title, message, onClose, onConfirm }) {
+  const [confirming, setConfirming] = React.useState(false)
+  const confirm = () => {
+    if (confirming) return
+    setConfirming(true)
+    onConfirm()
+  }
   return (
     <Dialog onClose={onClose} className="confirm-dialog">
-      <h2>{title}</h2>
-      <p>{message}</p>
+      <div className="dialog-heading">
+        <h2>{title}</h2>
+        <p>{message}</p>
+      </div>
       <div className="confirm-actions">
-        <button onClick={onClose}>رجوع</button>
-        <button className="danger-button" onClick={onConfirm}>تأكيد</button>
+        <button type="button" onClick={onClose} disabled={confirming}>رجوع</button>
+        <button type="button" className="danger-button" onClick={confirm} disabled={confirming}>
+          {confirming ? 'جارٍ الإلغاء…' : 'تأكيد إلغاء الطلب'}
+        </button>
       </div>
     </Dialog>
   )
