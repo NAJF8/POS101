@@ -1,0 +1,11 @@
+import { Icon } from './Icons'
+
+const format = value => `${value.toLocaleString('ar-IQ')} د.ع`
+export default function OrderPanel({ order, updateQuantity, removeItem, onContinue, onHold, onEdit }) {
+  const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  return <aside className="order-panel">
+    <div className="order-top"><div><span className="eyebrow">الطلب الحالي</span><h2>{order.table ? `داخل الكوفي • طاولة ${order.table}` : order.name}</h2></div><button className="icon-button" aria-label="خيارات الطلب"><span>•••</span></button></div>
+    <div className="order-items">{order.items.length ? order.items.map(item => <article className="cart-item" key={item.lineId}><div className="cart-row"><div className="cart-main"><b>{item.name}</b>{item.options && <small>{item.options}</small>}</div><strong>{format(item.price * item.quantity)}</strong></div><div className="cart-row cart-actions"><div className="quantity"><button onClick={() => updateQuantity(item.lineId, -1)} aria-label="تقليل الكمية"><Icon name="minus" size={16}/></button><b>{item.quantity}</b><button onClick={() => updateQuantity(item.lineId, 1)} aria-label="زيادة الكمية"><Icon name="plus" size={16}/></button></div><div><button className="mini-edit" onClick={() => onEdit(item)}><Icon name="edit" size={16}/> تعديل</button><button className="mini-delete" onClick={() => removeItem(item.lineId)} aria-label="حذف"><Icon name="trash" size={17}/></button></div></div></article>) : <div className="cart-empty"><div className="coffee-empty"><Icon name="coffee" size={32}/></div><b>اختر منتجًا لبدء الطلب</b><span>ستظهر تفاصيل الطلب هنا</span></div>}</div>
+    <div className="order-bottom"><button className="discount"><span>إضافة خصم</span><Icon name="plus" size={17}/></button><div className="totals"><span>المجموع الفرعي <b>{format(total)}</b></span><span>الخصم <b>0 د.ع</b></span><div><strong>الإجمالي</strong><b>{format(total)}</b></div></div><button className="primary-action" disabled={!order.items.length} onClick={onContinue}>متابعة الطلب <Icon name="arrow" size={19}/></button><button className="hold-action" disabled={!order.items.length} onClick={onHold}><Icon name="pause" size={16}/> تعليق الطلب</button></div>
+  </aside>
+}
