@@ -71,7 +71,7 @@ export default function ProductGrid({
       <div className="products-area">
         <div className="product-grid">
           {products.map(p => (
-            <button key={p.id} className="product-card" onClick={() => onSelect(p)}>
+            <button key={p.id} className={`product-card ${p.unavailable ? 'unavailable' : ''}`} disabled={p.unavailable} onClick={() => onSelect(p)}>
               <div className="img-wrap">
                 {p.image ? <img src={p.image} alt={p.name} loading="lazy" /> : <div className="no-img">١٠١</div>}
                 {p.category === 'مشروبات 101' && <span className="product-mark"><Icon name="star" size={12}/></span>}
@@ -80,8 +80,8 @@ export default function ProductGrid({
                 <b className="p-name">{p.name}</b>
                 <small className="p-eng">{p.english}</small>
                 <div className="p-price">
-                  <span>{p.price.toLocaleString()}</span>
-                  <small>د.ع</small>
+                  <span>{p.price ? p.price.toLocaleString() : '—'}</span>
+                  {p.price && <small>د.ع</small>}
                 </div>
               </div>
             </button>

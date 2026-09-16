@@ -53,8 +53,8 @@ export default function OrderPanel({
                   <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={16}/></button>
                 </div>
                 <div className="i-price">
-                  <span>{item.price.toLocaleString()}</span>
-                  <small>د.ع</small>
+                  <span>{item.price != null ? item.price.toLocaleString() : '—'}</span>
+                  {item.price != null && <small>د.ع</small>}
                 </div>
                 <div className="i-prod" onClick={() => item.configurable && onEdit(item)}>
                   <div className="i-prod-text">
