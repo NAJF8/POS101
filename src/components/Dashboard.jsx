@@ -11,7 +11,6 @@ export default function Dashboard({ onNavigate, onLogout }) {
     { id: 'employees', title: 'الموظفين', icon: 'users', action: () => alert('تحت التطوير') },
     { id: 'settings', title: 'الإعدادات', icon: 'settings', action: () => alert('تحت التطوير') },
     { id: 'captain-sales', title: 'مبيعات الكابتن', icon: 'user', action: () => onNavigate('reports-captain') },
-    { id: 'expense-entry', title: 'تسجيل المصروفات', icon: 'plus-circle', action: () => onNavigate('expense-entry') },
     { id: 'purchases', title: 'المشتريات', icon: 'shopping-bag', action: () => alert('تحت التطوير') },
     { id: 'inventory-reconciliation', title: 'التسويات والجرد', icon: 'clipboard', action: () => alert('تحت التطوير') },
     { id: 'logout', title: 'إغلاق النظام', icon: 'logout', action: () => {

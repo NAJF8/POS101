@@ -376,7 +376,7 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 /* ── Receipt — display:none normally, shown only @media print ── */
 export function Receipt({ sale }) {
   if (!sale) return null
-  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
+  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/receipt-logo-original.jpg`
   return (
     <div className="receipt-sheet">
       <div className="receipt-logo-wrap">
@@ -479,19 +479,30 @@ export function ConfirmDialog({ title, message, onClose, onConfirm }) {
 }
 
 /* ── Print Menu ── */
-export function PrintMenu({ enabled, onClose, onChange }) {
+export function PrintMenu({ enabled, settings, onClose, onChange, onSave }) {
+  const [printerName, setPrinterName] = React.useState(settings?.name || '')
+  const save = () => {
+    onSave({ name: printerName.trim(), paper: '80mm' })
+    onClose()
+  }
   return (
     <Dialog onClose={onClose} className="print-menu">
       <h2>إعداد الطباعة</h2>
-      <p>اختيار محفوظ على هذا الجهاز.</p>
+      <p>تُحفظ هذه الإعدادات محلياً على جهاز الكاشير.</p>
+      <label className="printer-name-field">
+        اسم الطابعة الحرارية (80mm)
+        <input value={printerName} onChange={e => setPrinterName(e.target.value)} placeholder="مثال: POS-80" />
+      </label>
+      <small className="printer-note">المتصفح لا يستطيع اختيار طابعة محددة أو الطباعة الصامتة من داخل GitHub Pages. اكتب الاسم للتوثيق، واضبط الطابعة الافتراضية مرة واحدة في Windows أو استخدم Chrome Kiosk/برنامج طباعة محلي.</small>
       <button className={enabled ? 'selected' : ''} onClick={() => onChange(true)}>
         <b>تشغيل الطباعة</b>
-        <small>تفتح الفاتورة تلقائيًا بعد نجاح البيع</small>
+        <small>تفتح فاتورة واحدة تلقائياً بعد نجاح حفظ البيع</small>
       </button>
       <button className={!enabled ? 'selected' : ''} onClick={() => onChange(false)}>
         <b>إيقاف الطباعة</b>
         <small>يستمر البيع دون فتح نافذة الطباعة</small>
       </button>
+      <button className="primary-action" type="button" onClick={save}>حفظ إعدادات الطابعة</button>
     </Dialog>
   )
 }

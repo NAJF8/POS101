@@ -35,6 +35,35 @@
     --cart-w: 420px;
   }
 }
+
+/* Thermal receipt: one canonical 80mm layout, with content width including padding. */
+.printer-name-field { display: grid; gap: 6px; margin: 12px 0 8px; color: var(--coffee); font-weight: 700; }
+.printer-name-field input { width: 100%; box-sizing: border-box; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--coffee); }
+.printer-note { display: block; margin: 0 0 10px; color: var(--muted); line-height: 1.5; }
+.print-status { position: fixed; right: 18px; bottom: 18px; z-index: 1000; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 36px)); padding: 11px 13px; border: 1px solid #d4decb; border-radius: 10px; background: #eef4eb; color: var(--green); box-shadow: 0 8px 24px rgba(0,0,0,.12); direction: rtl; }
+.print-status span { flex: 1; line-height: 1.45; }
+.print-status button { border: 0; border-radius: 7px; padding: 7px 10px; background: var(--green); color: #fff; font-weight: 700; white-space: nowrap; }
+.print-status button:last-child { padding: 2px 7px; background: transparent; color: var(--muted); font-size: 20px; }
+
+@media print {
+  @page { size: 80mm auto; margin: 0; }
+  html, body { width: 80mm; height: auto !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important; background: #fff !important; }
+  body * { visibility: hidden !important; }
+  body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
+  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box; width: 80mm !important; min-height: 0; height: auto !important; margin: 0 !important; padding: 3mm 4mm 6mm !important; background: #fff !important; color: #111 !important; font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif; font-size: 10pt; line-height: 1.35; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body .receipt-logo-wrap { margin: 0 0 3mm; text-align: center; }
+  body .receipt-logo { display: block; width: 32mm; height: auto; max-width: 100%; max-height: 22mm; margin: 0 auto; object-fit: contain; }
+  body .receipt-date { margin: 0 0 3mm; text-align: center; color: #111; font-size: 9pt; }
+  body .receipt-items { display: block; border: .25mm solid #222; border-radius: 0; overflow: visible; }
+  body .receipt-table-head, body .receipt-line { display: grid !important; grid-template-columns: minmax(0, 1fr) 12mm 20mm; gap: 2mm; align-items: start; }
+  body .receipt-table-head { padding: 2mm; border-bottom: .25mm solid #222; color: #111; font-size: 8pt; font-weight: 700; }
+  body .receipt-line { margin: 0; padding: 2mm; border-bottom: .2mm solid #bbb; break-inside: avoid; page-break-inside: avoid; }
+  body .receipt-line:last-child { border-bottom: 0; }
+  body .receipt-line span { min-width: 0; overflow-wrap: anywhere; }
+  body .receipt-line b { font-size: 9pt; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left; }
+  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4mm; align-items: center; margin: 4mm 0 0; padding: 3mm 1mm 0; border-top: .45mm solid #111; color: #111; font-size: 12pt; font-weight: 700; }
+  .print-status { display: none !important; }
+}
 @media (min-width: 1600px) { :root { --cart-w: 500px; } }
 
 /* â”€â”€ Reset â”€â”€ */
@@ -925,20 +954,7 @@ input, textarea, select { cursor: text; }
 
 /* Print mode */
 .receipt-sheet { display: none; }
-@media print {
-  @page { margin: 0; size: 80mm auto; }
-  body * { visibility: hidden !important; }
-  body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
-  body .receipt-sheet {
-    display: block !important;
-    position: static; left: 0; top: 0; width: 80mm; height: auto;
-    background: #fff; color: #000; font-size: 12px;
-    padding: 0 4mm 10mm;
-  }
-  body .receipt-logo-wrap { display: block; text-align: center; margin-bottom: 6mm; }
-  body .receipt-logo-wrap img { display: block; margin: 0 auto; width: 40mm; max-height: 20mm; object-fit: contain; }
-  body .receipt-line, body .receipt-total { display: flex; justify-content: space-between; gap: 4mm; margin: 2mm 0; }
-}
+
 
 /* ========================================================================
    Dialog repairs: every label/value owns a separate layout cell.  Keeping
@@ -1035,22 +1051,7 @@ input, textarea, select { cursor: text; }
 /* A receipt is intentionally absent from screen rendering.  In print it owns
    the document flow so a long order grows vertically instead of being clipped
    at the top of an A4 sheet. */
-@media print {
-  @page { size: 80mm auto; margin: 0; }
-  html, body { width: 80mm; height: auto !important; overflow: visible !important; background: #fff !important; }
-  body .receipt-sheet { display: block !important; position: static !important; width: 80mm; min-height: 0; height: auto; margin: 0; padding: 4mm 4mm 8mm; background: #fff; color: #111; font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif; font-size: 11pt; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body .receipt-logo-wrap { margin: 0 0 3mm; text-align: center; }
-  body .receipt-logo { display: inline-block; width: 34mm; max-width: 100%; max-height: 20mm; object-fit: contain; }
-  body .receipt-date { margin: 0 0 3mm; text-align: center; color: #111; font-size: 9pt; }
-  body .receipt-items { display: block; border: .25mm solid #222; border-radius: 0; overflow: visible; }
-  body .receipt-table-head, body .receipt-line { display: grid !important; grid-template-columns: minmax(0, 1fr) 12mm 20mm; gap: 2mm; align-items: start; }
-  body .receipt-table-head { padding: 2mm; border-bottom: .25mm solid #222; color: #111; font-size: 8pt; font-weight: 700; }
-  body .receipt-line { margin: 0; padding: 2mm; border-bottom: .2mm solid #bbb; break-inside: avoid; page-break-inside: avoid; }
-  body .receipt-line:last-child { border-bottom: 0; }
-  body .receipt-line span { min-width: 0; overflow-wrap: anywhere; }
-  body .receipt-line b { font-size: 9pt; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left; }
-  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4mm; align-items: center; margin: 4mm 0 0; padding: 3mm 1mm 0; border-top: .45mm solid #111; color: #111; font-size: 12pt; font-weight: 700; }
-}
+
 
 @media (max-width: 560px) {
   .discount-dialog, .open-dialog, .return-dialog { padding: 20px 16px; }
@@ -1251,35 +1252,7 @@ input, textarea, select { cursor: text; }
 }
 
 /* Print Styles */
-@media print {
-  .app-header, .non-printable, .dashboard-container, .reports-sidebar {
-    display: none !important;
-  }
-  
-  .report-paper {
-    box-shadow: none;
-    padding: 0;
-    margin: 0;
-    width: 100%;
-    max-width: 100%;
-  }
 
-  body {
-    background: white;
-  }
-  
-  /* Thermal Print adjustments (80mm) */
-  .receipt-sheet {
-    width: 80mm !important;
-    max-width: 80mm !important;
-    margin: 0 auto !important;
-    padding: 5mm !important;
-  }
-
-  .receipt-logo {
-    max-width: 60%;
-  }
-}
 
 /* Fixes for overlapping text in dialogs */
 .discount-dialog, .return-dialog {
@@ -1339,4 +1312,65 @@ input, textarea, select { cursor: text; }
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+
+@media print {
+  /* Hide UI elements globally */
+  .app-header, .non-printable, .dashboard-container, .reports-sidebar, .pos-header, .cart-panel, .catalog-panel, .history-sidebar {
+    display: none !important;
+  }
+  
+  /* Reset body */
+  html, body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Receipt base */
+  body .receipt-sheet {
+    display: block !important;
+    position: static !important;
+    width: 80mm;
+    margin: 0;
+    padding: 4mm 4mm 8mm;
+    background: #fff;
+    color: #111;
+    font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif;
+    font-size: 11pt;
+    line-height: 1.45;
+  }
+  body .receipt-logo-wrap { margin: 0 0 3mm; text-align: center; }
+  body .receipt-logo { display: inline-block; width: 34mm; max-height: 20mm; object-fit: contain; }
+  body .receipt-date { margin: 0 0 3mm; text-align: center; font-size: 9pt; }
+  body .receipt-items { border: .25mm solid #222; border-radius: 0; }
+  body .receipt-table-head, body .receipt-line { display: grid !important; grid-template-columns: minmax(0, 1fr) 12mm 20mm; gap: 2mm; align-items: start; }
+  body .receipt-table-head { padding: 2mm; border-bottom: .25mm solid #222; font-size: 8pt; font-weight: 700; }
+  body .receipt-line { margin: 0; padding: 2mm; border-bottom: .2mm solid #bbb; }
+  body .receipt-line:last-child { border-bottom: 0; }
+  body .receipt-total { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4mm; margin: 4mm 0 0; padding: 3mm 1mm 0; border-top: .45mm solid #111; font-weight: 700; font-size: 12pt; }
+
+  /* Reports base */
+  .report-paper {
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Dialogs that should print */
+  .dialog-overlay, .dialog {
+    position: static !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    inset: auto !important;
+    padding: 0 !important;
+    transform: none !important;
+    width: 100% !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+  }
 }

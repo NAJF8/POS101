@@ -6,7 +6,7 @@ import { ProductOptions, OrderType, TableSelection, Payment, QuickCash, Discount
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Reports from './components/Reports'
-import { Expenses, ExpenseEntry } from './components/Expenses'
+import { Expenses } from './components/Expenses'
 import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
 
@@ -43,8 +43,10 @@ export default function App() {
   const [modal, setModal] = useState(null)
   const [selected, setSelected] = useState(null)
   const [printSale, setPrintSale] = useState(null)
+  const [printMessage, setPrintMessage] = useState(null)
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
+  const [printerSettings, setPrinterSettings] = useState(() => read('pos101.printerSettings', { name: '', paper: '80mm' }))
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const saleInFlight = useRef(false)
 
@@ -68,6 +70,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.nextNumber', nextNumber), [nextNumber])
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
+  useEffect(() => localStorage.setItem('pos101.printerSettings', JSON.stringify(printerSettings)), [printerSettings])
 
   const [pendingPayment, setPendingPayment] = useState(null)
   
@@ -120,7 +123,10 @@ export default function App() {
       localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []), sale]))
       setNextNumber(n => n + 1)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-      if (autoPrint || payment.forcePrint) setPrintSale(sale)
+      if (autoPrint || payment.forcePrint) {
+        setPrintMessage(null)
+        setPrintSale(sale)
+      }
       setPendingPayment(null)
       window.setTimeout(() => setModal(null), 350)
       return true
@@ -156,6 +162,7 @@ export default function App() {
       setModal('history')
     }
     const printHistorical = e => {
+      setPrintMessage(null)
       setPrintSale(e.detail)
     }
     const viewHistorical = e => {
@@ -181,15 +188,18 @@ export default function App() {
     const waitForReceiptAssets = async () => {
       const fontReady = document.fonts?.ready || Promise.resolve()
       const logo = document.querySelector('.receipt-logo')
-      const imageReady = !logo || logo.complete
+      const imageReady = !logo
         ? Promise.resolve()
-        : new Promise(resolve => {
-            logo.addEventListener('load', resolve, { once: true })
-            logo.addEventListener('error', resolve, { once: true })
-          })
+        : logo.complete
+          ? (logo.naturalWidth > 0 && logo.decode ? logo.decode().catch(() => {}) : Promise.resolve())
+          : new Promise(resolve => {
+              logo.addEventListener('load', () => resolve(logo.decode ? logo.decode().catch(() => {}) : undefined), { once: true })
+              logo.addEventListener('error', resolve, { once: true })
+            })
       await Promise.all([fontReady, imageReady])
       if (!cancelled) {
         window.print()
+        setPrintMessage({ sale: printSale, text: 'تم فتح الطباعة. إذا لم تخرج الفاتورة من الطابعة، استخدم إعادة الطباعة.' })
         setPrintSale(null)
       }
     }
@@ -220,7 +230,13 @@ export default function App() {
   }, [selected])
 
   const history = useCallback(o => { setSelected(o); setModal('single-history') }, [])
-  const print = useCallback(() => setPrintSale(selected?.sale || selected), [selected])
+  const print = useCallback(() => {
+    const sale = selected?.sale || selected
+    if (!sale) return
+    setPrintMessage(null)
+    setPrintSale(sale)
+  }, [selected])
+  const savePrinterSettings = useCallback(settings => setPrinterSettings(v => ({ ...v, ...settings })), [])
   const login = useCallback(cashier => {
     setSession({ cashierId: cashier.cashierId, cashierNameSnapshot: cashier.name, shiftId: crypto.randomUUID(), openedAt: Date.now(), status: 'open' })
     setModal(null)
@@ -287,8 +303,12 @@ export default function App() {
       )}
 
       {currentView === 'reports' && session && <Reports onNavigate={setCurrentView} />}
-      {currentView === 'expenses' && session && <Expenses onNavigate={setCurrentView} />}
-      {currentView === 'expense-entry' && session && <ExpenseEntry onNavigate={setCurrentView} />}
+      {currentView === 'expenses' && session && (
+        <Expenses onNavigate={setCurrentView} />
+      )}
+      {currentView === 'expense-entry' && session && (
+        <Expenses onNavigate={setCurrentView} />
+      )}
       {currentView === 'reports-captain' && session && <Reports onNavigate={setCurrentView} />}
 
       {/* Login gate */}
@@ -299,7 +319,7 @@ export default function App() {
       {/* Modals */}
       {modal === 'cashier-menu' && <CashierMenu session={session} onClose={() => setModal(null)} onLogout={logout} />}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
-      {modal === 'print-menu' && <PrintMenu enabled={autoPrint} onClose={() => setModal(null)} onChange={v => { setAutoPrint(v); setModal(null) }} />}
+      {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} />}
       {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct} />}
       {modal === 'orderType' && <OrderType onClose={() => setModal(null)} onChoose={chooseType} />}
       {modal === 'tables' && <TableSelection orders={orders} onClose={() => setModal(null)} onChoose={chooseTable} />}
@@ -322,6 +342,11 @@ export default function App() {
 
       {/* Receipt – display:none in normal mode, shown only @media print */}
       {printSale && <Receipt sale={printSale} />}
+      {printMessage && <div className="print-status" role="status">
+        <span>{printMessage.text}</span>
+        <button type="button" onClick={() => { setPrintMessage(null); setPrintSale(printMessage.sale) }}>إعادة طباعة</button>
+        <button type="button" aria-label="إغلاق رسالة الطباعة" onClick={() => setPrintMessage(null)}>×</button>
+      </div>}
     </main>
   )
 }
