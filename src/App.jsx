@@ -238,7 +238,17 @@ export default function App() {
   }, [selected])
   const savePrinterSettings = useCallback(settings => setPrinterSettings(v => ({ ...v, ...settings })), [])
   const login = useCallback(cashier => {
-    setSession({ cashierId: cashier.cashierId, cashierNameSnapshot: cashier.name, shiftId: crypto.randomUUID(), openedAt: Date.now(), status: 'open' })
+    // Keep the selected shift on the session so completed sales can be grouped
+    // correctly by the morning/evening reports.
+    setSession({
+      cashierId: cashier.cashierId || cashier.shiftId,
+      cashierNameSnapshot: cashier.name,
+      shiftId: cashier.shiftId,
+      shiftName: cashier.name,
+      name: cashier.name,
+      openedAt: Date.now(),
+      status: 'open'
+    })
     setModal(null)
   }, [])
   const logout = useCallback(() => {
