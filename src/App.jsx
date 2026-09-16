@@ -25,6 +25,7 @@ export default function App() {
   const [printSale, setPrintSale] = useState(null)
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
+  const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const saleInFlight = useRef(false)
 
   const activeOrder = orders[active] || orders[0]
@@ -49,7 +50,11 @@ export default function App() {
 
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? fn(o) : o)), [active])
-  const addProduct = useCallback(p => { update(o => ({ ...o, items: [...o.items, { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }] })); setModal(null) }, [update])
+  const addProduct = useCallback(p => {
+    update(o => ({ ...o, items: [...o.items, { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }] }))
+    setCartScrollRequest(v => v + 1)
+    setModal(null)
+  }, [update])
   const selectProduct = useCallback(p => p.configurable ? (setSelected(p), setModal('options')) : addProduct({ ...p, quantity: 1 }), [addProduct])
   const updateQuantity = useCallback((lineId, delta) => update(o => ({ ...o, items: o.items.flatMap(i => i.lineId === lineId ? (i.quantity + delta <= 0 ? [] : [{ ...i, quantity: i.quantity + delta }]) : [i]) })), [update])
   const removeItem = useCallback(lineId => update(o => ({ ...o, items: o.items.filter(i => i.lineId !== lineId) })), [update])
@@ -193,6 +198,7 @@ export default function App() {
           onPrintMenu={() => setModal('print-menu')}
           onReturn={() => setModal('openOrders')}
           disabled={!session}
+          scrollRequest={cartScrollRequest}
         />
 
         {/* Right Panel: Catalog */}

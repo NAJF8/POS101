@@ -1,14 +1,24 @@
+import { useEffect, useRef } from 'react'
 import { Icon } from './Icons'
 import { productNames } from '../data/menu'
 
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
   onContinue, onHold, onDiscount, onClear, 
-  onPrintMenu, onReturn, disabled 
+  onPrintMenu, onReturn, disabled, scrollRequest
 }) {
+  const itemsAreaRef = useRef(null)
   const subtotal = order.items.reduce((s, i) => s + i.price * i.quantity, 0)
   const discountVal = order.discount?.value || 0
   const total = Math.max(0, subtotal - discountVal)
+
+  // Keep the cashier's focus on the item just added without moving the page
+  // or the catalog.  The request changes only after a successful cart add.
+  useEffect(() => {
+    const area = itemsAreaRef.current
+    if (!area || !scrollRequest) return
+    area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' })
+  }, [scrollRequest])
 
   return (
     <section className="order-panel" inert={disabled || undefined}>
@@ -32,7 +42,7 @@ export default function OrderPanel({
           <span className="col-prod">المنتج</span>
           <span className="col-num">#</span>
         </div>
-        <div className="order-items">
+        <div className="order-items" ref={itemsAreaRef}>
           {order.items.length === 0 ? (
             <div className="empty-cart">
               <Icon name="coffee" size={40} />

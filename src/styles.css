@@ -627,6 +627,30 @@ input, textarea, select { cursor: text; }
 .payment-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .payment-methods button { min-height: 88px; border: 1.5px solid var(--line-strong); border-radius: 12px; background: #fff; color: var(--coffee); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-size: 17px; }
 .payment-methods button:hover:not(:disabled) { border-color: var(--green); background: #eef2eb; }
+
+/* F7 Quick Cash: compact local-banknote keypad for POS screens. */
+.quick-cash-dialog { width: min(700px, 100%); padding: 20px; }
+.quick-cash-dialog > h2 { margin-bottom: 10px; }
+.cash-summary, .change { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: 9px; background: #eef2eb; color: var(--green); }
+.cash-summary { margin-bottom: 10px; }
+.cash-summary b, .change b { font-size: 17px; }
+.banknote-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.banknote { min-height: 94px; padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 4px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--coffee); overflow: hidden; }
+.banknote:hover { border-color: var(--green); background: #f7f9f4; }
+.banknote img { display: block; width: 100%; height: 58px; object-fit: contain; }
+.banknote strong { font-size: 11px; color: var(--green); white-space: nowrap; }
+.cash-tools { display: flex; gap: 8px; margin: 10px 0; }
+.cash-tools button { flex: 1; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--coffee); font-size: 12px; }
+.cash-tools button:last-child { color: var(--danger); background: var(--danger-bg); border-color: #f0caca; }
+.change { margin-bottom: 10px; }
+.change.due { color: #8d5d25; background: #fbefdb; }
+.quick-cash-dialog > .primary-action { width: 100%; }
+@media (max-height: 800px) {
+  .quick-cash-dialog { padding: 16px; }
+  .banknote { min-height: 76px; }
+  .banknote img { height: 42px; }
+  .cash-tools { margin: 7px 0; }
+}
 @media (max-width: 640px) { .type-grid { grid-template-columns: 1fr; } }
 
 /* Print mode */
