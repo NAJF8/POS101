@@ -377,18 +377,37 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 export function Receipt({ sale }) {
   if (!sale) return null
   const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`
+  const order = sale.order || {}
+  const items = order.items || sale.items || []
+  const subtotal = Number(sale.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0))
+  const discount = Number(sale.discount || 0)
+  const total = Number(sale.total ?? Math.max(0, subtotal - discount))
   return (
     <div className="receipt-sheet">
       <div className="receipt-logo-wrap">
         <img className="receipt-logo" src={logoUrl} alt="شعار 101" />
       </div>
+      <h1 className="receipt-title">فاتورة بيع</h1>
+      <p className="receipt-order-number">رقم الطلب: <b dir="ltr">{sale.orderNumber ?? '—'}</b></p>
       <p className="receipt-date" dir="rtl">{new Date(sale.createdAt).toLocaleString('ar-IQ', { dateStyle: 'medium', timeStyle: 'short' })}</p>
-      <section className="receipt-items" dir="rtl"><div className="receipt-table-head"><span>الصنف</span><span>الكمية</span><span>السعر</span></div>{sale.order.items.map(i => (
-        <div className="receipt-line" key={i.lineId}><span>{i.name}</span><b dir="ltr">{i.quantity}</b><b dir="ltr">{format(i.price * i.quantity)}</b></div>
+      {(sale.cashierNameSnapshot || sale.seller || order.orderType) && <div className="receipt-meta">
+        {(sale.cashierNameSnapshot || sale.seller) && <p>الكاشير: <b>{sale.cashierNameSnapshot || sale.seller}</b></p>}
+        {order.orderType && <p>نوع الطلب: <b>{order.orderType}</b></p>}
+      </div>}
+      <section className="receipt-items" dir="rtl"><div className="receipt-table-head"><span>اسم المادة</span><span>الكمية</span><span>السعر</span><span>الإجمالي</span></div>{items.map((i, index) => (
+        <div className="receipt-line" key={i.lineId || i.id || `${i.name}-${index}`}><span>{i.name}</span><b dir="ltr">{i.quantity}</b><b dir="ltr">{format(i.price)}</b><b dir="ltr">{format(i.price * i.quantity)}</b></div>
       ))}</section>
-      <div className="receipt-total">
-        <span>الإجمالي</span><b dir="ltr">{format(sale.total)}</b>
+      <div className="receipt-subtotals">
+        <p><span>المجموع</span><b dir="ltr">{format(subtotal)}</b></p>
+        {discount > 0 && <p><span>الخصم</span><b dir="ltr">−{format(discount)}</b></p>}
+        {Number(sale.service || 0) > 0 && <p><span>الخدمة</span><b dir="ltr">{format(sale.service)}</b></p>}
       </div>
+      <div className="receipt-total">
+        <span>المبلغ الصافي</span><b dir="ltr">{format(total)}</b>
+      </div>
+      <p className="receipt-thanks">شكراً لزيارتكم</p>
+      <p className="receipt-contact" dir="ltr">@101co_ffee</p>
+      <p className="receipt-tagline" dir="ltr">GOOD COFFEE&nbsp; \ &nbsp;GOOD PEOPLE&nbsp; \ &nbsp;BETTER DAYS</p>
     </div>
   )
 }

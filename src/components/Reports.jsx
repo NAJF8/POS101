@@ -30,7 +30,7 @@ const shiftForSale = sale => {
 const logoUrl = new URL(`${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`, window.location.href).href
 const formatDate = value => new Date(value).toLocaleString('ar-IQ', { dateStyle: 'short', timeStyle: 'short' })
 
-const reportPrintStyles = mode => `
+const reportPrintStyles = (mode, isComprehensive = false) => `
   @page { size: ${mode === 'thermal' ? '80mm auto' : 'A4 portrait'}; margin: ${mode === 'thermal' ? '0' : '12mm'}; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: Tahoma, Arial, sans-serif; }
@@ -49,6 +49,29 @@ const reportPrintStyles = mode => `
   .report-paper-footer { display: ${mode === 'thermal' ? 'block' : 'flex'}; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; ${mode === 'thermal' ? 'text-align: center;' : ''} }
   thead { display: table-header-group; }
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
+  ${mode === 'thermal' && isComprehensive ? `
+  html, body { width: 80mm; height: auto; min-height: 0; overflow: visible; }
+  body { font-size: 11pt; line-height: 1.3; font-weight: 600; }
+  .report-paper { width: 80mm; min-height: 0; padding: 2mm 4mm 5mm; }
+  .report-paper-header { margin: 0 0 2mm; padding: 0 0 2mm; border-bottom: .35mm solid #000; break-inside: avoid; page-break-inside: avoid; }
+  .report-paper-header > p { font-size: 10pt; font-weight: 700; }
+  .report-logo { width: auto; height: 22mm; max-width: 100%; margin: 0 auto 2mm; filter: brightness(0); }
+  h2 { margin: 0 0 2mm; font-size: 19pt; font-weight: 900; line-height: 1.2; }
+  h3 { margin: 3mm 0 2mm; padding-bottom: 1mm; border-bottom: .3mm solid #000; font-size: 14pt; font-weight: 900; break-after: avoid; page-break-after: avoid; }
+  .print-table { margin: 0 0 3mm; border: .35mm solid #000; }
+  .print-table th, .print-table td { border: .3mm solid #000; padding: 1.5mm 1mm; font-size: 10pt; font-weight: 700; text-align: center; vertical-align: middle; }
+  .print-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
+  .report-summary { break-inside: avoid; page-break-inside: avoid; }
+  .report-summary tbody tr:nth-child(4) td, .report-summary tbody tr:nth-child(6) td { border-top: .6mm solid #000; border-bottom: .6mm solid #000; font-size: 13pt; font-weight: 900; }
+  .sales-details:not(.thermal-print-only) { display: none !important; }
+  .thermal-print-only { display: block !important; }
+  .thermal-product-table th:first-child, .thermal-product-table td:first-child { width: 48%; text-align: right; }
+  .thermal-product-table td:last-child, .thermal-captain-table td:last-child { white-space: nowrap; }
+  .thermal-sales-table td:first-child { text-align: right; }
+  .thermal-sales-table td:last-child, .thermal-sales-table tfoot td { font-size: 10pt; font-weight: 900; }
+  .report-paper-footer { display: block; margin-top: 3mm; padding-top: 2mm; border-top: .35mm solid #000; text-align: center; font-size: 9pt; break-inside: avoid; page-break-inside: avoid; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  ` : ''}
 `
 
 export default function Reports({ onNavigate }) {
@@ -85,7 +108,7 @@ export default function Reports({ onNavigate }) {
     }
     printWindow.document.open()
     const printPaper = paper.cloneNode(true)
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${reportPrintStyles(mode)}</style></head><body>${printPaper.outerHTML}</body></html>`)
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${reportPrintStyles(mode, reportType === 'comprehensive')}</style></head><body>${printPaper.outerHTML}</body></html>`)
     printWindow.document.close()
 
     const waitForAssetsAndPrint = async () => {
@@ -200,12 +223,59 @@ export default function Reports({ onNavigate }) {
       </section>
     )
 
+    const thermalPrintDetails = sList => {
+      const products = new Map()
+      const captains = new Map()
+      sList.forEach(sale => {
+        const seller = sale.seller || sale.cashierNameSnapshot || 'غير محدد'
+        const captain = captains.get(seller) || { count: 0, total: 0 }
+        captain.count += 1
+        captain.total += Number(sale.total || 0)
+        captains.set(seller, captain)
+        ;(sale.order?.items || sale.items || []).forEach(item => {
+          const row = products.get(item.name) || { quantity: 0, total: 0 }
+          row.quantity += Number(item.quantity || 0)
+          row.total += Number(item.quantity || 0) * Number(item.price || 0)
+          products.set(item.name, row)
+        })
+      })
+      return <section className="sales-details thermal-print-only" style={{ display: 'none' }}>
+        <h3>تفاصيل المبيعات حسب المادة</h3>
+        <table className="print-table thermal-product-table">
+          <thead><tr><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
+          <tbody>
+            {[...products.entries()].sort((a, b) => b[1].quantity - a[1].quantity).map(([name, row]) => <tr key={name}><td>{name}</td><td>{row.quantity}</td><td>{format(row.total)}</td></tr>)}
+            {!products.size && <tr><td colSpan="3">لا توجد تفاصيل مواد ضمن الفترة المحددة</td></tr>}
+          </tbody>
+        </table>
+        <h3>تفاصيل المبيعات حسب الكاشير</h3>
+        <table className="print-table thermal-captain-table">
+          <thead><tr><th>الاسم</th><th>الطلبات</th><th>الإجمالي</th></tr></thead>
+          <tbody>
+            {[...captains.entries()].map(([name, row]) => <tr key={name}><td>{name}</td><td>{row.count}</td><td>{format(row.total)}</td></tr>)}
+            {!captains.size && <tr><td colSpan="3">لا توجد مبيعات ضمن الفترة المحددة</td></tr>}
+          </tbody>
+        </table>
+        <h3>تفاصيل عمليات البيع</h3>
+        <table className="print-table thermal-sales-table">
+          <tbody>
+            {sList.map((sale, index) => <tr key={sale.id || `${sale.orderNumber}-${sale.createdAt}`}>
+              <td><b>رقم الطلب:</b> {sale.orderNumber || '—'}<br /><b>التاريخ والوقت:</b> {sale.createdAt ? formatDate(sale.createdAt) : '—'}<br /><b>الكاشير:</b> {sale.seller || sale.cashierNameSnapshot || 'غير محدد'}<br /><b>الدفع:</b> {sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</td>
+              <td><b>الإجمالي</b><br />{format(sale.total)}</td>
+            </tr>)}
+            {!sList.length && <tr><td colSpan="2">لا توجد مبيعات ضمن الفترة المحددة</td></tr>}
+          </tbody>
+          <tfoot><tr><td>إجمالي عمليات البيع</td><td>{format(sList.reduce((sum, sale) => sum + Number(sale.total || 0), 0))}</td></tr></tfoot>
+        </table>
+      </section>
+    }
+
     if (reportType === 'comprehensive') {
-      title = 'تقرير شامل للمبيعات'
+      title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
       const expensesTotal = filteredExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
       
-      content = <><table className="print-table"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr style={{ fontWeight: 'bold' }}><td>صافي الأرباح (بعد المصاريف)</td><td>{format(stats.net - expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{stats.count}</td></tr></tbody></table>{salesDetails(filteredSales)}</>
+      content = <><table className="print-table report-summary"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr style={{ fontWeight: 'bold' }}><td>صافي الأرباح (بعد المصاريف)</td><td>{format(stats.net - expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{stats.count}</td></tr></tbody></table>{salesDetails(filteredSales)}{thermalPrintDetails(filteredSales)}</>
     } else if (reportType === 'morning' || reportType === 'evening') {
       const isMorning = reportType === 'morning'
       title = isMorning ? 'تقرير المبيعات - وردية صباحية' : 'تقرير المبيعات - وردية مسائية'
