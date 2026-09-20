@@ -379,13 +379,14 @@ export function Receipt({ sale }) {
   if (!sale) return null
   const logoSrc = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
   const order = sale.order || {}
-  const items = order.items || sale.items || []
+  const items = order.items?.length ? order.items : sale.items || []
   const subtotal = Number(sale.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0))
   const discount = Number(sale.discount || 0)
   const service = Number(sale.service || 0)
   const total = Number(sale.total ?? Math.max(0, subtotal - discount))
   const cashier = sale.seller || sale.cashierNameSnapshot || ''
   const orderType = order.orderType || sale.orderType || 'صالة'
+  const paymentMethod = sale.paymentMethod === 'electronic' ? 'إلكتروني' : sale.paymentMethod === 'cash' ? 'نقدي' : sale.paymentMethod || 'غير محدد'
   const orderNumber = sale.orderNumber || order.orderNumber || ''
   return (
     <div className="receipt-sheet" dir="rtl">
@@ -404,6 +405,7 @@ export function Receipt({ sale }) {
       <div className="receipt-meta">
         {cashier && <p><span>الكاشير :</span><b>{cashier}</b></p>}
         <p><span>نوع الطلب :</span><b>{orderType}</b></p>
+        <p><span>طريقة الدفع :</span><b>{paymentMethod}</b></p>
       </div>
       <section className="receipt-items">
         <div className="receipt-items-head receipt-table-head">

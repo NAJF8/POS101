@@ -1349,12 +1349,12 @@ input, textarea, select { cursor: text; }
    override that hardware/driver constraint. */
 @media print {
   @page { margin: 0; }
-  html, body, #root { width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; }
+  html, body, #root { width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; }
   body > #root > .app-shell { display: block !important; position: static !important; width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }
   body > #root > .app-shell > :not(.receipt-sheet) { display: none !important; }
   body * { visibility: hidden !important; }
   body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
-  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box !important; width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 1.5mm 3.5mm 4mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 10.5pt !important; font-weight: 600 !important; line-height: 1.3 !important; direction: rtl !important; break-after: avoid-page !important; page-break-after: avoid !important; transform: none !important; }
+  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box !important; width: 72mm !important; max-width: 72mm !important; height: auto !important; min-height: 0 !important; margin: 0 auto !important; padding: 1.5mm 1.5mm 4mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 10.5pt !important; font-weight: 600 !important; line-height: 1.3 !important; direction: rtl !important; break-after: avoid-page !important; page-break-after: avoid !important; transform: none !important; }
   body .receipt-logo-wrap { display: block !important; margin: 0 0 1mm !important; padding: 0 !important; text-align: center !important; }
   body .receipt-logo { display: block !important; width: 26mm !important; height: 26mm !important; max-width: 100% !important; margin: 0 auto !important; object-fit: contain !important; object-position: center center !important; filter: brightness(0) !important; }
   body .receipt-brand-note { display: block !important; margin: 0 0 1mm !important; padding: 0 !important; text-align: center !important; font-size: 9.5pt !important; font-weight: 700 !important; color: #000 !important; }
