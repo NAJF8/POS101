@@ -1,6 +1,7 @@
 import React from 'react'
 import { Icon } from './Icons'
 import { productNames } from '../data/menu'
+import { logoDataUri } from '../assets/logo'
 
 const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
 
@@ -125,12 +126,12 @@ export function TableSelection({ onClose, onChoose, orders = [] }) {
 export function Payment({ total, onClose, onSuccess }) {
   const [processing, setProcessing] = React.useState(false)
   const [error, setError] = React.useState('')
-  const choose = method => {
+  const choose = async method => {
     if (processing) return
     setProcessing(true)
     setError('')
     try {
-      if (onSuccess({ method, received: 0, change: 0 }) === false) throw new Error('SALE_FAILED')
+      if (await onSuccess({ method, received: 0, change: 0 }) === false) throw new Error('SALE_FAILED')
     } catch {
       setProcessing(false)
       setError('تعذر حفظ البيع. بقي الطلب الحالي كما هو، حاول مرة أخرى.')
@@ -376,19 +377,69 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
 /* ── Receipt — display:none normally, shown only @media print ── */
 export function Receipt({ sale }) {
   if (!sale) return null
-  const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-print-mark.png`
+  const logoSrc = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
+  const order = sale.order || {}
+  const items = order.items || sale.items || []
+  const subtotal = Number(sale.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0))
+  const discount = Number(sale.discount || 0)
+  const service = Number(sale.service || 0)
+  const total = Number(sale.total ?? Math.max(0, subtotal - discount))
+  const cashier = sale.seller || sale.cashierNameSnapshot || ''
+  const orderType = order.orderType || sale.orderType || 'صالة'
+  const orderNumber = sale.orderNumber || order.orderNumber || ''
   return (
-    <div className="receipt-sheet">
+    <div className="receipt-sheet" dir="rtl">
       <div className="receipt-logo-wrap">
-        <img className="receipt-logo" src={logoUrl} alt="شعار 101" />
+        <img className="receipt-logo" src={logoSrc} alt="101 COFFEE HOUSE" />
       </div>
-      <p className="receipt-date" dir="rtl">{new Date(sale.createdAt).toLocaleString('ar-IQ', { dateStyle: 'medium', timeStyle: 'short' })}</p>
-      <section className="receipt-items" dir="rtl"><div className="receipt-table-head"><span>الصنف</span><span>الكمية</span><span>السعر</span></div>{sale.order.items.map(i => (
-        <div className="receipt-line" key={i.lineId}><span>{i.name}</span><b dir="ltr">{i.quantity}</b><b dir="ltr">{format(i.price * i.quantity)}</b></div>
-      ))}</section>
+      <p className="receipt-brand-note">قهوة أكثر من مجرد كوب ..</p>
+      <div className="receipt-divider" />
+      <h1 className="receipt-title">فاتورة بيع</h1>
+      <div className="receipt-meta">
+        {orderNumber ? <p className="receipt-order-number"><span>رقم الطلب :</span><b dir="ltr">#{orderNumber}</b></p> : null}
+        <p><span>التاريخ :</span><b dir="ltr">{new Date(sale.createdAt).toLocaleDateString('en-CA')}</b></p>
+        <p><span>الوقت :</span><b dir="ltr">{new Date(sale.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</b></p>
+      </div>
+      <div className="receipt-divider-dashed" />
+      <div className="receipt-meta">
+        {cashier && <p><span>الكاشير :</span><b>{cashier}</b></p>}
+        <p><span>نوع الطلب :</span><b>{orderType}</b></p>
+      </div>
+      <section className="receipt-items">
+        <div className="receipt-items-head receipt-table-head">
+          <span>المادة / التفاصيل</span>
+          <span>الإجمالي</span>
+        </div>
+        {items.map((i, index) => (
+          <div className="receipt-item-row receipt-line" key={i.lineId || i.id || `${i.name}-${index}`}>
+            <div className="receipt-item-name-line">
+              <span className="receipt-item-idx">{index + 1}.</span>
+              <span className="receipt-item-name">{i.name}</span>
+            </div>
+            <div className="receipt-item-details-line">
+              <span className="receipt-item-calc" dir="ltr">{i.quantity} × {format(i.price)}</span>
+              <b className="receipt-item-subtotal" dir="ltr">{format(i.price * i.quantity)}</b>
+            </div>
+          </div>
+        ))}
+      </section>
+      <div className="receipt-subtotals">
+        <p><span>إجمالي المبلغ :</span><b dir="ltr">{format(subtotal)}</b></p>
+        <p><span>الخصم :</span><b dir="ltr">{format(discount)}</b></p>
+        <p><span>الخدمة :</span><b dir="ltr">{format(service)}</b></p>
+      </div>
       <div className="receipt-total">
-        <span>الإجمالي</span><b dir="ltr">{format(sale.total)}</b>
+        <span>المبلغ الصافي:</span><b dir="ltr">{format(total)}</b>
       </div>
+      <div className="receipt-divider" />
+      <p className="receipt-thanks">شكراً لزيارتكم</p>
+      <p className="receipt-venue">ننتظركم دائمًا في 101 COFFEE HOUSE ❤</p>
+      <p className="receipt-social" dir="ltr">
+        <span aria-hidden="true">📷</span>
+        <span aria-hidden="true">♪</span>
+        <b>@101co_ffee</b>
+      </p>
+      <p className="receipt-tagline" dir="ltr">GOOD COFFEE &nbsp;\&nbsp; GOOD PEOPLE &nbsp;\&nbsp; BETTER DAYS</p>
     </div>
   )
 }
@@ -396,21 +447,29 @@ export function Receipt({ sale }) {
 /* ── Shift Login ── */
 export function ShiftLogin({ shifts, onClose, onLogin }) {
   const [shiftId, setShiftId] = React.useState(shifts[0]?.shiftId || '')
+  const [email, setEmail] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [error, setError] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
   const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
 
-  const submit = e => {
+  const submit = async e => {
     e.preventDefault()
+    setError('')
     const shift = shifts.find(c => c.shiftId === shiftId)
     if (!shift) return
-    onLogin(shift)
+    setBusy(true)
+    try { await onLogin({ ...shift, email, password }) } catch (err) { setError(err?.message || 'تعذر تسجيل الدخول.') } finally { setBusy(false) }
   }
 
   return (
     <Dialog onClose={onClose} className="cashier-login">
       <img src={logoUrl} alt="101 COFFEE HOUSE" style={{ maxHeight: '100px', objectFit: 'contain', marginBottom: '1rem' }} />
-      <h2>اختيار الوردية</h2>
-      <form onSubmit={submit}>
-        <label>
+       <h2>دخول الكاشير والوردية</h2>
+       <form onSubmit={submit}>
+         <label>البريد الإلكتروني<input type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" /></label>
+         <label>كلمة المرور<input type="password" required value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>
+         <label>
           الوردية
           <select value={shiftId} onChange={e => setShiftId(e.target.value)}>
             {shifts.map(c => (
@@ -418,7 +477,8 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
             ))}
           </select>
         </label>
-        <button className="primary-action" type="submit">دخول</button>
+         {error && <p className="form-error" role="alert">{error}</p>}
+         <button className="primary-action" type="submit" disabled={busy}>{busy ? 'جارٍ التحقق…' : 'دخول'}</button>
       </form>
     </Dialog>
   )
@@ -427,15 +487,26 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
 /* ── Seller Selection ── */
 export function SellerSelection({ onClose, onSelect }) {
   const sellers = ['علي', 'روان', 'محمد', 'ميس']
+  const [busy, setBusy] = React.useState(false)
+  const choose = async name => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const result = await onSelect(name)
+      if (result === false) setBusy(false)
+    } catch {
+      setBusy(false)
+    }
+  }
   return (
     <Dialog onClose={onClose} className="type-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <h2>اختر اسم الكابتن</h2>
       <div className="type-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
         {sellers.map(name => (
-          <button onClick={() => onSelect(name)} key={name}>
+          <button disabled={busy} onClick={() => choose(name)} key={name}>
             <span><Icon name="user" size={27} /></span>
-            <b>{name}</b>
+            <b>{busy ? 'جارٍ الحفظ…' : name}</b>
           </button>
         ))}
       </div>

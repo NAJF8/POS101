@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { saveAccExpense } from '../services/accSync'
 
 const STORAGE_KEY = 'pos101.expenses'
 const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
@@ -24,7 +25,7 @@ export function Expenses({ onNavigate, onBack, session }) {
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
   const saveRows = rows => { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); setExpenses(rows) }
-  const submit = e => {
+  const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
     if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !notes.trim()) return alert('يرجى إدخال مبلغ ووصف صحيحين')
@@ -32,7 +33,9 @@ export function Expenses({ onNavigate, onBack, session }) {
       saveRows(expenses.map(row => row.id === editingId ? { ...row, amount: numericAmount, category, person, notes: notes.trim() } : row))
       resetForm(); alert('تم تعديل المصروف بنجاح'); return
     }
-    saveRows([...expenses, { id: makeId(), amount: numericAmount, category, date: Date.now(), shift: session?.name || 'وردية غير محددة', person, notes: notes.trim() }])
+    const row = { id: makeId(), amount: numericAmount, category, date: Date.now(), shift: session?.name || 'وردية غير محددة', shiftId: session?.accShiftId || '', person, notes: notes.trim() }
+    try { await saveAccExpense(row, session?.profile) } catch (error) { alert(error?.message || 'تعذر حفظ المصروف في ACC-101'); return }
+    saveRows([...expenses, row])
     resetForm(); alert('تم حفظ المصروف بنجاح')
   }
   const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || 'علي'); setNotes(expense.notes || ''); window.scrollTo({ top: 0, behavior: 'smooth' }) }
