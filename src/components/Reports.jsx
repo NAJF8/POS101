@@ -38,20 +38,18 @@ const a4PrintStyles = `
 // Match the thermal receipt's proven 80mm print settings. This is injected
 // into the isolated print window only for the comprehensive report.
 const thermalComprehensiveStyles = `
-  /* Chrome may ignore an auto roll height. Width is controlled here; the
-     Windows thermal driver must supply the custom roll length and cut rule. */
-  @page { margin: 0; }
+  @page { margin: 0; size: 80mm auto; }
   * { box-sizing: border-box; }
-  html, body { width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; color: #000; }
+  html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { box-sizing: border-box; width: 72mm; max-width: 72mm; min-height: 0; margin: 0 auto; padding: 1.5mm 1.5mm 4mm; background: #fff; color: #000; }
+  .report-paper { display: block; width: 74mm; max-width: 74mm; min-width: 0; min-height: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
   h3 { margin: 2.5mm 0 1.5mm; padding-bottom: 1mm; border-bottom: .3mm solid #000; color: #000; font-size: 12.5pt; font-weight: 800; break-after: avoid; page-break-after: avoid; }
   p { margin: 0; color: #000; }
   .report-paper-header > p { font-size: 9.5pt; font-weight: 700; }
-  .print-table { width: 100%; margin: 0 0 3mm; border: .35mm solid #000; border-collapse: collapse; color: #000; table-layout: auto; }
+  .print-table { width: 100%; max-width: 100%; min-width: 0; margin: 0 0 3mm; border: .35mm solid #000; border-collapse: collapse; color: #000; table-layout: fixed; }
   .print-table th, .print-table td { border: .3mm solid #000; padding: 1.5mm 1mm; color: #000; text-align: center; vertical-align: middle; font-size: 9.5pt; font-weight: 600; overflow-wrap: anywhere; word-break: break-word; }
   .print-table th { font-weight: 800; }
   .print-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
@@ -62,25 +60,19 @@ const thermalComprehensiveStyles = `
   .summary-highlight td, tr.summary-highlight td { font-size: 12pt !important; font-weight: 900 !important; border-top: .6mm solid #000 !important; border-bottom: .6mm solid #000 !important; }
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
-  .thermal-sales-cards { display: block; width: 100%; margin: 0 0 3mm; }
-  .thermal-sale-card { display: block; margin: 0 0 2mm; padding: 1.8mm 1.5mm; border: .35mm solid #000; break-inside: avoid; page-break-inside: avoid; }
-  .thermal-sale-info { display: block; text-align: right; line-height: 1.35; }
-  .thermal-sale-order-no { font-size: 10pt; font-weight: 800; margin-bottom: 0.5mm; color: #000; }
-  .thermal-sale-datetime { font-size: 8.5pt; font-weight: 700; color: #222; margin-bottom: 0.5mm; direction: ltr; text-align: right; }
-  .thermal-sale-meta { font-size: 8.5pt; color: #111; }
-  .thermal-sale-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 1.2mm; padding-top: 1.2mm; border-top: .25mm dashed #555; background: #fff; }
-  .thermal-sale-total-lbl { display: block; font-size: 8pt; font-weight: 700; color: #444; margin-bottom: 0.5mm; }
-  .thermal-sale-total-val { display: block; font-size: 10.5pt; font-weight: 900; white-space: nowrap; color: #000; direction: ltr; }
-  .thermal-sales-total { display: flex; justify-content: space-between; padding: 2mm 1.5mm; border-top: .5mm solid #000; font-size: 10.5pt; font-weight: 900; }
-  .thermal-three-col th:first-child, .thermal-three-col td:first-child { width: auto; text-align: right; }
-  .thermal-four-col { table-layout: fixed; }
-  .thermal-four-col th:first-child, .thermal-four-col td:first-child { width: 7mm; text-align: center; }
-  .thermal-four-col th:nth-child(2), .thermal-four-col td:nth-child(2) { width: auto; text-align: right; }
-  .thermal-four-col th:nth-child(3), .thermal-four-col td:nth-child(3) { width: 17mm; white-space: nowrap; }
-  .thermal-four-col th:nth-child(4), .thermal-four-col td:nth-child(4) { width: 22mm; white-space: nowrap; }
-  .thermal-four-col th:nth-child(3) { min-width: 17mm; font-size: 8pt !important; white-space: nowrap !important; overflow-wrap: normal !important; word-break: keep-all !important; }
+  .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
+  .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
+  .thermal-card-head { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
+  .thermal-card-head .order-no { font-size: 10pt; font-weight: 800; color: #000; }
+  .thermal-card-head .order-dt { min-width: 0; font-size: 8.5pt; font-weight: 700; color: #222; overflow-wrap: anywhere; }
+  .thermal-card-body { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; font-size: 8.5pt; color: #111; margin-bottom: 1mm; }
+  .thermal-card-foot { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: center; background: #fdfdfd; border-top: .2mm dashed #555; padding-top: 1mm; font-size: 10pt; font-weight: 900; color: #000; }
+  .thermal-cards-total { display: flex; justify-content: space-between; font-size: 11pt; font-weight: 900; border-top: .5mm solid #000; padding-top: 1.5mm; margin-bottom: 3mm; }
+  .thermal-product-table th:first-child, .thermal-product-table td:first-child { width: 7mm; text-align: center; }
+  .thermal-product-table th:nth-child(2), .thermal-product-table td:nth-child(2) { text-align: right; }
   .thermal-product-table td:last-child, .thermal-captain-table td:last-child { white-space: nowrap; }
   .report-paper-footer { display: flex; flex-direction: column; align-items: center; gap: 1mm; padding-top: 2mm; margin-top: 3mm; border-top: .35mm solid #000; color: #000; font-size: 9pt; font-weight: 800; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+  .report-paper > *, .report-paper h2, .report-paper h3, .report-paper p, .report-paper td, .report-paper th { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; page-break-inside: avoid; }
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -89,11 +81,11 @@ const thermalComprehensiveStyles = `
 // The sold-materials report is its own compact thermal document. It is not
 // the comprehensive report and deliberately contains only item aggregates.
 const thermalMaterialsStyles = `
-  @page { margin: 0; }
+  @page { margin: 0; size: 80mm auto; }
   * { box-sizing: border-box; }
-  html, body { width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; color: #000; }
+  html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { box-sizing: border-box; width: 72mm; max-width: 72mm; margin: 0 auto; padding: 1.5mm 1.5mm 4mm; background: #fff; }
+  .report-paper { display: block; width: 74mm; max-width: 74mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; font-size: 16pt; font-weight: 900; line-height: 1.2; }
@@ -132,7 +124,7 @@ export default function Reports({ onNavigate }) {
     return expenses.filter(e => e.date >= startMs && e.date <= endMs)
   }, [expenses, startMs, endMs])
 
-  const printReport = mode => {
+  const printReport = (format) => {
     const paper = document.querySelector('.report-paper')
     if (!paper) return
 
@@ -142,11 +134,11 @@ export default function Reports({ onNavigate }) {
       return
     }
     printWindow.document.open()
-    const isA4 = mode === 'a4'
+    try { printWindow.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}#print-report`) } catch {}
+    const isA4 = format === 'a4'
     const isMaterials = reportType === 'materials'
     const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
-    const printClass = isA4 ? 'a4-print' : 'thermal-print'
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl" class="${printClass}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${printStyles}</style></head><body>${paper.outerHTML}</body></html>`)
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
     printWindow.document.close()
 
     const waitForAssetsAndPrint = async () => {
@@ -246,23 +238,26 @@ export default function Reports({ onNavigate }) {
     const thermalSalesDetails = sList => (
       <section className="sales-details">
         <h3>تفاصيل عمليات البيع</h3>
-        <div className="thermal-sales-cards">
-            {sList.map((sale, index) => (
-              <article className="thermal-sale-card" key={sale.id || `${sale.orderNumber}-${sale.createdAt}`}>
-                <div className="thermal-sale-info">
-                  <div className="thermal-sale-order-no"><b>طلب #{sale.orderNumber || index + 1}</b></div>
-                  <div className="thermal-sale-datetime" dir="ltr">{formatDateTime(sale.createdAt)}</div>
-                  <div className="thermal-sale-meta">الكابتن: <b>{sale.seller || sale.cashierNameSnapshot || 'غير محدد'}</b> | الدفع: <b>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</b></div>
-                </div>
-                <div className="thermal-sale-total">
-                  <span className="thermal-sale-total-lbl">الإجمالي</span>
-                  <b className="thermal-sale-total-val" dir="ltr">{format(sale.total)}</b>
-                </div>
-              </article>
-            ))}
-            {!sList.length && <p className="thermal-empty">لا توجد مبيعات ضمن الفترة المحددة</p>}
+        <div className="thermal-cards-list">
+          {sList.map((sale, index) => (
+            <div className="thermal-sale-card" key={sale.id || `${sale.orderNumber}-${sale.createdAt}`}>
+              <div className="thermal-card-head">
+                <b className="order-no">طلب #{sale.orderNumber || index + 1}</b>
+                <span className="order-dt" dir="ltr">{formatDateTime(sale.createdAt)}</span>
+              </div>
+              <div className="thermal-card-body">
+                <span>الكابتن: <b>{sale.seller || sale.cashierNameSnapshot || 'غير محدد'}</b></span>
+                <span>الدفع: <b>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</b></span>
+              </div>
+              <div className="thermal-card-foot">
+                <span>الإجمالي</span>
+                <b dir="ltr">{format(sale.total)}</b>
+              </div>
+            </div>
+          ))}
+          {!sList.length && <div className="thermal-sale-card empty">لا توجد مبيعات ضمن الفترة المحددة</div>}
         </div>
-        <div className="thermal-sales-total"><span>إجمالي عمليات البيع</span><b dir="ltr">{format(sList.reduce((sum, sale) => sum + Number(sale.total || 0), 0))}</b></div>
+        <div className="thermal-cards-total"><span>إجمالي عمليات البيع</span><b dir="ltr">{format(sList.reduce((sum, sale) => sum + Number(sale.total || 0), 0))}</b></div>
       </section>
     )
 
@@ -276,8 +271,8 @@ export default function Reports({ onNavigate }) {
       }))
       return <section className="sales-details">
         <h3>تفاصيل المبيعات حسب المادة</h3>
-        <table className="print-table thermal-product-table thermal-three-col">
-          <thead><tr><th>اسم المادة</th><th dir="ltr">Qty</th><th>الإجمالي</th></tr></thead>
+        <table className="print-table thermal-product-table">
+          <thead><tr><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {[...products.entries()].sort((a, b) => b[1].quantity - a[1].quantity).map(([name, row]) => <tr key={name}><td>{name}</td><td>{row.quantity}</td><td>{format(row.total)}</td></tr>)}
             {!products.size && <tr><td colSpan="3">لا توجد تفاصيل مواد ضمن الفترة المحددة</td></tr>}
@@ -347,8 +342,8 @@ export default function Reports({ onNavigate }) {
 
         {/* ── Product Details Section ── */}
         <h3>تفاصيل المبيعات</h3>
-        <table className="print-table thermal-product-table thermal-three-col">
-          <thead><tr><th>ت</th><th>اسم المادة</th><th dir="ltr">Qty</th><th>الإجمالي</th></tr></thead>
+        <table className="print-table thermal-product-table">
+          <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {productList.map(([name, row], idx) => (
               <tr key={name}><td>{idx + 1}</td><td>{name}</td><td>{row.quantity}</td><td className="number-cell">{format(row.total)}</td></tr>
@@ -378,8 +373,8 @@ export default function Reports({ onNavigate }) {
           const giftAmt = giftList.reduce((s, [, r]) => s + r.total, 0)
           return <>
             <h3>تقرير مبيعات الهديا</h3>
-            <table className="print-table thermal-product-table thermal-four-col">
-              <thead><tr><th>ت</th><th>اسم المادة</th><th dir="ltr">Qty</th><th>الإجمالي</th></tr></thead>
+            <table className="print-table thermal-product-table">
+              <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
               <tbody>
                 {giftList.map(([name, row], idx) => (
                   <tr key={name}><td>{idx + 1}</td><td>{name}</td><td>{row.quantity}</td><td className="number-cell">{format(row.total)}</td></tr>
@@ -422,8 +417,8 @@ export default function Reports({ onNavigate }) {
       const totalAmt = list.reduce((sum, item) => sum + item[1].total, 0)
       
       content = (
-        <table className="print-table thermal-product-table thermal-four-col">
-          <thead><tr><th>ت</th><th>اسم المادة</th><th dir="ltr">Qty</th><th>الإجمالي</th></tr></thead>
+        <table className="print-table thermal-product-table">
+          <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {list.map(([name, data], idx) => (
               <tr key={name}>
