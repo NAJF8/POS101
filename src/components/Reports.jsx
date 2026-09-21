@@ -105,7 +105,7 @@ const thermalMaterialsStyles = `
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 `
 
-export default function Reports({ onNavigate, session }) {
+export default function Reports({ onNavigate, session, onDirectThermalPrint, directThermalReady = false }) {
   const [reportType, setReportType] = useState(null)
   const [remote, setRemote] = useState(null)
   
@@ -167,6 +167,12 @@ export default function Reports({ onNavigate, session }) {
       printWindow.print()
     }
     waitForAssetsAndPrint()
+  }
+
+  const printReportDirect = () => {
+    if (!directThermalReady || !onDirectThermalPrint) return
+    const titleByType = { comprehensive: 'تقرير شامل', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', dateFrom, dateTo, period: `${dateFrom} - ${dateTo}`, sales: filteredSales, expenses: filteredExpenses })
   }
 
   const renderReportCards = () => (
@@ -515,6 +521,7 @@ export default function Reports({ onNavigate, session }) {
           <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>
             <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4</button>
             <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
+            <button className="outline-btn" type="button" disabled={!directThermalReady} onClick={printReportDirect} title={directThermalReady ? 'إرسال ESC/POS إلى الخدمة المحلية' : 'فعّل الخدمة المحلية وتحقق من الطابعة أولاً'}><Icon name="printer" size={20} /> طباعة حرارية مباشرة</button>
           </div>
         </div>
         

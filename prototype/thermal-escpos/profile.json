@@ -1,0 +1,11 @@
+{
+  "name": "H-D821 calibration candidate",
+  "paperWidthMm": 80,
+  "printableWidthDots": 576,
+  "dpi": 203,
+  "feedLinesBeforeCut": 5,
+  "cutCommand": "full",
+  "encoding": "windows-1256",
+  "verified": false,
+  "notes": "576/203dpi are unverified candidates. Replace after H-D821 self-test/manual confirmation."
+}
