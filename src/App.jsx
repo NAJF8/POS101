@@ -9,6 +9,7 @@ import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
 import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
+import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
@@ -46,7 +47,8 @@ export default function App() {
   const [printMessage, setPrintMessage] = useState(null)
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
-  const [printerSettings, setPrinterSettings] = useState(() => read('pos101.printerSettings', { name: '', paper: '80mm' }))
+  const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
+  const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const saleInFlight = useRef(false)
 
@@ -72,6 +74,19 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.printerSettings', JSON.stringify(printerSettings)), [printerSettings])
 
+  const refreshThermalStatus = useCallback(async settings => {
+    try {
+      const status = await checkThermalService(settings)
+      setThermalStatus(status)
+      return status
+    } catch (error) {
+      setThermalStatus({ ok: false, error: error.message })
+      return null
+    }
+  }, [])
+
+  useEffect(() => { void refreshThermalStatus(printerSettings) }, [printerSettings.serviceUrl, printerSettings.token, refreshThermalStatus])
+
   const [pendingPayment, setPendingPayment] = useState(null)
   
   // Order mutations
@@ -88,6 +103,28 @@ export default function App() {
   const chooseTable = useCallback(t => { update(o => ({ ...o, table: t })); setModal('payment') }, [update])
   const hold = useCallback(() => { if (!activeOrder.items.length) return; update(o => ({ ...o, held: true })); setModal('openOrders') }, [activeOrder.items.length, update])
   const openOrder = useCallback(id => { const idx = orders.findIndex(o => o.id === id); if (idx >= 0) { setActive(idx); setOrders(v => v.map(o => o.id === id ? ({ ...o, held: false }) : o)); setModal(null) } }, [orders])
+
+  const directThermalReady = Boolean(printerSettings.directThermal && thermalStatus?.ready)
+  const requestSalePrint = useCallback(async (sale, { reprint = false } = {}) => {
+    setPrintMessage(null)
+    if (!directThermalReady) {
+      setPrintSale(sale)
+      return true
+    }
+    const saleId = sale.saleId || sale.id || sale.orderNumber
+    try {
+      const result = await printThermalDocument({
+        settings: printerSettings,
+        jobId: `invoice:${saleId}${reprint ? `:reprint:${Date.now()}` : ''}`,
+        document: { kind: 'invoice', sale },
+      })
+      setPrintMessage({ sale, text: result.duplicate ? 'تم تجاهل إعادة الإرسال المكرر.' : 'تم إرسال الفاتورة للطابعة الحرارية مباشرة.' })
+      return true
+    } catch (error) {
+      setPrintMessage({ sale, text: `تعذر إرسال الفاتورة للطابعة الحرارية: ${error.message}` })
+      return false
+    }
+  }, [directThermalReady, printerSettings])
 
   const initiateComplete = useCallback(payment => {
     if (!session || !activeOrder.items.length || saleInFlight.current) return false
@@ -123,10 +160,7 @@ export default function App() {
       localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []), sale]))
       setNextNumber(n => n + 1)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-      if (autoPrint || payment.forcePrint) {
-        setPrintMessage(null)
-        setPrintSale(sale)
-      }
+      if (autoPrint || payment.forcePrint) void requestSalePrint(sale)
       setPendingPayment(null)
       window.setTimeout(() => setModal(null), 350)
       return true
@@ -135,7 +169,7 @@ export default function App() {
     } finally {
       window.setTimeout(() => { saleInFlight.current = false }, 350)
     }
-  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment])
+  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -161,10 +195,7 @@ export default function App() {
       if (!session) { setModal('login'); return }
       setModal('history')
     }
-    const printHistorical = e => {
-      setPrintMessage(null)
-      setPrintSale(e.detail)
-    }
+    const printHistorical = e => { void requestSalePrint(e.detail, { reprint: true }) }
     const viewHistorical = e => {
       setSelected(e.detail)
       setModal('history')
@@ -179,7 +210,7 @@ export default function App() {
       window.removeEventListener('print-historical-sale', printHistorical)
       window.removeEventListener('view-historical-sale', viewHistorical)
     }
-  }, [activeOrder.items.length, session, initiateComplete, total])
+  }, [activeOrder.items.length, session, initiateComplete, total, requestSalePrint])
 
   // Auto-print trigger
   useEffect(() => {
@@ -233,10 +264,17 @@ export default function App() {
   const print = useCallback(() => {
     const sale = selected?.sale || selected
     if (!sale) return
-    setPrintMessage(null)
-    setPrintSale(sale)
-  }, [selected])
+    void requestSalePrint(sale, { reprint: true })
+  }, [selected, requestSalePrint])
   const savePrinterSettings = useCallback(settings => setPrinterSettings(v => ({ ...v, ...settings })), [])
+  const printReportDirect = useCallback(report => {
+    if (!directThermalReady) return false
+    const jobId = `report:${report.reportType}:${report.dateFrom}:${report.dateTo}`
+    void printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
+      .then(result => setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' }))
+      .catch(error => setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` }))
+    return true
+  }, [directThermalReady, printerSettings])
   const login = useCallback(cashier => {
     // Keep the selected shift on the session so completed sales can be grouped
     // correctly by the morning/evening reports.
@@ -312,14 +350,14 @@ export default function App() {
         </div>
       )}
 
-      {currentView === 'reports' && session && <Reports onNavigate={setCurrentView} />}
+      {currentView === 'reports' && session && <Reports onNavigate={setCurrentView} onDirectThermalPrint={printReportDirect} directThermalReady={directThermalReady} />}
       {currentView === 'expenses' && session && (
         <Expenses onNavigate={setCurrentView} />
       )}
       {currentView === 'expense-entry' && session && (
         <Expenses onNavigate={setCurrentView} />
       )}
-      {currentView === 'reports-captain' && session && <Reports onNavigate={setCurrentView} />}
+      {currentView === 'reports-captain' && session && <Reports onNavigate={setCurrentView} onDirectThermalPrint={printReportDirect} directThermalReady={directThermalReady} />}
 
       {/* Login gate */}
       {!session && (
@@ -329,7 +367,7 @@ export default function App() {
       {/* Modals */}
       {modal === 'cashier-menu' && <CashierMenu session={session} onClose={() => setModal(null)} onLogout={logout} />}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
-      {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} />}
+      {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}
       {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct} />}
       {modal === 'orderType' && <OrderType onClose={() => setModal(null)} onChoose={chooseType} />}
       {modal === 'tables' && <TableSelection orders={orders} onClose={() => setModal(null)} onChoose={chooseTable} />}

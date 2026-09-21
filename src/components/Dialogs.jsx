@@ -532,10 +532,12 @@ export function ConfirmDialog({ title, message, onClose, onConfirm }) {
 }
 
 /* ── Print Menu ── */
-export function PrintMenu({ enabled, settings, onClose, onChange, onSave }) {
+export function PrintMenu({ enabled, settings, thermalStatus, onClose, onChange, onSave, onCheck, onDirectChange }) {
   const [printerName, setPrinterName] = React.useState(settings?.name || '')
+  const [serviceUrl, setServiceUrl] = React.useState(settings?.serviceUrl || 'http://127.0.0.1:17821')
+  const [token, setToken] = React.useState(settings?.token || '')
   const save = () => {
-    onSave({ name: printerName.trim(), paper: '80mm' })
+    onSave({ name: printerName.trim(), serviceUrl: serviceUrl.trim(), token, paper: '80mm' })
     onClose()
   }
   return (
@@ -546,7 +548,13 @@ export function PrintMenu({ enabled, settings, onClose, onChange, onSave }) {
         اسم الطابعة الحرارية (80mm)
         <input value={printerName} onChange={e => setPrinterName(e.target.value)} placeholder="مثال: POS-80" />
       </label>
-      <small className="printer-note">المتصفح لا يستطيع اختيار طابعة محددة أو الطباعة الصامتة من داخل GitHub Pages. اكتب الاسم للتوثيق، واضبط الطابعة الافتراضية مرة واحدة في Windows أو استخدم Chrome Kiosk/برنامج طباعة محلي.</small>
+      <label className="printer-name-field">عنوان الخدمة المحلية<input value={serviceUrl} onChange={e => setServiceUrl(e.target.value)} /></label>
+      <label className="printer-name-field">رمز الخدمة (اختياري في dry-run)<input type="password" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" /></label>
+      <small className="printer-note">الخدمة محلية فقط ولا تقرأ Firebase أو بيانات الإنتاج. لن يصبح المسار المباشر متاحاً إلا إذا أعادت الخدمة جاهزية مؤكدة وطابعة متحققة.</small>
+      <button type="button" onClick={() => { const next = { name: printerName.trim(), serviceUrl: serviceUrl.trim(), token, paper: '80mm' }; onSave(next); onCheck?.(next) }}>
+        فحص الخدمة والطابعة
+      </button>
+      <p className="printer-note" role="status">{thermalStatus?.ready ? 'جاهزة للطباعة الحرارية المباشرة.' : thermalStatus?.mode === 'dry-run' ? 'الخدمة تعمل dry-run فقط؛ الطباعة المباشرة معطلة.' : thermalStatus?.error || 'لم يتم التحقق من الخدمة بعد.'}</p>
       <button className={enabled ? 'selected' : ''} onClick={() => onChange(true)}>
         <b>تشغيل الطباعة</b>
         <small>تفتح فاتورة واحدة تلقائياً بعد نجاح حفظ البيع</small>
@@ -554,6 +562,14 @@ export function PrintMenu({ enabled, settings, onClose, onChange, onSave }) {
       <button className={!enabled ? 'selected' : ''} onClick={() => onChange(false)}>
         <b>إيقاف الطباعة</b>
         <small>يستمر البيع دون فتح نافذة الطباعة</small>
+      </button>
+      <button className={settings?.directThermal ? 'selected' : ''} disabled={!thermalStatus?.ready} onClick={() => onDirectChange?.(true)}>
+        <b>طباعة حرارية مباشرة</b>
+        <small>{thermalStatus?.ready ? 'إرسال ESC/POS إلى خدمة localhost' : 'تتطلب إعداد الخدمة والتحقق من الطابعة'}</small>
+      </button>
+      <button className={!settings?.directThermal ? 'selected' : ''} onClick={() => onDirectChange?.(false)}>
+        <b>إيقاف الطباعة الحرارية المباشرة</b>
+        <small>تبقى طباعة Chrome الحالية وA4 دون تغيير</small>
       </button>
       <button className="primary-action" type="button" onClick={save}>حفظ إعدادات الطابعة</button>
     </Dialog>
