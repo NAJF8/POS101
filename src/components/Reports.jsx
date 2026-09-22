@@ -35,14 +35,15 @@ const a4PrintStyles = `
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
 `
 
-// Match the thermal receipt's proven 80mm print settings. This is injected
+// Match the thermal receipt's 80mm paper settings. Content stays below the
+// driver's confirmed 72.1mm printable limit. This is injected
 // into the isolated print window only for the comprehensive report.
 const thermalComprehensiveStyles = `
   @page { margin: 0; size: 80mm auto; }
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; width: 74mm; max-width: 74mm; min-width: 0; min-height: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; min-height: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
@@ -63,7 +64,7 @@ const thermalComprehensiveStyles = `
   .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
   .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
   .thermal-card-head { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
-  .thermal-card-head .order-no { font-size: 10pt; font-weight: 800; color: #000; }
+  .thermal-card-head .order-no { min-width: 0; max-width: 50%; font-size: 10pt; font-weight: 800; color: #000; overflow-wrap: anywhere; }
   .thermal-card-head .order-dt { min-width: 0; font-size: 8.5pt; font-weight: 700; color: #222; overflow-wrap: anywhere; }
   .thermal-card-body { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; font-size: 8.5pt; color: #111; margin-bottom: 1mm; }
   .thermal-card-foot { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: center; background: #fdfdfd; border-top: .2mm dashed #555; padding-top: 1mm; font-size: 10pt; font-weight: 900; color: #000; }
@@ -72,7 +73,7 @@ const thermalComprehensiveStyles = `
   .thermal-product-table th:nth-child(2), .thermal-product-table td:nth-child(2) { text-align: right; }
   .thermal-product-table td:last-child, .thermal-captain-table td:last-child { white-space: nowrap; }
   .report-paper-footer { display: flex; flex-direction: column; align-items: center; gap: 1mm; padding-top: 2mm; margin-top: 3mm; border-top: .35mm solid #000; color: #000; font-size: 9pt; font-weight: 800; text-align: center; break-inside: avoid; page-break-inside: avoid; }
-  .report-paper > *, .report-paper h2, .report-paper h3, .report-paper p, .report-paper td, .report-paper th { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .report-paper > *, .report-paper h2, .report-paper h3, .report-paper p, .report-paper td, .report-paper th, .report-paper .thermal-card-body > *, .report-paper .thermal-card-foot > *, .report-paper .thermal-cards-total > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; page-break-inside: avoid; }
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -85,7 +86,7 @@ const thermalMaterialsStyles = `
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; width: 74mm; max-width: 74mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; font-size: 16pt; font-weight: 900; line-height: 1.2; }
