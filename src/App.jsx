@@ -11,6 +11,7 @@ import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
 import { isAccConfigured, loginToAcc, logoutFromAcc, loadAccProducts, saveAccSale, openAccShift, closeAccShift, subscribeAuth } from './services/accSync'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
+import { toArabic } from './utils.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
@@ -407,8 +408,8 @@ export default function App() {
       {syncNotice && (
         <div className={`sync-notice ${syncNotice.status}`} role="status">
           {syncNotice.status === 'pending'
-            ? `بيع محفوظ محلياً — بانتظار المزامنة (${syncNotice.count})`
-            : `تم تأكيد مزامنة ${syncNotice.count} بيع مع ACC-101`}
+            ? `بيع محفوظ محلياً — بانتظار المزامنة (${toArabic(syncNotice.count)})`
+            : `تم تأكيد مزامنة ${toArabic(syncNotice.count)} بيع مع ACC-101`}
           <button type="button" onClick={() => setSyncNotice(null)} aria-label="إغلاق حالة المزامنة">×</button>
         </div>
       )}

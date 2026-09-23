@@ -3,17 +3,13 @@ import { Icon } from './Icons'
 import { loadAccReports } from '../services/accSync'
 import { logoDataUri } from '../assets/logo'
 
-const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
+import { formatMoney, formatDateTime, formatTime, toArabic, formatNumber } from '../utils.js'
+const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
-// Reports print in their own A4 or thermal 80mm document.
+// Reports print in their own A4 or thermal 80mm document. Thermal content is
+// intentionally narrower than the Windows driver's confirmed 72.1mm limit.
 const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
-const formatDateTime = value => {
-  if (!value) return '—'
-  const d = new Date(value)
-  const datePart = d.toLocaleDateString('en-CA')
-  const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-  return `${datePart} ${timePart}`
-}
+
 const formatDate = value => formatDateTime(value)
 
 const a4PrintStyles = `
@@ -37,21 +33,22 @@ const a4PrintStyles = `
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
 `
 
-// Match the thermal receipt's proven 80mm print settings. This is injected
+// Match the thermal receipt's 80mm paper settings. Content stays below the
+// driver's confirmed 72.1mm printable limit. This is injected
 // into the isolated print window only for the comprehensive report.
 const thermalComprehensiveStyles = `
   @page { margin: 0; size: 80mm auto; }
   * { box-sizing: border-box; }
-  html, body { width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
+  html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { width: 72mm; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; }
+  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
   h3 { margin: 2.5mm 0 1.5mm; padding-bottom: 1mm; border-bottom: .3mm solid #000; color: #000; font-size: 12.5pt; font-weight: 800; break-after: avoid; page-break-after: avoid; }
   p { margin: 0; color: #000; }
   .report-paper-header > p { font-size: 9.5pt; font-weight: 700; }
-  .print-table { width: 100%; margin: 0 0 3mm; border: .35mm solid #000; border-collapse: collapse; color: #000; table-layout: auto; }
+  .print-table { width: 100%; max-width: 100%; min-width: 0; margin: 0 0 3mm; border: .35mm solid #000; border-collapse: collapse; color: #000; table-layout: fixed; }
   .print-table th, .print-table td { border: .3mm solid #000; padding: 1.5mm 1mm; color: #000; text-align: center; vertical-align: middle; font-size: 9.5pt; font-weight: 600; overflow-wrap: anywhere; word-break: break-word; }
   .print-table th { font-weight: 800; }
   .print-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
@@ -63,19 +60,20 @@ const thermalComprehensiveStyles = `
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   
-  .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; margin-bottom: 3mm; }
-  .thermal-sale-card { display: flex; flex-direction: column; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
-  .thermal-card-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
-  .thermal-card-head .order-no { font-size: 10pt; font-weight: 800; color: #000; }
-  .thermal-card-head .order-dt { font-size: 8.5pt; font-weight: 700; color: #222; }
-  .thermal-card-body { display: flex; justify-content: space-between; font-size: 8.5pt; color: #111; margin-bottom: 1mm; }
-  .thermal-card-foot { display: flex; justify-content: space-between; align-items: center; background: #fdfdfd; border-top: .2mm dashed #555; padding-top: 1mm; font-size: 10pt; font-weight: 900; color: #000; }
-  .thermal-cards-total { display: flex; justify-content: space-between; font-size: 11pt; font-weight: 900; border-top: .5mm solid #000; padding-top: 1.5mm; margin-bottom: 3mm; }
+  .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
+  .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
+  .thermal-card-head { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
+  .thermal-card-head .order-no { min-width: 0; max-width: 50%; font-size: 10pt; font-weight: 800; color: #000; overflow-wrap: anywhere; }
+  .thermal-card-head .order-dt { min-width: 0; font-size: 8.5pt; font-weight: 700; color: #222; overflow-wrap: anywhere; }
+  .thermal-card-body { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; font-size: 8.5pt; color: #111; margin-bottom: 1mm; }
+  .thermal-card-foot { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: center; background: #fdfdfd; border-top: .2mm dashed #555; padding-top: 1mm; font-size: 10pt; font-weight: 900; color: #000; }
+  .thermal-cards-total { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; font-size: 11pt; font-weight: 900; border-top: .5mm solid #000; padding-top: 1.5mm; margin-bottom: 3mm; }
 
   .thermal-product-table th:first-child, .thermal-product-table td:first-child { width: 7mm; text-align: center; }
   .thermal-product-table th:nth-child(2), .thermal-product-table td:nth-child(2) { text-align: right; }
   .thermal-product-table td:last-child, .thermal-captain-table td:last-child { white-space: nowrap; }
   .report-paper-footer { display: flex; flex-direction: column; align-items: center; gap: 1mm; padding-top: 2mm; margin-top: 3mm; border-top: .35mm solid #000; color: #000; font-size: 9pt; font-weight: 800; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+  .report-paper > *, .report-paper h2, .report-paper h3, .report-paper p, .report-paper td, .report-paper th, .report-paper .thermal-card-body > *, .report-paper .thermal-card-foot > *, .report-paper .thermal-cards-total > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; page-break-inside: avoid; }
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -86,9 +84,9 @@ const thermalComprehensiveStyles = `
 const thermalMaterialsStyles = `
   @page { margin: 0; size: 80mm auto; }
   * { box-sizing: border-box; }
-  html, body { width: 80mm !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
+  html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { width: 72mm; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; }
+  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; font-size: 16pt; font-weight: 900; line-height: 1.2; }
@@ -145,6 +143,10 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
       return
     }
+    // Keep the print document same-origin and give Chrome a meaningful URL.
+    // If Headers and footers are accidentally enabled, this avoids printing
+    // `about:blank` while the user can still disable them in the dialog.
+    try { printWindow.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}#print-report`) } catch {}
     printWindow.document.open()
     const isA4 = format === 'a4'
     const isMaterials = reportType === 'materials'
@@ -254,7 +256,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
         <h3>تفاصيل عمليات البيع</h3>
         <div className="thermal-cards-list">
           {sList.map((sale, index) => (
-            <div className="thermal-sale-card" key={sale.id || `${sale.orderNumber}-${sale.createdAt}`}>
+            <div className="thermal-sale-card" key={sale.id || `${toArabic(sale.orderNumber)}-${sale.createdAt}`}>
               <div className="thermal-card-head">
                 <b className="order-no">طلب #{sale.orderNumber || index + 1}</b>
                 <span className="order-dt" dir="ltr">{formatDateTime(sale.createdAt)}</span>
