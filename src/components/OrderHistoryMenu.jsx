@@ -5,11 +5,12 @@ const PAGE_SIZE = 10
 const readSales = () => {
   try { return JSON.parse(localStorage.getItem('pos101.sales')) || [] } catch { return [] }
 }
-const money = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
+import { formatMoney, formatDateTime, toArabic } from '../utils.js'
+const money = formatMoney
 const paymentLabel = value => value === 'cash' ? 'نقدي' : value === 'electronic' || value === 'card' ? 'إلكتروني' : 'غير محدد'
 const statusLabel = value => value === 'voided' ? 'مبطل' : 'مكتمل'
 const typeLabel = sale => sale.order?.orderType || sale.orderType || 'داخل الكوفي'
-const localDate = value => new Date(value).toLocaleString('ar-IQ', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+const localDate = formatDateTime
 
 function SaleDetails({ sale, onBack, onPrint, onVoid }) {
   const [confirmingVoid, setConfirmingVoid] = useState(false)
@@ -21,7 +22,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid }) {
         <button className="history-back" onClick={onBack}><Icon name="arrow" size={18} /> العودة للسجل</button>
         <div>
           <span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span>
-          <h3>تفاصيل الطلب #{sale.orderNumber || '—'}</h3>
+          <h3>تفاصيل الطلب #{sale.orderNumber ? toArabic(sale.orderNumber) : '—'}</h3>
           <p>{localDate(sale.createdAt)} · {paymentLabel(sale.paymentMethod)}</p>
         </div>
       </div>
@@ -39,7 +40,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid }) {
           <tbody>{items.map((item, index) => (
             <tr key={item.lineId || `${item.id}-${index}`}>
               <td><b>{item.name}</b>{item.options?.length ? <small>{item.options.join('، ')}</small> : null}{item.notes ? <small>ملاحظة: {item.notes}</small> : null}</td>
-              <td className="number-cell">{item.quantity}</td>
+              <td className="number-cell">{toArabic(item.quantity)}</td>
               <td className="number-cell">{money(item.price)}</td>
               <td className="number-cell">{money(item.price * item.quantity)}</td>
             </tr>

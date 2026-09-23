@@ -1,17 +1,15 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { Icon } from './Icons'
+import { loadAccReports } from '../services/accSync'
 import { logoDataUri } from '../assets/logo'
 
-const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
+import { formatMoney, formatDateTime, formatTime, toArabic, formatNumber } from '../utils.js'
+const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
+// Reports print in their own A4 or thermal 80mm document. Thermal content is
+// intentionally narrower than the Windows driver's confirmed 72.1mm limit.
 const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
-const formatDateTime = value => {
-  if (!value) return '—'
-  const d = new Date(value)
-  const datePart = d.toLocaleDateString('en-CA')
-  const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-  return `${datePart} ${timePart}`
-}
+
 const formatDate = value => formatDateTime(value)
 
 const a4PrintStyles = `
@@ -43,7 +41,7 @@ const thermalComprehensiveStyles = `
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; min-height: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
@@ -61,6 +59,7 @@ const thermalComprehensiveStyles = `
   .summary-highlight td, tr.summary-highlight td { font-size: 12pt !important; font-weight: 900 !important; border-top: .6mm solid #000 !important; border-bottom: .6mm solid #000 !important; }
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
+  
   .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
   .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
   .thermal-card-head { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
@@ -68,7 +67,8 @@ const thermalComprehensiveStyles = `
   .thermal-card-head .order-dt { min-width: 0; font-size: 8.5pt; font-weight: 700; color: #222; overflow-wrap: anywhere; }
   .thermal-card-body { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; font-size: 8.5pt; color: #111; margin-bottom: 1mm; }
   .thermal-card-foot { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: center; background: #fdfdfd; border-top: .2mm dashed #555; padding-top: 1mm; font-size: 10pt; font-weight: 900; color: #000; }
-  .thermal-cards-total { display: flex; justify-content: space-between; font-size: 11pt; font-weight: 900; border-top: .5mm solid #000; padding-top: 1.5mm; margin-bottom: 3mm; }
+  .thermal-cards-total { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; font-size: 11pt; font-weight: 900; border-top: .5mm solid #000; padding-top: 1.5mm; margin-bottom: 3mm; }
+
   .thermal-product-table th:first-child, .thermal-product-table td:first-child { width: 7mm; text-align: center; }
   .thermal-product-table th:nth-child(2), .thermal-product-table td:nth-child(2) { text-align: right; }
   .thermal-product-table td:last-child, .thermal-captain-table td:last-child { white-space: nowrap; }
@@ -100,19 +100,26 @@ const thermalMaterialsStyles = `
   .print-table tbody tr { break-inside: avoid; }
   .report-paper-footer { display: flex; flex-direction: column; align-items: center; gap: 1mm; padding-top: 2mm; margin-top: 3mm; border-top: .35mm solid #000; text-align: center; font-size: 9pt; font-weight: 800; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
-  .thermal-four-col th:nth-child(3) { min-width: 17mm; font-size: 8pt !important; white-space: nowrap !important; overflow-wrap: normal !important; word-break: keep-all !important; }
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 `
 
 export default function Reports({ onNavigate, session, onDirectThermalPrint, directThermalReady = false }) {
   const [reportType, setReportType] = useState(null)
+  const [remote, setRemote] = useState(null)
   
   const todayStr = new Date().toISOString().substring(0, 10)
   const [dateFrom, setDateFrom] = useState(todayStr)
   const [dateTo, setDateTo] = useState(todayStr)
   
-  const sales = useMemo(() => read('pos101.sales', []), [])
-  const expenses = useMemo(() => read('pos101.expenses', []), [])
+  useEffect(() => {
+    if (!session?.profile) return undefined
+    let active = true
+    loadAccReports().then(data => { if (active) setRemote(data) }).catch(() => {})
+    return () => { active = false }
+  }, [session])
+
+  const sales = useMemo(() => remote ? remote.sales.map(row => ({ ...row, id: row.id, createdAt: Date.parse(row.created_at || row.date) || 0, total: Number(row.total_after_discount || 0), discount: Number(row.discount_amount || 0), paymentMethod: row.payment_method, shift: row.shift_id, order: { items: row.items || [] } })) : read('pos101.sales', []), [remote])
+  const expenses = useMemo(() => remote ? remote.expenses.map(row => ({ ...row, date: Date.parse(row.date || row.created_at) || 0, amount: Number(row.amount || 0), shift: row.shift_id, notes: row.description })) : read('pos101.expenses', []), [remote])
 
   const startMs = new Date(dateFrom).setHours(0, 0, 0, 0)
   const endMs = new Date(dateTo).setHours(23, 59, 59, 999)
@@ -129,13 +136,18 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
     const paper = document.querySelector('.report-paper')
     if (!paper) return
 
+    // Opening the window in the click handler avoids popup blocking.  Copying
+    // already-rendered markup preserves React's escaped local data safely.
     const printWindow = window.open('', '_blank')
     if (!printWindow) {
       window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
       return
     }
-    printWindow.document.open()
+    // Keep the print document same-origin and give Chrome a meaningful URL.
+    // If Headers and footers are accidentally enabled, this avoids printing
+    // `about:blank` while the user can still disable them in the dialog.
     try { printWindow.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}#print-report`) } catch {}
+    printWindow.document.open()
     const isA4 = format === 'a4'
     const isMaterials = reportType === 'materials'
     const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
@@ -169,12 +181,9 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
     <div className="reports-container" dir="rtl">
       <div className="reports-sidebar">
         <div className="date-filter">
-          <label>من تاريخ:
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          </label>
-          <label>إلى تاريخ:
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          </label>
+          <h3>اختيار المدة</h3>
+          <label>من تاريخ<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} /></label>
+          <label>إلى تاريخ<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} /></label>
         </div>
       </div>
       
@@ -247,7 +256,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
         <h3>تفاصيل عمليات البيع</h3>
         <div className="thermal-cards-list">
           {sList.map((sale, index) => (
-            <div className="thermal-sale-card" key={sale.id || `${sale.orderNumber}-${sale.createdAt}`}>
+            <div className="thermal-sale-card" key={sale.id || `${toArabic(sale.orderNumber)}-${sale.createdAt}`}>
               <div className="thermal-card-head">
                 <b className="order-no">طلب #{sale.orderNumber || index + 1}</b>
                 <span className="order-dt" dir="ltr">{formatDateTime(sale.createdAt)}</span>
@@ -264,7 +273,10 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           ))}
           {!sList.length && <div className="thermal-sale-card empty">لا توجد مبيعات ضمن الفترة المحددة</div>}
         </div>
-        <div className="thermal-cards-total"><span>إجمالي عمليات البيع</span><b dir="ltr">{format(sList.reduce((sum, sale) => sum + Number(sale.total || 0), 0))}</b></div>
+        <div className="thermal-cards-total">
+          <span>إجمالي عمليات البيع</span>
+          <b dir="ltr">{format(sList.reduce((sum, sale) => sum + Number(sale.total || 0), 0))}</b>
+        </div>
       </section>
     )
 
@@ -303,7 +315,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <thead><tr><th>الاسم</th><th>الطلبات</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {[...captains.entries()].map(([name, row]) => <tr key={name}><td>{name}</td><td>{row.count}</td><td>{format(row.total)}</td></tr>)}
-            {!captains.size && <tr><td colSpan="3">لا توجد تفاصيل كاشير ضمن الفترة المحددة</td></tr>}
+            {!captains.size && <tr><td colSpan="3">لا توجد مبيعات ضمن الفترة المحددة</td></tr>}
           </tbody>
         </table>
       </section>
@@ -313,15 +325,15 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
       const expensesTotal = filteredExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
-      const totalRevenue = stats.net
-      const netProfit = totalRevenue - expensesTotal
+      const totalRevenue = filteredSales.reduce((sum, s) => sum + Number(s.total || 0), 0)
+      const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const netBalance = totalRevenue - expensesTotal
 
-      // Product sales details map
+      // Aggregate products sold
       const productMap = new Map()
       filteredSales.forEach(sale => {
-        const sItems = sale.items || sale.order?.items || []
-        sItems.forEach(item => {
+        const saleItems = sale.items || sale.order?.items || []
+        saleItems.forEach(item => {
           const row = productMap.get(item.name) || { quantity: 0, total: 0 }
           row.quantity += Number(item.quantity || 0)
           row.total += Number(item.quantity || 0) * Number(item.price || 0)
@@ -340,9 +352,9 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
             <tr><td>إجمالي المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
             <tr><td>إجمالي الإيرادات</td><td className="number-cell">{format(totalRevenue)}</td></tr>
             <tr><td>إجمالي الخصم</td><td className="number-cell">{format(stats.discounts)}</td></tr>
-            <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(0)}</td></tr>
+            <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(totalServiceCharge)}</td></tr>
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
-            <tr className="summary-highlight"><td>صافي البيع</td><td className="number-cell">{format(netProfit > 0 ? netProfit : 0)}</td></tr>
+            <tr className="summary-highlight"><td>صافي البيع</td><td className="number-cell">{format(totalRevenue)}</td></tr>
             <tr className="summary-negative"><td>صافي الوارد</td><td className="number-cell">{format(netBalance < 0 ? netBalance : -1 * (expensesTotal - totalRevenue > 0 ? expensesTotal - totalRevenue : 0))}</td></tr>
           </tbody>
         </table>
@@ -424,7 +436,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       const totalAmt = list.reduce((sum, item) => sum + item[1].total, 0)
       
       content = (
-        <table className="print-table thermal-product-table">
+        <table className="print-table">
           <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {list.map(([name, data], idx) => (
@@ -508,7 +520,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       <div className="report-view-container" dir="rtl">
         <div className="report-view-header non-printable">
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
-          <div className="report-print-actions">
+          <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>
             <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4</button>
             <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
             <button className="outline-btn" type="button" disabled={!directThermalReady} onClick={printReportDirect} title={directThermalReady ? 'إرسال ESC/POS إلى الخدمة المحلية' : 'فعّل الخدمة المحلية وتحقق من الطابعة أولاً'}><Icon name="printer" size={20} /> طباعة حرارية مباشرة</button>

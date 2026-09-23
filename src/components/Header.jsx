@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
+import { formatTime, formatDate, toArabic } from '../utils.js'
 
 const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
 
@@ -15,8 +16,8 @@ function useLiveClock() {
 export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate }) {
   const now = useLiveClock()
 
-  const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })
-  const dateStr = now.toLocaleDateString('ar-IQ', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
+  const dateStr = formatDate(now, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
   return (
     <header className="app-header">
@@ -61,7 +62,7 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
             <button className="header-btn outline-btn" onClick={onOpenOrders}>
               <Icon name="receipt" size={20} />
               <span>الطلبات المفتوحة</span>
-              <span className="badge">{openOrdersCount}</span>
+              <span className="badge">{toArabic(openOrdersCount)}</span>
             </button>
           </>
         )}

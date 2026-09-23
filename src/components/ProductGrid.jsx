@@ -1,5 +1,6 @@
 import { Icon } from './Icons'
 import { productNames } from '../data/menu'
+import { formatNumber, toArabic } from '../utils.js'
 
 // Mapping categories to icons
 const getCategoryIcon = (category) => {
@@ -32,9 +33,9 @@ export default function ProductGrid({
                 key={o.id} 
                 className={activeOrderIndex === i ? 'active' : ''}
               >
-                <span>طلب {o.id}</span>
-                {o.table && <small>طاولة {o.table}</small>}
-                {o.items.length > 0 && <i>{o.items.reduce((s, x) => s + x.quantity, 0)}</i>}
+                <span>طلب {toArabic(o.id)}</span>
+                {o.table && <small>طاولة {toArabic(o.table)}</small>}
+                {o.items.length > 0 && <i>{toArabic(o.items.reduce((s, x) => s + x.quantity, 0))}</i>}
               </button>
             ))}
             <button className="quick-add" onClick={() => session && onNewOrder()} aria-label="فتح مساحة طلب جديدة">
@@ -82,7 +83,7 @@ export default function ProductGrid({
                 <b className="p-name">{names.arabic}</b>
                 {names.english && <small className="p-eng">{names.english}</small>}
                 <div className="p-price">
-                  <span>{p.price ? p.price.toLocaleString() : '—'}</span>
+                  <span>{p.price ? formatNumber(p.price) : '—'}</span>
                   {p.price && <small>د.ع</small>}
                 </div>
               </div>

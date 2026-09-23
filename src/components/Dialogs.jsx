@@ -3,7 +3,8 @@ import { Icon } from './Icons'
 import { productNames } from '../data/menu'
 import { logoDataUri } from '../assets/logo'
 
-const format = value => `${Number(value || 0).toLocaleString('ar-IQ')} د.ع`
+import { formatMoney, formatNumber, formatDate, formatTime, formatDateTime, toArabic } from '../utils.js'
+const format = formatMoney
 
 /* ── Product Options ── */
 export function ProductOptions({ product, onClose, onAdd }) {
@@ -60,7 +61,7 @@ export function ProductOptions({ product, onClose, onAdd }) {
         <span className="quantity-label">الكمية</span>
         <div className="quantity">
           <button onClick={() => setQuantity(Math.max(1, quantity - 1))}><Icon name="minus" size={15} /></button>
-          <b>{quantity}</b>
+          <b>{toArabic(quantity)}</b>
           <button onClick={() => setQuantity(quantity + 1)}><Icon name="plus" size={15} /></button>
         </div>
         <button className="primary-action" onClick={() => onAdd({
@@ -108,7 +109,7 @@ export function TableSelection({ onClose, onChoose, orders = [] }) {
           return (
             <button disabled={occupied} className={occupied ? 'busy' : 'free'} onClick={() => onChoose(i + 1)} key={i}>
               <Icon name="table" size={25} />
-              <b>{i + 1}</b>
+              <b>{toArabic(i + 1)}</b>
               <small>{occupied ? 'مشغولة' : 'فارغة'}</small>
             </button>
           )
@@ -126,12 +127,12 @@ export function TableSelection({ onClose, onChoose, orders = [] }) {
 export function Payment({ total, onClose, onSuccess }) {
   const [processing, setProcessing] = React.useState(false)
   const [error, setError] = React.useState('')
-  const choose = method => {
+  const choose = async method => {
     if (processing) return
     setProcessing(true)
     setError('')
     try {
-      if (onSuccess({ method, received: 0, change: 0 }) === false) throw new Error('SALE_FAILED')
+      if (await onSuccess({ method, received: 0, change: 0 }) === false) throw new Error('SALE_FAILED')
     } catch {
       setProcessing(false)
       setError('تعذر حفظ البيع. بقي الطلب الحالي كما هو، حاول مرة أخرى.')
@@ -285,7 +286,7 @@ export function OpenOrders({ orders, onClose, onSelect, onHistory }) {
           const type = o.table ? `داخل الكوفي — طاولة ${o.table}` : o.orderType || 'غير محدد'
           return <article className="open-order" key={o.id}>
             <div className="open-order-main"><b dir="ltr">{o.sale?.orderNumber ? `#${o.sale.orderNumber}` : o.name}</b><em className={o.held ? 'held' : ''}>{o.completed ? 'مكتمل' : o.held ? 'معلق' : 'مفتوح'}</em></div>
-            <dl><div><dt>نوع الطلب</dt><dd>{type}</dd></div><div><dt>عدد الأصناف</dt><dd dir="ltr">{items.reduce((sum, item) => sum + item.quantity, 0)}</dd></div><div><dt>الإجمالي</dt><dd dir="ltr">{format(orderTotal)}</dd></div></dl>
+            <dl><div><dt>نوع الطلب</dt><dd>{type}</dd></div><div><dt>عدد الأصناف</dt><dd dir="ltr">{toArabic(items.reduce((sum, item) => sum + item.quantity, 0))}</dd></div><div><dt>الإجمالي</dt><dd dir="ltr">{format(orderTotal)}</dd></div></dl>
             <button type="button" onClick={() => o.completed ? onHistory(o) : onSelect(o.id)}>{o.completed ? 'عرض التفاصيل' : 'استئناف الطلب'}</button>
           </article>
         })}
@@ -302,12 +303,12 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
   return (
     <Dialog onClose={onClose} className="history-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
-      <p>فاتورة مكتملة <b>#{order?.sale?.orderNumber || '—'}</b></p>
+      <p>فاتورة مكتملة <b>#{order?.sale?.orderNumber ? toArabic(order.sale.orderNumber) : '—'}</b></p>
       <h2>تفاصيل الطلب وسجل التعديلات</h2>
       <div className="history-lines">
         {items.map(i => (
           <div key={i.lineId}>
-            <span>{i.name} × {i.quantity}</span>
+            <span>{i.name} × {toArabic(i.quantity)}</span>
             <b>{format(i.price * i.quantity)}</b>
           </div>
         ))}
@@ -320,7 +321,7 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
         {adjustments.map(a => (
           <div key={a.id}>
             <i /><b>{a.type === 'refund' ? 'إرجاع' : 'إضافة'}</b>
-            <span>{a.product} × {a.quantity} — {format(a.amount)} {a.reason && `— ${a.reason}`}</span>
+            <span>{a.product} × {toArabic(a.quantity)} — {format(a.amount)} {a.reason && `— ${a.reason}`}</span>
           </div>
         ))}
       </div>
@@ -350,8 +351,8 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
       <div className="dialog-heading"><h2>إرجاع بيع</h2><p>يسجل الإرجاع كتعديل مستقل ولا يحذف البيع الأصلي.</p></div>
       <section className="return-original" aria-label="معلومات البيع الأصلي">
         <div className="section-title">البيع الأصلي</div>
-        <div className="return-meta"><span>رقم الطلب <b dir="ltr">{sale?.orderNumber ? `#${sale.orderNumber}` : '—'}</b></span><span>التاريخ والوقت <b dir="ltr">{sale?.createdAt ? new Date(sale.createdAt).toLocaleString('ar-IQ') : 'غير متوفر'}</b></span></div>
-        <div className="return-items">{items.map(i => <div key={i.lineId}><span>{i.name}</span><b dir="ltr">{i.quantity} × {format(i.price)}</b></div>)}</div>
+        <div className="return-meta"><span>رقم الطلب <b dir="ltr">{sale?.orderNumber ? `#${toArabic(sale.orderNumber)}` : '—'}</b></span><span>التاريخ والوقت <b dir="ltr">{sale?.createdAt ? formatDateTime(sale.createdAt) : 'غير متوفر'}</b></span></div>
+        <div className="return-items">{items.map(i => <div key={i.lineId}><span>{i.name}</span><b dir="ltr">{toArabic(i.quantity)} × {format(i.price)}</b></div>)}</div>
       </section>
       <section className="return-controls" aria-label="تفاصيل الإرجاع">
         <div className="section-title">تفاصيل الإرجاع</div>
@@ -379,15 +380,19 @@ export function Receipt({ sale }) {
   if (!sale) return null
   const logoSrc = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
   const order = sale.order || {}
-  const items = order.items?.length ? order.items : sale.items || []
+  const items = order.items || sale.items || []
   const subtotal = Number(sale.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0))
   const discount = Number(sale.discount || 0)
   const service = Number(sale.service || 0)
   const total = Number(sale.total ?? Math.max(0, subtotal - discount))
   const cashier = sale.seller || sale.cashierNameSnapshot || ''
   const orderType = order.orderType || sale.orderType || 'صالة'
-  const paymentMethod = sale.paymentMethod === 'electronic' ? 'إلكتروني' : sale.paymentMethod === 'cash' ? 'نقدي' : sale.paymentMethod || 'غير محدد'
   const orderNumber = sale.orderNumber || order.orderNumber || ''
+  const received = sale.payment?.received
+  const change = sale.payment?.change
+
+
+
   return (
     <div className="receipt-sheet" dir="rtl">
       <div className="receipt-logo-wrap">
@@ -397,15 +402,14 @@ export function Receipt({ sale }) {
       <div className="receipt-divider" />
       <h1 className="receipt-title">فاتورة بيع</h1>
       <div className="receipt-meta">
-        {orderNumber ? <p className="receipt-order-number"><span>رقم الطلب :</span><b dir="ltr">#{orderNumber}</b></p> : null}
-        <p><span>التاريخ :</span><b dir="ltr">{new Date(sale.createdAt).toLocaleDateString('en-CA')}</b></p>
-        <p><span>الوقت :</span><b dir="ltr">{new Date(sale.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</b></p>
+        {orderNumber ? <p className="receipt-order-number"><span>رقم الطلب :</span><b dir="ltr">#{toArabic(orderNumber)}</b></p> : null}
+        <p><span>التاريخ :</span><b dir="ltr">{toArabic(new Date(sale.createdAt).toLocaleDateString('en-CA'))}</b></p>
+        <p><span>الوقت :</span><b dir="ltr">{toArabic(new Date(sale.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }))}</b></p>
       </div>
       <div className="receipt-divider-dashed" />
       <div className="receipt-meta">
         {cashier && <p><span>الكاشير :</span><b>{cashier}</b></p>}
         <p><span>نوع الطلب :</span><b>{orderType}</b></p>
-        <p><span>طريقة الدفع :</span><b>{paymentMethod}</b></p>
       </div>
       <section className="receipt-items">
         <div className="receipt-items-head receipt-table-head">
@@ -415,24 +419,30 @@ export function Receipt({ sale }) {
         {items.map((i, index) => (
           <div className="receipt-item-row receipt-line" key={i.lineId || i.id || `${i.name}-${index}`}>
             <div className="receipt-item-name-line">
-              <span className="receipt-item-idx">{index + 1}.</span>
+              <span className="receipt-item-idx">{toArabic(index + 1)}.</span>
               <span className="receipt-item-name">{i.name}</span>
             </div>
             <div className="receipt-item-details-line">
-              <span className="receipt-item-calc" dir="ltr">{i.quantity} × {format(i.price)}</span>
-              <b className="receipt-item-subtotal" dir="ltr">{format(i.price * i.quantity)}</b>
+              <span className="receipt-item-calc" dir="ltr">{toArabic(i.quantity)} × {toArabic(format(i.price))}</span>
+              <b className="receipt-item-subtotal" dir="ltr">{toArabic(format(i.price * i.quantity))}</b>
             </div>
           </div>
         ))}
       </section>
       <div className="receipt-subtotals">
-        <p><span>إجمالي المبلغ :</span><b dir="ltr">{format(subtotal)}</b></p>
-        <p><span>الخصم :</span><b dir="ltr">{format(discount)}</b></p>
-        <p><span>الخدمة :</span><b dir="ltr">{format(service)}</b></p>
+        <p><span>إجمالي المبلغ :</span><b dir="ltr">{toArabic(format(subtotal))}</b></p>
+        <p><span>الخصم :</span><b dir="ltr">{toArabic(format(discount))}</b></p>
+        <p><span>الخدمة :</span><b dir="ltr">{toArabic(format(service))}</b></p>
       </div>
       <div className="receipt-total">
-        <span>المبلغ الصافي:</span><b dir="ltr">{format(total)}</b>
+        <span>المبلغ الصافي:</span><b dir="ltr">{toArabic(format(total))}</b>
       </div>
+      {received !== undefined && (
+        <div className="receipt-subtotals" style={{ marginTop: '4px', borderTop: 'none', paddingTop: 0 }}>
+          <p><span>المبلغ المستلم :</span><b dir="ltr">{toArabic(format(received))}</b></p>
+          <p><span>الباقي :</span><b dir="ltr">{toArabic(format(change || 0))}</b></p>
+        </div>
+      )}
       <div className="receipt-divider" />
       <p className="receipt-thanks">شكراً لزيارتكم</p>
       <p className="receipt-venue">ننتظركم دائمًا في 101 COFFEE HOUSE ❤</p>
@@ -449,21 +459,29 @@ export function Receipt({ sale }) {
 /* ── Shift Login ── */
 export function ShiftLogin({ shifts, onClose, onLogin }) {
   const [shiftId, setShiftId] = React.useState(shifts[0]?.shiftId || '')
+  const [email, setEmail] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [error, setError] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
   const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
 
-  const submit = e => {
+  const submit = async e => {
     e.preventDefault()
+    setError('')
     const shift = shifts.find(c => c.shiftId === shiftId)
     if (!shift) return
-    onLogin(shift)
+    setBusy(true)
+    try { await onLogin({ ...shift, email, password }) } catch (err) { setError(err?.message || 'تعذر تسجيل الدخول.') } finally { setBusy(false) }
   }
 
   return (
     <Dialog onClose={onClose} className="cashier-login">
       <img src={logoUrl} alt="101 COFFEE HOUSE" style={{ maxHeight: '100px', objectFit: 'contain', marginBottom: '1rem' }} />
-      <h2>اختيار الوردية</h2>
-      <form onSubmit={submit}>
-        <label>
+       <h2>دخول الكاشير والوردية</h2>
+       <form onSubmit={submit}>
+         <label>البريد الإلكتروني<input type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" /></label>
+         <label>كلمة المرور<input type="password" required value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>
+         <label>
           الوردية
           <select value={shiftId} onChange={e => setShiftId(e.target.value)}>
             {shifts.map(c => (
@@ -471,7 +489,8 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
             ))}
           </select>
         </label>
-        <button className="primary-action" type="submit">دخول</button>
+         {error && <p className="form-error" role="alert">{error}</p>}
+         <button className="primary-action" type="submit" disabled={busy}>{busy ? 'جارٍ التحقق…' : 'دخول'}</button>
       </form>
     </Dialog>
   )
@@ -480,15 +499,26 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
 /* ── Seller Selection ── */
 export function SellerSelection({ onClose, onSelect }) {
   const sellers = ['علي', 'روان', 'محمد', 'ميس']
+  const [busy, setBusy] = React.useState(false)
+  const choose = async name => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const result = await onSelect(name)
+      if (result === false) setBusy(false)
+    } catch {
+      setBusy(false)
+    }
+  }
   return (
     <Dialog onClose={onClose} className="type-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <h2>اختر اسم الكابتن</h2>
       <div className="type-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
         {sellers.map(name => (
-          <button onClick={() => onSelect(name)} key={name}>
+          <button disabled={busy} onClick={() => choose(name)} key={name}>
             <span><Icon name="user" size={27} /></span>
-            <b>{name}</b>
+            <b>{busy ? 'جارٍ الحفظ…' : name}</b>
           </button>
         ))}
       </div>
@@ -501,7 +531,7 @@ export function CashierMenu({ session, onClose, onLogout }) {
   return (
     <Dialog onClose={onClose} className="cashier-menu">
       <h2>{session.shiftName}</h2>
-      <p>الوردية مفتوحة منذ {new Date(session.openedAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</p>
+      <p>الوردية مفتوحة منذ {formatTime(session.openedAt, { hour: '2-digit', minute: '2-digit' })}</p>
       <button className="primary-action" onClick={onLogout}>إغلاق الوردية وتسجيل الخروج</button>
     </Dialog>
   )

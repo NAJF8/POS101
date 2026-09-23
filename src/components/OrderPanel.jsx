@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Icon } from './Icons'
+import { formatNumber, toArabic } from '../utils.js'
 import { productNames } from '../data/menu'
 
 export default function OrderPanel({ 
@@ -48,7 +49,7 @@ export default function OrderPanel({
             order.items.map((item, index) => {
               const names = productNames(item)
               return <div key={item.lineId} className="cart-item">
-                <div className="i-num">{index + 1}</div>
+                <div className="i-num">{toArabic(index + 1)}</div>
                 <div className="i-prod">
                   <div className="i-prod-img">
                     {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img"></div>}
@@ -64,11 +65,11 @@ export default function OrderPanel({
                 </div>
                 <div className="qty-ctrl">
                   <button onClick={() => updateQuantity(item.lineId, -1)}><Icon name="minus" size={14}/></button>
-                  <span>{item.quantity}</span>
+                  <span>{toArabic(item.quantity)}</span>
                   <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={14}/></button>
                 </div>
                 <div className="i-total">
-                  <span>{(item.price * item.quantity).toLocaleString()}</span>
+                  <span>{formatNumber(item.price * item.quantity)}</span>
                   <small>د.ع</small>
                 </div>
                 <div className="i-actions">
@@ -94,16 +95,16 @@ export default function OrderPanel({
         <div className="totals-box">
           <div className="total-line">
             <span className="label">المجموع الفرعي</span>
-            <span>{subtotal.toLocaleString()} <small>د.ع</small></span>
+            <span>{formatNumber(subtotal)} <small>د.ع</small></span>
           </div>
           <div className="total-line discount-val">
             <span className="label">الخصم</span>
-            <span>{discountVal.toLocaleString()} <small>د.ع</small></span>
+            <span>{formatNumber(discountVal)} <small>د.ع</small></span>
           </div>
           <div className="divider" />
           <div className="grand-total">
             <span className="label">الإجمالي</span>
-            <span className="amount">{total.toLocaleString()} <small>د.ع</small></span>
+            <span className="amount">{formatNumber(total)} <small>د.ع</small></span>
           </div>
         </div>
 
