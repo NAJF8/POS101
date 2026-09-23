@@ -1,9 +1,0 @@
-{
-  "name": "101-pos",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build && node scripts/finalize-dist.cjs", "preview": "vite preview" },
-  "dependencies": { "@vitejs/plugin-react": "latest", "vite": "latest", "react": "latest", "react-dom": "latest" },
-  "devDependencies": {}
-}
