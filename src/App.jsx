@@ -82,7 +82,16 @@ export default function App() {
           await withSyncTimeout(saveAccSale(entry.sale, session.profile))
           const sales = read('pos101.sales', [])
           localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
-        } catch { remaining.push(entry) }
+        } catch (error) {
+          if (transientSyncError(error)) {
+            remaining.push(entry)
+          } else {
+            // Permanent failure during retry
+            const sales = read('pos101.sales', [])
+            localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'failed', syncError: String(error?.message || error) } : row)))
+            console.error('Permanent sync failure in queue:', error)
+          }
+        }
       }
       localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(remaining))
       setSyncNotice(remaining.length ? { status: 'pending', count: remaining.length } : { status: 'synced', count: queued.length })
@@ -144,7 +153,7 @@ export default function App() {
   useEffect(() => { void refreshThermalStatus(printerSettings) }, [printerSettings.serviceUrl, printerSettings.token, refreshThermalStatus])
 
   const [pendingPayment, setPendingPayment] = useState(null)
-  
+
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o)) : o)), [active])
   const addProduct = useCallback(p => {
@@ -191,7 +200,7 @@ export default function App() {
 
   const finalizeSale = useCallback(async (sellerName) => {
     if (!session || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
-    if (!isAccConfigured()) { window.alert('هذا البناء غير مربوط بـ ACC-101. أعد بناء POS بإعدادات Firebase.'); return false }
+
     saleInFlight.current = true
     const payment = pendingPayment
     const originalItems = activeOrder.items.map(i => ({ ...i }))
@@ -199,6 +208,7 @@ export default function App() {
     // retry this exact sale, including after a page refresh.
     const stableSaleId = activeOrder.saleId || crypto.randomUUID()
     if (!activeOrder.saleId) setOrders(v => v.map((o, i) => i === active ? { ...o, saleId: stableSaleId } : o))
+
     const sale = {
       saleId: stableSaleId,
       id: stableSaleId,
@@ -217,48 +227,61 @@ export default function App() {
       items: originalItems,
       order: { ...activeOrder, items: originalItems }
     }
-    let mappedItems = null
+
+    // 1. Optimistic Local Save & Cart Clear (POS continues selling)
+    setNextNumber(n => n + 1)
+    setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
+    if (autoPrint || payment.forcePrint) void requestSalePrint(sale)
+    setPendingPayment(null)
+    window.setTimeout(() => setModal(null), 350)
+
+    // 2. Try ACC Sync
+    let mappedItems = sale.items
     try {
+      if (!isAccConfigured()) {
+        const localSale = { ...sale, status: 'disabled' }
+        localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), localSale]))
+        return true
+      }
+
       mappedItems = originalItems.map(item => {
         // Keep a previously loaded ACC identity usable after a page reload
-        // while the live catalog is temporarily unavailable. The server still
-        // remains the authority when the queued operation is flushed.
+        // while the live catalog is temporarily unavailable.
         const remote = accProducts.find(p => String(p.id) === String(item.accProductId || item.product_id || item.id)) || (item.accProductId ? item : null)
         if (!remote) throw new Error(`الصنف غير مربوط في ACC-101: ${item.name}`)
         return { ...item, accProductId: remote.id, product_id: remote.id, name: remote.name, english: remote.english, price: Number(item.price) }
       })
+
       const pendingSale = { ...sale, items: mappedItems, status: 'pending_sync' }
       const queuedBeforeSend = read(SYNC_QUEUE_KEY, [])
       localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...queuedBeforeSend.filter(entry => entry.sale?.saleId !== sale.saleId), { sale: pendingSale, queuedAt: Date.now() }]))
       localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), pendingSale]))
+
       const syncedSale = { ...sale, items: mappedItems, status: 'synced', syncConfirmedAt: Date.now() }
       await withSyncTimeout(saveAccSale(syncedSale, session.profile))
+
       const localSales = read('pos101.sales', [])
       localStorage.setItem('pos101.sales', JSON.stringify([...localSales.filter(row => row.saleId !== sale.saleId), syncedSale]))
       localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(read(SYNC_QUEUE_KEY, []).filter(entry => entry.sale?.saleId !== sale.saleId)))
-      setNextNumber(n => n + 1)
-      setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-      if (autoPrint || payment.forcePrint) void requestSalePrint(sale)
-      setPendingPayment(null)
-      window.setTimeout(() => setModal(null), 350)
       return true
+
     } catch (error) {
       if (transientSyncError(error)) {
         const queued = read(SYNC_QUEUE_KEY, [])
         const queuedSale = { ...sale, items: mappedItems, status: 'pending_sync' }
         localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...queued.filter(entry => entry.sale?.saleId !== sale.saleId), { sale: queuedSale, queuedAt: Date.now() }]))
         localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), queuedSale]))
-        setNextNumber(n => n + 1)
-        setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-        setPendingPayment(null)
         setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
-        setModal(null)
         return true
       }
-      localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), { ...sale, items: mappedItems || sale.items, status: 'failed', syncError: String(error?.message || error) }]))
+
+      // Permanent failure (e.g. item not linked in ACC)
+      localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), { ...sale, items: mappedItems, status: 'failed', syncError: String(error?.message || error) }]))
       localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(read(SYNC_QUEUE_KEY, []).filter(entry => entry.sale?.saleId !== sale.saleId)))
-      window.alert(error?.message || 'تعذر حفظ البيع في ACC-101. لم يتم تفريغ السلة.')
-      return false
+      console.error('ACC Sync Failed:', error)
+      // Do not block or alert to keep POS functional.
+      return true
+
     } finally {
       window.setTimeout(() => { saleInFlight.current = false }, 350)
     }
@@ -270,7 +293,7 @@ export default function App() {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
       if (e.key === 'Escape') { setModal(null); return }
       if (!session) return
-      
+
       // F6: Direct Sell + Print
       if (e.key === 'F6') {
         e.preventDefault()
@@ -278,7 +301,7 @@ export default function App() {
           initiateComplete({ method: 'cash', received: total, change: 0, forcePrint: true })
         }
       }
-      
+
       if (e.key === 'F7') { e.preventDefault(); activeOrder.items.length ? setModal('quickCash') : window.alert('أضف منتجًا أولًا قبل الدفع السريع') }
       if (e.key === 'F8') { e.preventDefault(); /* Unassigned */ }
       if (e.key === 'F9') { e.preventDefault(); hold() }
@@ -414,10 +437,10 @@ export default function App() {
         </div>
       )}
       {session && (
-        <Header 
-          session={session} 
-          onOpenOrders={() => setModal('openOrders')} 
-          onCashierMenu={() => setModal('cashier-menu')} 
+        <Header
+          session={session}
+          onOpenOrders={() => setModal('openOrders')}
+          onCashierMenu={() => setModal('cashier-menu')}
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           currentView={currentView}
