@@ -52,7 +52,7 @@ const ensureConfigured = () => {
 }
 
 const cleanKey = value => String(value || '').split('').map(character => '.#$[]/'.includes(character) ? '_' : character).join('')
-const todayBaghdad = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date())
+const todayBaghdad = () => new Intl.DateTimeFormat('en-CA', { numberingSystem: 'latn', timeZone: 'Asia/Baghdad' }).format(new Date())
 const monthOf = date => String(date || todayBaghdad()).slice(0, 7)
 const normalize = value => String(value || '').trim().toLowerCase().replace(/[┘ï┘î┘ì┘Ä┘Å┘É┘æ┘Æ┘Ç]/g, '').replace(/[╪Ñ╪ú╪ó]/g, '╪º').replace(/┘ë/g, '┘è').replace(/\s+/g, ' ')
 const values = snapshot => snapshot.exists() ? Object.entries(snapshot.val()).map(([id, value]) => ({ id, ...value })) : []

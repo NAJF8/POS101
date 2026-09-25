@@ -1,6 +1,6 @@
 import { Icon } from './Icons'
 import { productNames } from '../data/menu'
-import { formatNumber, toArabic } from '../utils.js'
+import { formatNumber } from '../utils.js'
 
 // Mapping categories to icons
 const getCategoryIcon = (category) => {
@@ -33,9 +33,9 @@ export default function ProductGrid({
                 key={o.id} 
                 className={activeOrderIndex === i ? 'active' : ''}
               >
-                <span>طلب {toArabic(o.id)}</span>
-                {o.table && <small>طاولة {toArabic(o.table)}</small>}
-                {o.items.length > 0 && <i>{toArabic(o.items.reduce((s, x) => s + x.quantity, 0))}</i>}
+                <span>طلب {formatNumber(o.id)}</span>
+                {o.table && <small>طاولة {formatNumber(o.table)}</small>}
+                {o.items.length > 0 && <i>{formatNumber(o.items.reduce((s, x) => s + x.quantity, 0))}</i>}
               </button>
             ))}
             <button className="quick-add" onClick={() => session && onNewOrder()} aria-label="فتح مساحة طلب جديدة">

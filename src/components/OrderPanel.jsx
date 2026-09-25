@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Icon } from './Icons'
-import { formatNumber, toArabic } from '../utils.js'
+import { formatNumber } from '../utils.js'
 import { productNames } from '../data/menu'
 
 export default function OrderPanel({ 
@@ -49,7 +49,7 @@ export default function OrderPanel({
             order.items.map((item, index) => {
               const names = productNames(item)
               return <div key={item.lineId} className="cart-item">
-                <div className="i-num">{toArabic(index + 1)}</div>
+                <div className="i-num">{formatNumber(index + 1)}</div>
                 <div className="i-prod">
                   <div className="i-prod-img">
                     {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img"></div>}
@@ -60,12 +60,12 @@ export default function OrderPanel({
                   </div>
                 </div>
                 <div className="i-price">
-                  <span>{item.price != null ? item.price.toLocaleString() : '—'}</span>
+                  <span>{item.price != null ? formatNumber(item.price) : '—'}</span>
                   {item.price != null && <small>د.ع</small>}
                 </div>
                 <div className="qty-ctrl">
                   <button onClick={() => updateQuantity(item.lineId, -1)}><Icon name="minus" size={14}/></button>
-                  <span>{toArabic(item.quantity)}</span>
+                  <span>{formatNumber(item.quantity)}</span>
                   <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={14}/></button>
                 </div>
                 <div className="i-total">

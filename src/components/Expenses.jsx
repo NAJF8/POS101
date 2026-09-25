@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { saveAccExpense } from '../services/accSync'
-import { formatMoney, formatDateTime, toArabic } from '../utils.js'
+import { formatMoney, formatDateTime } from '../utils.js'
 
 const STORAGE_KEY = 'pos101.expenses'
 const format = formatMoney

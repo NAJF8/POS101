@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
-import { formatTime, formatDate, toArabic } from '../utils.js'
+import { formatTime, formatDate, formatNumber } from '../utils.js'
 
 const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
 
@@ -62,7 +62,7 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
             <button className="header-btn outline-btn" onClick={onOpenOrders}>
               <Icon name="receipt" size={20} />
               <span>الطلبات المفتوحة</span>
-              <span className="badge">{toArabic(openOrdersCount)}</span>
+              <span className="badge">{formatNumber(openOrdersCount)}</span>
             </button>
           </>
         )}

@@ -3,7 +3,7 @@ import { Icon } from './Icons'
 import { loadAccReports } from '../services/accSync'
 import { logoDataUri } from '../assets/logo'
 
-import { formatMoney, formatDateTime, formatTime, toArabic, formatNumber } from '../utils.js'
+import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -256,9 +256,9 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
         <h3>تفاصيل عمليات البيع</h3>
         <div className="thermal-cards-list">
           {sList.map((sale, index) => (
-            <div className="thermal-sale-card" key={sale.id || `${toArabic(sale.orderNumber)}-${sale.createdAt}`}>
+            <div className="thermal-sale-card" key={sale.id || `${formatNumber(sale.orderNumber)}-${sale.createdAt}`}>
               <div className="thermal-card-head">
-                <b className="order-no">طلب #{sale.orderNumber || index + 1}</b>
+                <b className="order-no">طلب #{formatNumber(sale.orderNumber || index + 1)}</b>
                 <span className="order-dt" dir="ltr">{formatDateTime(sale.createdAt)}</span>
               </div>
               <div className="thermal-card-body">
@@ -293,7 +293,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
         <table className="print-table thermal-product-table">
           <thead><tr><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
           <tbody>
-            {[...products.entries()].sort((a, b) => b[1].quantity - a[1].quantity).map(([name, row]) => <tr key={name}><td>{name}</td><td>{row.quantity}</td><td>{format(row.total)}</td></tr>)}
+            {[...products.entries()].sort((a, b) => b[1].quantity - a[1].quantity).map(([name, row]) => <tr key={name}><td>{name}</td><td>{formatNumber(row.quantity)}</td><td>{format(row.total)}</td></tr>)}
             {!products.size && <tr><td colSpan="3">لا توجد تفاصيل مواد ضمن الفترة المحددة</td></tr>}
           </tbody>
         </table>
@@ -314,7 +314,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
         <table className="print-table thermal-captain-table">
           <thead><tr><th>الاسم</th><th>الطلبات</th><th>الإجمالي</th></tr></thead>
           <tbody>
-            {[...captains.entries()].map(([name, row]) => <tr key={name}><td>{name}</td><td>{row.count}</td><td>{format(row.total)}</td></tr>)}
+            {[...captains.entries()].map(([name, row]) => <tr key={name}><td>{name}</td><td>{formatNumber(row.count)}</td><td>{format(row.total)}</td></tr>)}
             {!captains.size && <tr><td colSpan="3">لا توجد مبيعات ضمن الفترة المحددة</td></tr>}
           </tbody>
         </table>
@@ -365,11 +365,11 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {productList.map(([name, row], idx) => (
-              <tr key={name}><td>{idx + 1}</td><td>{name}</td><td>{row.quantity}</td><td className="number-cell">{format(row.total)}</td></tr>
+              <tr key={name}><td>{formatNumber(idx + 1)}</td><td>{name}</td><td>{formatNumber(row.quantity)}</td><td className="number-cell">{format(row.total)}</td></tr>
             ))}
             {!productList.length && <tr><td colSpan="4">لا توجد مبيعات ضمن الفترة المحددة</td></tr>}
-            <tr className="summary-row"><td colSpan="2">إجمالي المبيعات</td><td>{totalProductQty}</td><td className="number-cell">{format(totalProductAmt)}</td></tr>
-            <tr className="summary-row"><td colSpan="2">إجمالي الكمية</td><td>{totalProductQty}</td><td></td></tr>
+            <tr className="summary-row"><td colSpan="2">إجمالي المبيعات</td><td>{formatNumber(totalProductQty)}</td><td className="number-cell">{format(totalProductAmt)}</td></tr>
+            <tr className="summary-row"><td colSpan="2">إجمالي الكمية</td><td>{formatNumber(totalProductQty)}</td><td></td></tr>
           </tbody>
         </table>
 
@@ -396,12 +396,12 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
               <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
               <tbody>
                 {giftList.map(([name, row], idx) => (
-                  <tr key={name}><td>{idx + 1}</td><td>{name}</td><td>{row.quantity}</td><td className="number-cell">{format(row.total)}</td></tr>
+                  <tr key={name}><td>{formatNumber(idx + 1)}</td><td>{name}</td><td>{formatNumber(row.quantity)}</td><td className="number-cell">{format(row.total)}</td></tr>
                 ))}
                 {!giftList.length && <tr><td colSpan="4">لا توجد هدايا ضمن الفترة المحددة</td></tr>}
                 {giftList.length > 0 && <>
-                  <tr className="summary-row"><td colSpan="2">إجمالي الهدايا</td><td>{giftQty}</td><td className="number-cell">{format(giftAmt)}</td></tr>
-                  <tr className="summary-row"><td colSpan="2">إجمالي الكمية</td><td>{giftQty}</td><td></td></tr>
+                  <tr className="summary-row"><td colSpan="2">إجمالي الهدايا</td><td>{formatNumber(giftQty)}</td><td className="number-cell">{format(giftAmt)}</td></tr>
+                  <tr className="summary-row"><td colSpan="2">إجمالي الكمية</td><td>{formatNumber(giftQty)}</td><td></td></tr>
                 </>}
               </tbody>
             </table>
@@ -419,7 +419,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       const eList = filteredExpenses.filter(e => e.shift === targetShift)
       const expensesTotal = eList.reduce((sum, e) => sum + Number(e.amount), 0)
       
-      content = <><table className="print-table"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{stats.count}</td></tr><tr><td>المتوسط لكل طلب</td><td>{format(stats.avg)}</td></tr></tbody></table>{thermalSalesDetails(sList)}</>
+      content = <><table className="print-table"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{formatNumber(stats.count)}</td></tr><tr><td>المتوسط لكل طلب</td><td>{format(stats.avg)}</td></tr></tbody></table>{thermalSalesDetails(sList)}</>
     } else if (reportType === 'materials') {
       title = 'تقرير المواد المباعة'
       const materials = {}
@@ -441,21 +441,21 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <tbody>
             {list.map(([name, data], idx) => (
               <tr key={name}>
-                <td>{idx + 1}</td>
+                <td>{formatNumber(idx + 1)}</td>
                 <td>{name}</td>
-                <td>{data.qty}</td>
+                <td>{formatNumber(data.qty)}</td>
                 <td>{format(data.total)}</td>
               </tr>
             ))}
             {list.length === 0 && <tr><td colSpan="4">لا توجد مبيعات</td></tr>}
             <tr className="summary-row">
               <td colSpan="2">إجمالي المبيعات</td>
-              <td>{totalQty}</td>
+              <td>{formatNumber(totalQty)}</td>
               <td>{format(totalAmt)}</td>
             </tr>
             <tr className="summary-row">
               <td colSpan="2">إجمالي الكمية</td>
-              <td>{totalQty}</td>
+              <td>{formatNumber(totalQty)}</td>
               <td></td>
             </tr>
           </tbody>
@@ -469,7 +469,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <tbody>
             {filteredExpenses.map((e, idx) => (
               <tr key={e.id}>
-                <td>{idx + 1}</td>
+                <td>{formatNumber(idx + 1)}</td>
                 <td>{e.category} - {e.notes}</td>
                 <td>{format(e.amount)}</td>
               </tr>
@@ -499,16 +499,16 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <tbody>
             {list.map(([name, data], idx) => (
               <tr key={name}>
-                <td>{idx + 1}</td>
+                <td>{formatNumber(idx + 1)}</td>
                 <td>{name}</td>
-                <td>{data.count}</td>
+                <td>{formatNumber(data.count)}</td>
                 <td>{format(data.total)}</td>
               </tr>
             ))}
             {list.length === 0 && <tr><td colSpan="4">لا توجد مبيعات</td></tr>}
             <tr style={{ fontWeight: 'bold' }}>
               <td colSpan="2">الإجمالي</td>
-              <td>{list.reduce((sum, item) => sum + item[1].count, 0)}</td>
+              <td>{formatNumber(list.reduce((sum, item) => sum + item[1].count, 0))}</td>
               <td>{format(list.reduce((sum, item) => sum + item[1].total, 0))}</td>
             </tr>
           </tbody>

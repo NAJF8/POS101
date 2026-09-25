@@ -3,7 +3,7 @@ import { Icon } from './Icons'
 import { productNames } from '../data/menu'
 import { logoDataUri } from '../assets/logo'
 
-import { formatMoney, formatNumber, formatDate, formatTime, formatDateTime, toArabic } from '../utils.js'
+import { formatMoney, formatNumber, formatDate, formatTime, formatDateTime } from '../utils.js'
 const format = formatMoney
 
 /* ── Product Options ── */
@@ -61,7 +61,7 @@ export function ProductOptions({ product, onClose, onAdd }) {
         <span className="quantity-label">الكمية</span>
         <div className="quantity">
           <button onClick={() => setQuantity(Math.max(1, quantity - 1))}><Icon name="minus" size={15} /></button>
-          <b>{toArabic(quantity)}</b>
+          <b>{formatNumber(quantity)}</b>
           <button onClick={() => setQuantity(quantity + 1)}><Icon name="plus" size={15} /></button>
         </div>
         <button className="primary-action" onClick={() => onAdd({
@@ -109,7 +109,7 @@ export function TableSelection({ onClose, onChoose, orders = [] }) {
           return (
             <button disabled={occupied} className={occupied ? 'busy' : 'free'} onClick={() => onChoose(i + 1)} key={i}>
               <Icon name="table" size={25} />
-              <b>{toArabic(i + 1)}</b>
+              <b>{formatNumber(i + 1)}</b>
               <small>{occupied ? 'مشغولة' : 'فارغة'}</small>
             </button>
           )
@@ -285,8 +285,8 @@ export function OpenOrders({ orders, onClose, onSelect, onHistory }) {
           const orderTotal = o.total || items.reduce((sum, item) => sum + item.price * item.quantity, 0)
           const type = o.table ? `داخل الكوفي — طاولة ${o.table}` : o.orderType || 'غير محدد'
           return <article className="open-order" key={o.id}>
-            <div className="open-order-main"><b dir="ltr">{o.sale?.orderNumber ? `#${o.sale.orderNumber}` : o.name}</b><em className={o.held ? 'held' : ''}>{o.completed ? 'مكتمل' : o.held ? 'معلق' : 'مفتوح'}</em></div>
-            <dl><div><dt>نوع الطلب</dt><dd>{type}</dd></div><div><dt>عدد الأصناف</dt><dd dir="ltr">{toArabic(items.reduce((sum, item) => sum + item.quantity, 0))}</dd></div><div><dt>الإجمالي</dt><dd dir="ltr">{format(orderTotal)}</dd></div></dl>
+            <div className="open-order-main"><b dir="ltr">{o.sale?.orderNumber ? `#${formatNumber(o.sale.orderNumber)}` : o.name}</b><em className={o.held ? 'held' : ''}>{o.completed ? 'مكتمل' : o.held ? 'معلق' : 'مفتوح'}</em></div>
+            <dl><div><dt>نوع الطلب</dt><dd>{type}</dd></div><div><dt>عدد الأصناف</dt><dd dir="ltr">{formatNumber(items.reduce((sum, item) => sum + item.quantity, 0))}</dd></div><div><dt>الإجمالي</dt><dd dir="ltr">{format(orderTotal)}</dd></div></dl>
             <button type="button" onClick={() => o.completed ? onHistory(o) : onSelect(o.id)}>{o.completed ? 'عرض التفاصيل' : 'استئناف الطلب'}</button>
           </article>
         })}
@@ -303,12 +303,12 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
   return (
     <Dialog onClose={onClose} className="history-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
-      <p>فاتورة مكتملة <b>#{order?.sale?.orderNumber ? toArabic(order.sale.orderNumber) : '—'}</b></p>
+      <p>فاتورة مكتملة <b>#{order?.sale?.orderNumber ? formatNumber(order.sale.orderNumber) : '—'}</b></p>
       <h2>تفاصيل الطلب وسجل التعديلات</h2>
       <div className="history-lines">
         {items.map(i => (
           <div key={i.lineId}>
-            <span>{i.name} × {toArabic(i.quantity)}</span>
+            <span>{i.name} × {formatNumber(i.quantity)}</span>
             <b>{format(i.price * i.quantity)}</b>
           </div>
         ))}
@@ -321,7 +321,7 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
         {adjustments.map(a => (
           <div key={a.id}>
             <i /><b>{a.type === 'refund' ? 'إرجاع' : 'إضافة'}</b>
-            <span>{a.product} × {toArabic(a.quantity)} — {format(a.amount)} {a.reason && `— ${a.reason}`}</span>
+            <span>{a.product} × {formatNumber(a.quantity)} — {format(a.amount)} {a.reason && `— ${a.reason}`}</span>
           </div>
         ))}
       </div>
@@ -351,8 +351,8 @@ export function ReturnDialog({ order, onClose, onConfirm }) {
       <div className="dialog-heading"><h2>إرجاع بيع</h2><p>يسجل الإرجاع كتعديل مستقل ولا يحذف البيع الأصلي.</p></div>
       <section className="return-original" aria-label="معلومات البيع الأصلي">
         <div className="section-title">البيع الأصلي</div>
-        <div className="return-meta"><span>رقم الطلب <b dir="ltr">{sale?.orderNumber ? `#${toArabic(sale.orderNumber)}` : '—'}</b></span><span>التاريخ والوقت <b dir="ltr">{sale?.createdAt ? formatDateTime(sale.createdAt) : 'غير متوفر'}</b></span></div>
-        <div className="return-items">{items.map(i => <div key={i.lineId}><span>{i.name}</span><b dir="ltr">{toArabic(i.quantity)} × {format(i.price)}</b></div>)}</div>
+        <div className="return-meta"><span>رقم الطلب <b dir="ltr">{sale?.orderNumber ? `#${formatNumber(sale.orderNumber)}` : '—'}</b></span><span>التاريخ والوقت <b dir="ltr">{sale?.createdAt ? formatDateTime(sale.createdAt) : 'غير متوفر'}</b></span></div>
+        <div className="return-items">{items.map(i => <div key={i.lineId}><span>{i.name}</span><b dir="ltr">{formatNumber(i.quantity)} × {format(i.price)}</b></div>)}</div>
       </section>
       <section className="return-controls" aria-label="تفاصيل الإرجاع">
         <div className="section-title">تفاصيل الإرجاع</div>
@@ -402,9 +402,9 @@ export function Receipt({ sale }) {
       <div className="receipt-divider" />
       <h1 className="receipt-title">فاتورة بيع</h1>
       <div className="receipt-meta">
-        {orderNumber ? <p className="receipt-order-number"><span>رقم الطلب :</span><b dir="ltr">#{toArabic(orderNumber)}</b></p> : null}
-        <p><span>التاريخ :</span><b dir="ltr">{toArabic(new Date(sale.createdAt).toLocaleDateString('en-CA'))}</b></p>
-        <p><span>الوقت :</span><b dir="ltr">{toArabic(new Date(sale.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }))}</b></p>
+        {orderNumber ? <p className="receipt-order-number"><span>رقم الطلب :</span><b dir="ltr">#{formatNumber(orderNumber)}</b></p> : null}
+        <p><span>التاريخ :</span><b dir="ltr">{formatDate(sale.createdAt)}</b></p>
+        <p><span>الوقت :</span><b dir="ltr">{formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: true })}</b></p>
       </div>
       <div className="receipt-divider-dashed" />
       <div className="receipt-meta">
@@ -419,28 +419,28 @@ export function Receipt({ sale }) {
         {items.map((i, index) => (
           <div className="receipt-item-row receipt-line" key={i.lineId || i.id || `${i.name}-${index}`}>
             <div className="receipt-item-name-line">
-              <span className="receipt-item-idx">{toArabic(index + 1)}.</span>
+              <span className="receipt-item-idx">{formatNumber(index + 1)}.</span>
               <span className="receipt-item-name">{i.name}</span>
             </div>
             <div className="receipt-item-details-line">
-              <span className="receipt-item-calc" dir="ltr">{toArabic(i.quantity)} × {toArabic(format(i.price))}</span>
-              <b className="receipt-item-subtotal" dir="ltr">{toArabic(format(i.price * i.quantity))}</b>
+              <span className="receipt-item-calc" dir="ltr">{formatNumber(i.quantity)} × {format(i.price)}</span>
+              <b className="receipt-item-subtotal" dir="ltr">{format(i.price * i.quantity)}</b>
             </div>
           </div>
         ))}
       </section>
       <div className="receipt-subtotals">
-        <p><span>إجمالي المبلغ :</span><b dir="ltr">{toArabic(format(subtotal))}</b></p>
-        <p><span>الخصم :</span><b dir="ltr">{toArabic(format(discount))}</b></p>
-        <p><span>الخدمة :</span><b dir="ltr">{toArabic(format(service))}</b></p>
+        <p><span>إجمالي المبلغ :</span><b dir="ltr">{format(subtotal)}</b></p>
+        <p><span>الخصم :</span><b dir="ltr">{format(discount)}</b></p>
+        <p><span>الخدمة :</span><b dir="ltr">{format(service)}</b></p>
       </div>
       <div className="receipt-total">
-        <span>المبلغ الصافي:</span><b dir="ltr">{toArabic(format(total))}</b>
+        <span>المبلغ الصافي:</span><b dir="ltr">{format(total)}</b>
       </div>
       {received !== undefined && (
         <div className="receipt-subtotals" style={{ marginTop: '4px', borderTop: 'none', paddingTop: 0 }}>
-          <p><span>المبلغ المستلم :</span><b dir="ltr">{toArabic(format(received))}</b></p>
-          <p><span>الباقي :</span><b dir="ltr">{toArabic(format(change || 0))}</b></p>
+          <p><span>المبلغ المستلم :</span><b dir="ltr">{format(received)}</b></p>
+          <p><span>الباقي :</span><b dir="ltr">{format(change || 0)}</b></p>
         </div>
       )}
       <div className="receipt-divider" />

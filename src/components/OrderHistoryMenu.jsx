@@ -5,7 +5,7 @@ const PAGE_SIZE = 10
 const readSales = () => {
   try { return JSON.parse(localStorage.getItem('pos101.sales')) || [] } catch { return [] }
 }
-import { formatMoney, formatDateTime, toArabic } from '../utils.js'
+import { formatMoney, formatDateTime, formatNumber } from '../utils.js'
 const money = formatMoney
 const paymentLabel = value => value === 'cash' ? 'نقدي' : value === 'electronic' || value === 'card' ? 'إلكتروني' : 'غير محدد'
 const statusLabel = value => value === 'voided' ? 'مبطل' : 'مكتمل'
@@ -22,7 +22,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid }) {
         <button className="history-back" onClick={onBack}><Icon name="arrow" size={18} /> العودة للسجل</button>
         <div>
           <span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span>
-          <h3>تفاصيل الطلب #{sale.orderNumber ? toArabic(sale.orderNumber) : '—'}</h3>
+          <h3>تفاصيل الطلب #{sale.orderNumber ? formatNumber(sale.orderNumber) : '—'}</h3>
           <p>{localDate(sale.createdAt)} · {paymentLabel(sale.paymentMethod)}</p>
         </div>
       </div>
@@ -40,7 +40,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid }) {
           <tbody>{items.map((item, index) => (
             <tr key={item.lineId || `${item.id}-${index}`}>
               <td><b>{item.name}</b>{item.options?.length ? <small>{item.options.join('، ')}</small> : null}{item.notes ? <small>ملاحظة: {item.notes}</small> : null}</td>
-              <td className="number-cell">{toArabic(item.quantity)}</td>
+              <td className="number-cell">{formatNumber(item.quantity)}</td>
               <td className="number-cell">{money(item.price)}</td>
               <td className="number-cell">{money(item.price * item.quantity)}</td>
             </tr>
@@ -75,11 +75,11 @@ export default function OrderHistoryMenu({ onClose, session }) {
   const [selectedSale, setSelectedSale] = useState(null)
 
   const filtered = useMemo(() => {
-    const lowerQuery = query.trim().toLocaleLowerCase('ar-IQ')
+    const lowerQuery = query.trim().toLocaleLowerCase()
     const from = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null
     const to = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null
     return sales.filter(sale => {
-      const textMatches = !lowerQuery || String(sale.orderNumber || '').includes(lowerQuery) || (sale.items || sale.order?.items || []).some(item => `${item.name || ''} ${item.english || ''}`.toLocaleLowerCase('ar-IQ').includes(lowerQuery))
+      const textMatches = !lowerQuery || String(sale.orderNumber || '').includes(lowerQuery) || (sale.items || sale.order?.items || []).some(item => `${item.name || ''} ${item.english || ''}`.toLocaleLowerCase().includes(lowerQuery))
       const dateMatches = (!from || sale.createdAt >= from) && (!to || sale.createdAt <= to)
       const methodMatches = method === 'all' || sale.paymentMethod === method || (method === 'electronic' && sale.paymentMethod === 'card')
       const statusMatches = status === 'all' || (status === 'completed' && sale.status !== 'voided') || sale.status === status
@@ -114,8 +114,8 @@ export default function OrderHistoryMenu({ onClose, session }) {
             <select aria-label="وسيلة الدفع" value={method} onChange={event => resetPage(() => setMethod(event.target.value))}><option value="all">جميع الوسائل</option><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select>
             <select aria-label="حالة الطلب" value={status} onChange={event => resetPage(() => setStatus(event.target.value))}><option value="all">جميع الحالات</option><option value="completed">مكتمل</option><option value="voided">مبطل</option></select>
           </div>
-          <div className="history-table-wrapper"><table className="history-table"><thead><tr><th>#</th><th>رقم الطلب</th><th>النوع</th><th>التاريخ والوقت</th><th>الوسيلة</th><th>المبلغ</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{paginated.map((sale, index) => <tr key={sale.id} className={sale.status === 'voided' ? 'history-row-voided' : ''}><td className="number-cell">{(safePage - 1) * PAGE_SIZE + index + 1}</td><td className="number-cell">{sale.orderNumber || '—'}</td><td>{typeLabel(sale)}</td><td className="date-cell">{localDate(sale.createdAt)}</td><td>{paymentLabel(sale.paymentMethod)}</td><td className="number-cell money-cell">{money(sale.total)}</td><td><span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span></td><td><div className="h-actions"><button onClick={() => setSelectedSale(sale)} title="عرض التفاصيل" aria-label={`عرض تفاصيل الطلب ${sale.orderNumber}`}><Icon name="search" size={17} /></button><button onClick={() => reprint(sale)} title="إعادة طباعة" aria-label={`إعادة طباعة الطلب ${sale.orderNumber}`}><Icon name="printer" size={17} /></button><button disabled title="التعديل المالي غير متاح حتى يُربط بسجل تصحيح مصرح به" aria-label="تعديل غير متاح"><Icon name="edit" size={17} /></button>{sale.status !== 'voided' && <button className="history-void" onClick={() => setSelectedSale(sale)} title="فتح تفاصيل الإبطال" aria-label={`إبطال الطلب ${sale.orderNumber}`}><Icon name="trash" size={17} /></button>}</div></td></tr>)}{!paginated.length && <tr><td className="history-empty" colSpan="8"><Icon name="receipt" size={28} /><b>{sales.length ? 'لا توجد مبيعات تطابق عوامل التصفية' : 'لا توجد مبيعات مسجلة بعد'}</b></td></tr>}</tbody></table></div>
-          <footer className="history-footer"><div className="history-count">إجمالي النتائج: <b>{filtered.length}</b></div><nav className="pagination" aria-label="ترقيم صفحات السجل"><button disabled={safePage === 1} onClick={() => setPage(value => value - 1)}>السابق</button><span>صفحة {safePage} من {totalPages}</span><button disabled={safePage === totalPages} onClick={() => setPage(value => value + 1)}>التالي</button></nav></footer>
+          <div className="history-table-wrapper"><table className="history-table"><thead><tr><th>#</th><th>رقم الطلب</th><th>النوع</th><th>التاريخ والوقت</th><th>الوسيلة</th><th>المبلغ</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{paginated.map((sale, index) => <tr key={sale.id} className={sale.status === 'voided' ? 'history-row-voided' : ''}><td className="number-cell">{formatNumber((safePage - 1) * PAGE_SIZE + index + 1)}</td><td className="number-cell">{formatNumber(sale.orderNumber)}</td><td>{typeLabel(sale)}</td><td className="date-cell">{localDate(sale.createdAt)}</td><td>{paymentLabel(sale.paymentMethod)}</td><td className="number-cell money-cell">{money(sale.total)}</td><td><span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span></td><td><div className="h-actions"><button onClick={() => setSelectedSale(sale)} title="عرض التفاصيل" aria-label={`عرض تفاصيل الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="search" size={17} /></button><button onClick={() => reprint(sale)} title="إعادة طباعة" aria-label={`إعادة طباعة الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="printer" size={17} /></button><button disabled title="التعديل المالي غير متاح حتى يُربط بسجل تصحيح مصرح به" aria-label="تعديل غير متاح"><Icon name="edit" size={17} /></button>{sale.status !== 'voided' && <button className="history-void" onClick={() => setSelectedSale(sale)} title="فتح تفاصيل الإبطال" aria-label={`إبطال الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="trash" size={17} /></button>}</div></td></tr>)}{!paginated.length && <tr><td className="history-empty" colSpan="8"><Icon name="receipt" size={28} /><b>{sales.length ? 'لا توجد مبيعات تطابق عوامل التصفية' : 'لا توجد مبيعات مسجلة بعد'}</b></td></tr>}</tbody></table></div>
+          <footer className="history-footer"><div className="history-count">إجمالي النتائج: <b>{formatNumber(filtered.length)}</b></div><nav className="pagination" aria-label="ترقيم صفحات السجل"><button disabled={safePage === 1} onClick={() => setPage(value => value - 1)}>السابق</button><span>صفحة {formatNumber(safePage)} من {formatNumber(totalPages)}</span><button disabled={safePage === totalPages} onClick={() => setPage(value => value + 1)}>التالي</button></nav></footer>
         </>}
       </section>
     </div>
