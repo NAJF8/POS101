@@ -51,7 +51,7 @@ FIREBASE: `))}restoreState_(){this.tryAuth(),this.tryAppCheck();for(let e of thi
   .summary-highlight td, tr.summary-highlight td { font-size: 12pt !important; font-weight: 900 !important; border-top: .6mm solid #000 !important; border-bottom: .6mm solid #000 !important; }
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
-  
+
   .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
   .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
   .thermal-card-head { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
