@@ -12,6 +12,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
+import { CENTRAL_SYNC_EMAIL, centralAuth, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth } from './services/posCentralSync.js'
 import { formatNumber } from './utils.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -53,6 +54,10 @@ export default function App() {
   const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
   const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [syncLabel, setSyncLabel] = useState('تسجيل دخول المزامنة')
+  const [syncAuthStatus, setSyncAuthStatus] = useState(null)
+  const centralListener = useRef(null)
   const saleInFlight = useRef(false)
 
   const downloadSalesBackup = useCallback(() => {
@@ -96,6 +101,38 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.printerSettings', JSON.stringify(printerSettings)), [printerSettings])
+
+  useEffect(() => {
+    const stopAuth = subscribeCentralAuth(user => {
+      setSyncLabel(user ? 'مزامنة' : 'تسجيل دخول المزامنة')
+      if (!user) setSyncAuthStatus(null)
+    })
+    return () => {
+      stopAuth?.()
+      centralListener.current?.()
+    }
+  }, [])
+
+  const loginSync = useCallback(async () => {
+    if (syncBusy) return
+    setSyncBusy(true)
+    setSyncLabel('جارٍ تسجيل الدخول...')
+    try {
+      const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
+      if (user.email !== CENTRAL_SYNC_EMAIL) {
+        await signOutCentral()
+        throw new Error(`الحساب ${user.email || 'المختار'} غير مخول للمزامنة.`)
+      }
+      const providerId = user.providerData?.[0]?.providerId || 'google.com'
+      setSyncLabel('تم تسجيل دخول المزامنة')
+      setSyncAuthStatus({ ok: true, uid: user.uid, email: user.email, providerId })
+    } catch (error) {
+      setSyncLabel('تسجيل دخول المزامنة')
+      setSyncAuthStatus({ ok: false, message: error.message })
+    } finally {
+      setSyncBusy(false)
+    }
+  }, [syncBusy])
 
   const refreshThermalStatus = useCallback(async settings => {
     try {
@@ -339,6 +376,9 @@ export default function App() {
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
+          onSyncSales={loginSync}
+          syncBusy={syncBusy}
+          syncLabel={syncLabel}
           currentView={currentView}
           onNavigate={setCurrentView}
         />
@@ -428,6 +468,16 @@ export default function App() {
         <button type="button" onClick={() => { setPrintMessage(null); setPrintSale(printMessage.sale) }}>إعادة طباعة</button>
         <button type="button" aria-label="إغلاق رسالة الطباعة" onClick={() => setPrintMessage(null)}>×</button>
       </div>}
+      {syncAuthStatus && (
+        <div className={`print-status ${syncAuthStatus.ok ? '' : 'error'}`} role="status">
+          {syncAuthStatus.ok ? (
+            <span>تم تسجيل دخول المزامنة — {syncAuthStatus.email} — UID: {syncAuthStatus.uid} — Provider: {syncAuthStatus.providerId}</span>
+          ) : (
+            <span>{syncAuthStatus.message}</span>
+          )}
+          <button type="button" aria-label="إغلاق حالة تسجيل دخول المزامنة" onClick={() => setSyncAuthStatus(null)}>×</button>
+        </div>
+      )}
     </main>
   )
 }

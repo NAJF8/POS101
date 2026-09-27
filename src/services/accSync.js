@@ -6,7 +6,8 @@ import {
   connectAuthEmulator,
   onAuthStateChanged,
   setPersistence,
-  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut,
 } from 'firebase/auth'
 import {
@@ -20,6 +21,12 @@ import {
   set,
   update,
 } from 'firebase/database'
+import {
+  markSaleSynced,
+  readSaleQueue,
+  reconcileSalesAgainstCentral,
+  retainQueuedSale,
+} from './salesSyncQueue.js'
 
 const env = import.meta.env || {}
 const isLocalHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -60,6 +67,7 @@ const ensureConfigured = () => {
 }
 
 const cleanKey = value => String(value || '').split('').map(character => '.#$[]/'.includes(character) ? '_' : character).join('')
+const authEmailKey = email => cleanKey(String(email || '').trim().toLowerCase())
 const todayBaghdad = () => new Intl.DateTimeFormat('en-CA', { numberingSystem: 'latn', timeZone: 'Asia/Baghdad' }).format(new Date())
 const monthOf = date => String(date || todayBaghdad()).slice(0, 7)
 const normalize = value => String(value || '').trim().toLowerCase().replace(/[┘ï┘î┘ì┘Ä┘Å┘É┘æ┘Æ┘Ç]/g, '').replace(/[╪Ñ╪ú╪ó]/g, '╪º').replace(/┘ë/g, '┘è').replace(/\s+/g, ' ')
@@ -109,17 +117,33 @@ export const subscribeAuth = callback => {
   return onAuthStateChanged(auth, callback)
 }
 
-export async function loginToAcc(email, password) {
+export async function verifyPosCashier(user = auth?.currentUser) {
+  ensureConfigured()
+  if (!user?.uid) throw Object.assign(new Error('تسجيل الدخول إلى Google مطلوب للمزامنة.'), { code: 'UNAUTHENTICATED' })
+  const profileSnap = await get(ref(db, `users/${user.uid}`))
+  const profile = profileSnap.exists() ? profileSnap.val() : null
+  const authorizedSnap = await get(ref(db, `authorized_users/${authEmailKey(user.email)}`))
+  const authorized = authorizedSnap.exists() ? authorizedSnap.val() : null
+  const allowed = profile?.id === user.uid
+    && profile?.active !== false
+    && profile?.role === 'pos_cashier'
+    && profile?.permissions?.pos?.sales_create === true
+    && authorized?.uid === user.uid
+    && authorized?.active !== false
+    && authorized?.role === 'pos_cashier'
+    && (authorized?.permissions?.pos_sales_create === true || authorized?.permissions_rules?.pos?.sales_create === true || authorized?.permissions?.pos?.sales_create === true)
+  if (!allowed) {
+    await signOut(auth).catch(() => {})
+    throw Object.assign(new Error('حساب Google غير مصرح لـ POS.'), { code: 'PERMISSION_DENIED' })
+  }
+  return { ...profile, id: user.uid, email: user.email }
+}
+
+export async function signInToAccWithGoogle() {
   ensureConfigured()
   await authPersistenceReady
-  const credential = await signInWithEmailAndPassword(auth, String(email).trim(), password)
-  const profileSnap = await get(ref(db, `users/${credential.user.uid}`))
-  const profile = profileSnap.exists() ? profileSnap.val() : null
-  if (!profile || profile.active === false) {
-    await signOut(auth)
-    throw new Error('╪¡╪│╪º╪¿ ╪º┘ä┘â╪º╪┤┘è╪▒ ╪║┘è╪▒ ┘à┘ü╪╣┘æ┘ä ┘ü┘è ACC-101.')
-  }
-  return { ...profile, id: credential.user.uid, email: credential.user.email }
+  const credential = await signInWithPopup(auth, new GoogleAuthProvider())
+  return verifyPosCashier(credential.user)
 }
 
 export async function logoutFromAcc() {
@@ -143,6 +167,76 @@ export async function loadAccProducts() {
     image: item.image_url || item.imageUrl || item.image || null,
     unavailable: item.active === false,
   }))
+}
+
+const normalizeSaleTimestamp = value => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) return numeric < 100000000000 ? numeric * 1000 : numeric
+  const parsed = Date.parse(value || '')
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const normalizeRemoteSale = (sale, fallbackId) => {
+  const id = String(sale.saleId || sale.sale_id || sale.id || fallbackId || '').trim()
+  const remoteItems = Array.isArray(sale.items) ? sale.items : Object.values(sale.items || {})
+  return {
+    ...sale,
+    id,
+    saleId: id,
+    orderNumber: sale.orderNumber ?? sale.order_number ?? sale.order_no ?? sale.number ?? id,
+    createdAt: normalizeSaleTimestamp(sale.createdAt ?? sale.created_at ?? sale.timestamp ?? sale.date),
+    paymentMethod: sale.paymentMethod || sale.payment_method || 'unknown',
+    subtotal: Number(sale.subtotal ?? 0),
+    discount: Number(sale.discount ?? sale.discount_amount ?? 0),
+    total: Number(sale.total ?? sale.total_after_discount ?? sale.total_amount ?? 0),
+    status: sale.status === 'voided' || sale.voided === true ? 'voided' : (sale.status || 'completed'),
+    items: remoteItems.map((item, index) => ({
+      ...item,
+      id: item.id || item.product_id || `remote-${index}`,
+      name: item.name || item.product_name || item.item_name || '',
+      english: item.english || item.product_name_en || '',
+      quantity: Number(item.quantity || 0),
+      price: Number(item.price ?? item.unit_price ?? 0),
+    })),
+  }
+}
+
+// Read-only central history. No service account and no Firebase writes.
+export async function loadAccSales() {
+  ensureConfigured()
+  const snapshot = await get(ref(db, 'sales'))
+  return values(snapshot)
+    .filter(row => !row.source_channel || row.source_channel === 'POS101')
+    .map(row => normalizeRemoteSale(row, row.id))
+    .filter(row => row.id)
+}
+
+// The queue is reconciled by readback before any create call. This is the
+// safety gate for browsers that already contain imported historical sales.
+export async function syncSalesQueue(profile) {
+  ensureConfigured()
+  const centralSales = await loadAccSales()
+  const reconciliation = reconcileSalesAgainstCentral(centralSales)
+  let uploaded = 0
+  let failed = 0
+  for (const entry of readSaleQueue()) {
+    try {
+      await saveAccSale(entry.sale, profile)
+      markSaleSynced(entry.sale)
+      uploaded += 1
+    } catch (error) {
+      retainQueuedSale(entry, error)
+      failed += 1
+    }
+  }
+  return {
+    centralCount: centralSales.length,
+    reconciled: reconciliation.reconciled,
+    uploaded,
+    failed,
+    pending: readSaleQueue().length,
+  }
 }
 
 const claimOperation = async (key, payload) => {
@@ -207,7 +301,7 @@ async function consumeRecipe(productId, quantity, sourceKey, userId, date) {
   return true
 }
 
-export async function saveAccSale(sale, profile) {
+async function legacySaveAccSale(sale, profile) {
   ensureConfigured()
   const user = auth.currentUser
   if (!user || !profile?.id) throw new Error('╪º┘å╪¬┘ç╪¬ ╪¼┘ä╪│╪⌐ ╪º┘ä┘â╪º╪┤┘è╪▒. ╪│╪¼┘æ┘ä ╪º┘ä╪»╪«┘ê┘ä ┘à╪¼╪»╪»╪º┘ï.')
@@ -257,6 +351,28 @@ export async function saveAccSale(sale, profile) {
     throw error
   }
   return { ...record, id: canonicalSaleId, already_processed: false }
+}
+
+export async function saveAccSale(sale, profile) {
+  ensureConfigured()
+  if (!functions) throw new Error('ACC Functions غير مهيأة.')
+  const user = await waitForAuthUser()
+  if (!user || !profile?.id || user.uid !== profile.id) throw Object.assign(new Error('جلسة Google غير صالحة للمزامنة.'), { code: 'UNAUTHENTICATED' })
+  await verifyPosCashier(user)
+  const callable = httpsCallable(functions, 'createPosSale')
+  const data = {
+    saleId: sale.saleId || sale.id,
+    operationKey: sale.operationKey || sale.operation_key,
+    date: sale.date || todayBaghdad(),
+    paymentMethod: sale.paymentMethod || 'cash',
+    discount: Number(sale.discount || 0),
+    items: (sale.items || []).map(item => ({
+      productId: item.accProductId || item.product_id || item.id,
+      quantity: Number(item.quantity || 0),
+      unitPrice: Number(item.price || item.unit_price || 0),
+    })),
+  }
+  return (await callable(data)).data
 }
 
 export async function saveAccExpense(expense, profile) {

@@ -86,6 +86,7 @@ export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
   if (!saleId) throw new Error('Cannot queue a sale without saleId.')
   const sales = readJson(SALES_KEY, [])
   if (!sales.some(row => sameSaleIdentity(row, sale))) writeJson(SALES_KEY, [...sales, sale])
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
   return sale
 }
 

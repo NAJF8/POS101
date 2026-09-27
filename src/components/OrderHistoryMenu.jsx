@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Icon } from './Icons'
 
 const PAGE_SIZE = 10
@@ -73,6 +73,16 @@ export default function OrderHistoryMenu({ onClose, session }) {
   const [status, setStatus] = useState('all')
   const [page, setPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState(null)
+
+  useEffect(() => {
+    const refresh = () => setSales(readSales())
+    window.addEventListener('pos101-sales-updated', refresh)
+    window.addEventListener('pos101-sale-created', refresh)
+    return () => {
+      window.removeEventListener('pos101-sales-updated', refresh)
+      window.removeEventListener('pos101-sale-created', refresh)
+    }
+  }, [])
 
   const filtered = useMemo(() => {
     const lowerQuery = query.trim().toLocaleLowerCase()
