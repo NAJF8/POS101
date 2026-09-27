@@ -8,10 +8,10 @@ import Dashboard from './components/Dashboard'
 import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
 import { Purchases } from './components/Purchases'
-import { categories, products } from './data/menu'
+import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, readPendingSaleCount, reconcileSalesQueue, buildSalesBackup } from './services/salesSyncQueue'
+import { enqueueSale, readPendingSaleCount, readSalesCount, reconcileSalesQueue, buildSalesBackup } from './services/salesSyncQueue'
 import { formatNumber } from './utils.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -64,7 +64,7 @@ export default function App() {
       reconcileSalesQueue()
       const count = readPendingSaleCount()
       setPendingSaleCount(count)
-      setSyncNotice({ status: 'pending', text: `تم حفظ وتجهيز ${formatNumber(count)} عملية للمزامنة — لم يتم إرسالها إلى ACC بعد` })
+      setSyncNotice({ status: 'pending', text: `تم تجهيز ${formatNumber(readSalesCount())} عملية للمزامنة. المبيعات محفوظة بأمان على الجهاز ولم تُرسل إلى Firebase بعد.` })
     } finally { setSyncBusy(false) }
   }, [syncBusy])
 
@@ -99,7 +99,7 @@ export default function App() {
   const catalogCategories = categories
   const visibleProducts = useMemo(
     () => catalogProducts.filter(p =>
-      (category === 'الكل' || p.category === category) &&
+      (categoryId(category) === categoryId('الكل') || categoryId(p.categoryId || p.category) === categoryId(category)) &&
       `${p.name} ${p.english}`.toLowerCase().includes(query.toLowerCase())
     ),
     [catalogProducts, category, query]

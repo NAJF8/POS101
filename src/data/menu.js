@@ -1,5 +1,19 @@
 export const categories = ['الكل', 'قهوة مختصة', 'قهوة ساخنة', 'مشروبات باردة', 'مشروبات 101', 'حلويات', 'ساندويتشات', 'إضافات/أخرى']
 
+// Category identity is a data key, not a display-label comparison.  Keep the
+// visible Arabic labels unchanged while accepting the established spelling
+// variants used by older product records.
+const categoryAliases = {
+  ساندويش: 'ساندويتشات',
+  ساندويشات: 'ساندويتشات',
+  ساندويتش: 'ساندويتشات',
+  ساندويتشات: 'ساندويتشات',
+}
+export const categoryId = value => {
+  const key = String(value || '').trim().replace(/\s+/g, '')
+  return categoryAliases[key] || key
+}
+
 const rows = [
   ['قهوة مختصة','قهوة مقطرة','V60',7000],['قهوة مختصة','أيروبريس','Aeropress',6000],['قهوة مختصة','كولد برو','Cold Brew',6000],
   ['قهوة ساخنة','اسبرسو سنكل','Single Espresso',3000],['قهوة ساخنة','اسبرسو دبل','Double Espresso',4000],['قهوة ساخنة','أمريكانو','Americano',4500],['قهوة ساخنة','لاتيه كلاسيك','Classic Latte',5000],['قهوة ساخنة','سبانيش لاتيه','Spanish Latte',5500],['قهوة ساخنة','كراميل ماكياتو','Caramel Macchiato',5500],['قهوة ساخنة','لاتيه جوز الهند','Coconut Latte',5500],['قهوة ساخنة','لاتيه فانيلا','Vanilla Latte',5500],['قهوة ساخنة','لاتيه بندق','Hazelnut Latte',5500],['قهوة ساخنة','كابتشينو','Cappuccino',5000],['قهوة ساخنة','فلات وايت','Flat White',5000],['قهوة ساخنة','كورتادو','Cortado',4000],['قهوة ساخنة','موكا','Mocha',5500],['قهوة ساخنة','شاي','Tea',2000],['قهوة ساخنة','قهوة تركية','Turkish Coffee',3000],['قهوة ساخنة','قهوة بالبندق','Hazelnut Coffee',3000],['قهوة ساخنة','قهوة فرنسية','French Coffee',3000],['قهوة ساخنة','هوت شوكليت','Hot Chocolate',5000],
@@ -56,7 +70,7 @@ const imageMap = {
   50:'assets/products/1789207678103-2c05a4ed28a64c75bc307ca1d0ab0378.png',
 }
 
-export const products = rows.map(([category, name, english, price], index) => ({ id: index + 1, category, name, english, price, image: imageMap[index + 1] ? `${import.meta.env.BASE_URL}${imageMap[index + 1]}` : null, unavailable: price === null, configurable: ['لاتيه كلاسيك','سبانيش لاتيه','لاتيه بنكهات','آيس لاتيه كلاسيك','آيس سبانيش لاتيه','موكا'].includes(name), favorite: index < 6 }))
+export const products = rows.map(([category, name, english, price], index) => ({ id: index + 1, category, categoryId: categoryId(category), name, english, price, image: imageMap[index + 1] ? `${import.meta.env.BASE_URL}${imageMap[index + 1]}` : null, unavailable: price === null, configurable: ['لاتيه كلاسيك','سبانيش لاتيه','لاتيه بنكهات','آيس لاتيه كلاسيك','آيس سبانيش لاتيه','موكا'].includes(name), favorite: index < 6 }))
 
 // The authoritative menu currently stores Arabic in `name` and the optional
 // secondary English label in `english`; alternate established keys stay safe.

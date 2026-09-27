@@ -156,6 +156,28 @@ input, textarea, select { cursor: text; }
   border-radius: 10px;
 }
 
+.sync-notice {
+  position: fixed;
+  top: 76px;
+  right: 20px;
+  z-index: 1200;
+  width: min(620px, calc(100vw - 40px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #d8c58d;
+  border-radius: 10px;
+  background: #fff8df;
+  color: #4c3a12;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  direction: rtl;
+  font-weight: 700;
+  line-height: 1.6;
+}
+.sync-notice.pending { border-color: #d8c58d; background: #fff8df; color: #4c3a12; }
+.sync-notice button { flex: 0 0 auto; padding: 2px 8px; border-radius: 7px; background: transparent; color: inherit; font-size: 20px; line-height: 1; }
+
 /* ============================================================
    POS BODY â€” main split layout
    ============================================================ */
@@ -1326,6 +1348,11 @@ input, textarea, select { cursor: text; }
 .expenses-table th { background: #eef3eb; font-weight: 800; }
 .expense-amount { color: #000; font-weight: 800; white-space: nowrap; }
 .expense-actions { display: flex; gap: 7px; white-space: nowrap; }
+.sync-state { display: inline-block; padding: 5px 7px; border-radius: 6px; font-size: 12px; font-weight: 700; }
+.sync-state.synced { color: #175b27; background: #e1f2e3; }
+.sync-state.pending_sync { color: #7a4a00; background: #fff0c2; }
+.sync-state.failed { color: #8d1f1f; background: #fbe0e0; }
+.sync-state.disabled { color: #555; background: #ececec; }
 .edit-expense, .delete-expense { padding: 7px 10px; border-radius: 7px; font-weight: 800; }
 .edit-expense { background: #e8f0e5; color: #245326; }
 .delete-expense { background: #fbe7e7; color: #9d1f1f; }

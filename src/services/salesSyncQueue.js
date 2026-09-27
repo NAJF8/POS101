@@ -26,6 +26,8 @@ const isSaleEntry = entry => Boolean(entry?.sale && saleIdOf(entry.sale))
 
 export const readSaleQueue = () => readJson(QUEUE_KEY, []).filter(entry => entry?.sale && saleIdOf(entry.sale))
 
+export const readSalesCount = () => readJson(SALES_KEY, []).filter(sale => saleIdOf(sale)).length
+
 export const readPendingSaleCount = () => {
   const seenIds = new Set()
   const seenOperationKeys = new Set()

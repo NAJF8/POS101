@@ -1,5 +1,6 @@
 import { Icon } from './Icons'
 import { productNames } from '../data/menu'
+import { categoryId } from '../data/menu'
 import { formatNumber } from '../utils.js'
 
 // Mapping categories to icons
@@ -60,7 +61,10 @@ export default function ProductGrid({
         {categories.map(c => (
           <button 
             key={c} 
-            className={`cat-btn ${category === c ? 'active' : ''}`} 
+            className={`cat-btn ${categoryId(category) === categoryId(c) ? 'active' : ''}`}
+            type="button"
+            data-category-id={categoryId(c)}
+            aria-pressed={categoryId(category) === categoryId(c)}
             onClick={() => setCategory(c)}
           >
             <Icon name={getCategoryIcon(c)} size={20} />
@@ -74,7 +78,7 @@ export default function ProductGrid({
         <div className="product-grid">
           {products.map(p => {
             const names = productNames(p)
-            return <button key={p.id} className={`product-card ${p.unavailable ? 'unavailable' : ''}`} disabled={p.unavailable} onClick={() => onSelect(p)}>
+            return <button key={p.id} className={`product-card ${p.unavailable ? 'unavailable' : ''}`} data-category-id={categoryId(p.categoryId || p.category)} disabled={p.unavailable} onClick={() => onSelect(p)}>
               <div className="img-wrap">
                 {p.image ? <img src={p.image} alt={names.arabic} loading="lazy" /> : <div className="no-img" aria-label="صورة 101 البديلة"><strong>101</strong><small>بدون صورة</small></div>}
                 {p.category === 'مشروبات 101' && <span className="product-mark"><Icon name="star" size={12}/></span>}
