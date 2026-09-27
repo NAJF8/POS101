@@ -13,6 +13,27 @@ const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-l
 
 const formatDate = value => formatDateTime(value)
 
+const toDateInputValue = value => {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  const pad = part => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+const getDefaultReportRange = () => {
+  const today = new Date()
+  const fallback = toDateInputValue(today)
+  const timestamps = readLocalSales()
+    .map(sale => sale.createdAt)
+    .filter(timestamp => Number.isFinite(timestamp) && timestamp > 0)
+
+  if (!timestamps.length) return { from: fallback, to: fallback }
+  return {
+    from: toDateInputValue(Math.min(...timestamps)),
+    to: toDateInputValue(Math.max(...timestamps)),
+  }
+}
+
 const a4PrintStyles = `
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
@@ -108,9 +129,9 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
   const [reportType, setReportType] = useState(null)
   const [remote, setRemote] = useState(null)
   
-  const todayStr = new Date().toISOString().substring(0, 10)
-  const [dateFrom, setDateFrom] = useState(todayStr)
-  const [dateTo, setDateTo] = useState(todayStr)
+  const [defaultReportRange] = useState(getDefaultReportRange)
+  const [dateFrom, setDateFrom] = useState(defaultReportRange.from)
+  const [dateTo, setDateTo] = useState(defaultReportRange.to)
   
   useEffect(() => {
     if (!session?.profile || session.profile.localOnly) return undefined
