@@ -20,7 +20,19 @@ export const dateValue = value => {
     if (!numeric) return 0
     return numeric < 1e12 ? numeric * 1000 : numeric
   }
-  const parsed = Date.parse(normalizeDigits(value))
+  const normalized = normalizeDigits(value).trim()
+  // A date-only value is a cashier-local calendar date, not a UTC instant.
+  // Construct it with local Date setters so `2026-09-25` cannot shift across
+  // midnight when the browser timezone is west of UTC.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized)
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly
+    const localDate = new Date(0)
+    localDate.setHours(0, 0, 0, 0)
+    localDate.setFullYear(Number(year), Number(month) - 1, Number(day))
+    return Number.isFinite(localDate.getTime()) ? localDate.getTime() : 0
+  }
+  const parsed = Date.parse(normalized)
   return Number.isFinite(parsed) ? parsed : 0
 }
 

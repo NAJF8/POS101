@@ -1,10 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Icon } from './Icons'
-import { loadAccReports } from '../services/accSync'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
-import { readLocalSales, numberValue } from '../services/reportSales'
+import { readLocalSales, numberValue, dateValue } from '../services/reportSales'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -20,18 +19,18 @@ const toDateInputValue = value => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-const getDefaultReportRange = () => {
-  const today = new Date()
-  const fallback = toDateInputValue(today)
-  const timestamps = readLocalSales()
-    .map(sale => sale.createdAt)
-    .filter(timestamp => Number.isFinite(timestamp) && timestamp > 0)
+const getDefaultReportDate = () => toDateInputValue(new Date())
 
-  if (!timestamps.length) return { from: fallback, to: fallback }
-  return {
-    from: toDateInputValue(Math.min(...timestamps)),
-    to: toDateInputValue(Math.max(...timestamps)),
-  }
+const getLocalDayBounds = dateText => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateText || ''))
+  if (!match) return { startMs: Number.NaN, endMs: Number.NaN }
+  const [, year, month, day] = match
+  const start = new Date(0)
+  start.setHours(0, 0, 0, 0)
+  start.setFullYear(Number(year), Number(month) - 1, Number(day))
+  const end = new Date(start)
+  end.setHours(23, 59, 59, 999)
+  return { startMs: start.getTime(), endMs: end.getTime() }
 }
 
 const a4PrintStyles = `
@@ -127,27 +126,25 @@ const thermalMaterialsStyles = `
 
 export default function Reports({ onNavigate, session, onDirectThermalPrint, directThermalReady = false }) {
   const [reportType, setReportType] = useState(null)
-  const [remote, setRemote] = useState(null)
   
-  const [defaultReportRange] = useState(getDefaultReportRange)
-  const [dateFrom, setDateFrom] = useState(defaultReportRange.from)
-  const [dateTo, setDateTo] = useState(defaultReportRange.to)
-  
-  useEffect(() => {
-    if (!session?.profile || session.profile.localOnly) return undefined
-    let active = true
-    loadAccReports().then(data => { if (active) setRemote(data) }).catch(() => {})
-    return () => { active = false }
-  }, [session])
+  const [reportDate, setReportDate] = useState(getDefaultReportDate)
 
-  // Sales are authoritative in the cashier's local ledger. ACC is an optional
-  // sync destination and must never replace local sales with an empty/partial
-  // remote result, especially while offline.
-  const sales = useMemo(() => readLocalSales(), [remote])
-  const expenses = useMemo(() => remote ? remote.expenses.map(row => ({ ...row, date: Date.parse(row.date || row.created_at) || 0, amount: Number(row.amount || 0), shift: row.shift_id, notes: row.description })) : read('pos101.expenses', []), [remote])
+  // Keep reporting local-only until the ACC/Firebase source is explicitly
+  // reconciled. A report must never silently mix another cashier's data with
+  // this device's local ledger.
+  const sales = useMemo(() => readLocalSales(), [])
+  const expenses = useMemo(() => {
+    const rows = read('pos101.expenses', [])
+    return rows.map(row => ({
+      ...row,
+      date: dateValue(row.date ?? row.createdAt ?? row.created_at),
+      amount: Number(row.amount || 0),
+      shift: row.shift_id || row.shift,
+      notes: row.description || row.notes,
+    }))
+  }, [])
 
-  const startMs = new Date(dateFrom).setHours(0, 0, 0, 0)
-  const endMs = new Date(dateTo).setHours(23, 59, 59, 999)
+  const { startMs, endMs } = useMemo(() => getLocalDayBounds(reportDate), [reportDate])
 
   const filteredSales = useMemo(() => {
     return sales.filter(s => s.createdAt >= startMs && s.createdAt <= endMs && (!s.voided))
@@ -199,16 +196,15 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
   const printReportDirect = () => {
     if (!directThermalReady || !onDirectThermalPrint) return
     const titleByType = { comprehensive: 'تقرير شامل', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
-    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', dateFrom, dateTo, period: `${dateFrom} - ${dateTo}`, sales: filteredSales, expenses: filteredExpenses })
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate, dateFrom: reportDate, dateTo: reportDate, period: reportDate, sales: filteredSales, expenses: filteredExpenses })
   }
 
   const renderReportCards = () => (
     <div className="reports-container" dir="rtl">
       <div className="reports-sidebar">
         <div className="date-filter">
-          <h3>اختيار المدة</h3>
-          <label>من تاريخ<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} /></label>
-          <label>إلى تاريخ<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} /></label>
+          <h3>اختيار التاريخ</h3>
+          <label>التاريخ<input aria-label="التاريخ" type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} /></label>
         </div>
       </div>
       
@@ -222,12 +218,12 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <button className="report-card-btn" onClick={() => setReportType('comprehensive')}>
             <Icon name="file-text" size={40} />
             <b>تقرير شامل (صباحي ومسائي)</b>
-            <small>جميع المبيعات والمصاريف على فترة محددة</small>
+            <small>جميع المبيعات والمصاريف في اليوم المحدد</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('sales')}>
             <Icon name="receipt" size={40} />
             <b>تقرير الطلبات / المبيعات</b>
-            <small>كل عمليات البيع ضمن الفترة المحددة</small>
+            <small>كل عمليات البيع في اليوم المحدد</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('morning')}>
             <Icon name="sun" size={40} />
@@ -583,7 +579,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
           <div className="report-paper-header">
             <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
             <h2>{title}</h2>
-            <p>من: {dateFrom} إلى: {dateTo}</p>
+            <p>التاريخ: {reportDate}</p>
           </div>
           
           {content}

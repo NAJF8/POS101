@@ -212,7 +212,9 @@ export async function saveAccSale(sale, profile) {
   const user = auth.currentUser
   if (!user || !profile?.id) throw new Error('╪º┘å╪¬┘ç╪¬ ╪¼┘ä╪│╪⌐ ╪º┘ä┘â╪º╪┤┘è╪▒. ╪│╪¼┘æ┘ä ╪º┘ä╪»╪«┘ê┘ä ┘à╪¼╪»╪»╪º┘ï.')
   const date = todayBaghdad()
-  const operationKey = cleanKey(`pos101:${sale.saleId || sale.id}`)
+  // Retries must reuse the exact key stored with the local sale. Older local
+  // records without it retain the historical deterministic fallback.
+  const operationKey = cleanKey(sale.operationKey || `pos101:${sale.saleId || sale.id}`)
   const fingerprint = saleFingerprint(sale)
   const saleId = cleanKey(sale.saleId || sale.id)
   if (!saleId) throw new Error('┘à╪╣╪▒┘ü ╪¿┘è╪╣ ┘à╪¡┘ä┘è ╪½╪º╪¿╪¬ ┘à╪╖┘ä┘ê╪¿ ┘é╪¿┘ä ╪º┘ä╪Ñ╪▒╪│╪º┘ä.')

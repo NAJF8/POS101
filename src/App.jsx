@@ -12,6 +12,7 @@ import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
 import { isAccConfigured, loginToAcc, logoutFromAcc, loadAccProducts, saveAccSale, saveAccExpense, saveAccPurchase, openAccShift, closeAccShift, subscribeAuth } from './services/accSync'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
+import { enqueueSale, markSaleSynced, readSaleQueue, retainQueuedSale } from './services/salesSyncQueue'
 import { formatNumber } from './utils.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -73,7 +74,7 @@ export default function App() {
 
   const flushSaleQueue = useCallback(async () => {
     if (!session?.profile || session.profile.localOnly || !isAccConfigured() || queueFlushInFlight.current) return
-    const queued = read(SYNC_QUEUE_KEY, [])
+    const queued = readSaleQueue().concat(read(SYNC_QUEUE_KEY, []).filter(entry => entry?.kind === 'expense' || entry?.kind === 'purchase'))
     if (!queued.length) return
     queueFlushInFlight.current = true
     const remaining = []
@@ -90,12 +91,17 @@ export default function App() {
             localStorage.setItem('pos101.purchases', JSON.stringify(purchases.map(row => row.id === entry.purchase.id ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
           } else {
             await withSyncTimeout(saveAccSale(entry.sale, session.profile))
-            const sales = read('pos101.sales', [])
-            localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
+            markSaleSynced(entry.sale)
           }
           window.dispatchEvent(new Event('pos101-sync-updated'))
         } catch (error) {
-          if (transientSyncError(error)) {
+          if (entry.kind !== 'expense' && entry.kind !== 'purchase') {
+            // A sale is recoverable until saveAccSale has returned success.
+            // This includes missing/expired Auth, offline, permission/session
+            // refresh, and failures after a partial Firebase write.
+            retainQueuedSale(entry, error)
+            remaining.push({ ...entry, kind: 'sale', sale: { ...entry.sale, status: 'pending_sync', syncError: String(error?.message || error) } })
+          } else if (transientSyncError(error)) {
             remaining.push(entry)
           } else {
             // Permanent failure during retry
@@ -230,11 +236,13 @@ export default function App() {
     // The order owns the id before any network request.  A lost response must
     // retry this exact sale, including after a page refresh.
     const stableSaleId = activeOrder.saleId || crypto.randomUUID()
-    if (!activeOrder.saleId) setOrders(v => v.map((o, i) => i === active ? { ...o, saleId: stableSaleId } : o))
+    const stableOperationKey = activeOrder.operationKey || `pos101:${stableSaleId}`
+    if (!activeOrder.saleId || !activeOrder.operationKey) setOrders(v => v.map((o, i) => i === active ? { ...o, saleId: stableSaleId, operationKey: stableOperationKey } : o))
 
     const sale = {
       saleId: stableSaleId,
       id: stableSaleId,
+      operationKey: stableOperationKey,
       orderNumber: nextNumber,
       cashierId: session.shiftId,
       cashierNameSnapshot: sellerName,
@@ -258,12 +266,16 @@ export default function App() {
     setPendingPayment(null)
     window.setTimeout(() => setModal(null), 350)
 
-    // 2. Try ACC Sync
+    // 2. Persist the local ledger and retry queue before any ACC/Firebase work.
+    // The queue is the recovery record for missing Auth, offline, catalog, and
+    // ambiguous network responses.
+    enqueueSale(sale)
+
+    // 3. Try ACC Sync
     let mappedItems = sale.items
     try {
       if (!isAccConfigured()) {
-        const localSale = { ...sale, status: 'disabled' }
-        localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), localSale]))
+        setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
         return true
       }
 
@@ -275,34 +287,19 @@ export default function App() {
         return { ...item, accProductId: remote.id, product_id: remote.id, name: remote.name, english: remote.english, price: Number(item.price) }
       })
 
-      const pendingSale = { ...sale, items: mappedItems, status: 'pending_sync' }
-      const queuedBeforeSend = read(SYNC_QUEUE_KEY, [])
-      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...queuedBeforeSend.filter(entry => entry.sale?.saleId !== sale.saleId), { sale: pendingSale, queuedAt: Date.now() }]))
-      localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), pendingSale]))
+      enqueueSale({ ...sale, items: mappedItems })
 
       const syncedSale = { ...sale, items: mappedItems, status: 'synced', syncConfirmedAt: Date.now() }
       await withSyncTimeout(saveAccSale(syncedSale, session.profile))
 
-      const localSales = read('pos101.sales', [])
-      localStorage.setItem('pos101.sales', JSON.stringify([...localSales.filter(row => row.saleId !== sale.saleId), syncedSale]))
-      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(read(SYNC_QUEUE_KEY, []).filter(entry => entry.sale?.saleId !== sale.saleId)))
+      markSaleSynced(syncedSale)
       return true
 
     } catch (error) {
-      if (transientSyncError(error)) {
-        const queued = read(SYNC_QUEUE_KEY, [])
-        const queuedSale = { ...sale, items: mappedItems, status: 'pending_sync' }
-        localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...queued.filter(entry => entry.sale?.saleId !== sale.saleId), { sale: queuedSale, queuedAt: Date.now() }]))
-        localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), queuedSale]))
-        setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
-        return true
-      }
-
-      // Permanent failure (e.g. item not linked in ACC)
-      localStorage.setItem('pos101.sales', JSON.stringify([...read('pos101.sales', []).filter(row => row.saleId !== sale.saleId), { ...sale, items: mappedItems, status: 'failed', syncError: String(error?.message || error) }]))
-      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(read(SYNC_QUEUE_KEY, []).filter(entry => entry.sale?.saleId !== sale.saleId)))
-      console.error('ACC Sync Failed:', error)
-      // Do not block or alert to keep POS functional.
+      // No sale error is terminal here: without confirmed Firebase success the
+      // sale must remain retryable and must not disappear from the queue.
+      enqueueSale({ ...sale, items: mappedItems }, { error })
+      setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
       return true
 
     } finally {
@@ -408,7 +405,8 @@ export default function App() {
   const savePrinterSettings = useCallback(settings => setPrinterSettings(v => ({ ...v, ...settings })), [])
   const printReportDirect = useCallback(report => {
     if (!directThermalReady) return false
-    const jobId = `report:${report.reportType}:${report.dateFrom}:${report.dateTo}`
+    const reportDate = report.reportDate || report.dateFrom
+    const jobId = `report:${report.reportType}:${reportDate}`
     void printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
       .then(result => setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' }))
       .catch(error => setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` }))
