@@ -66,3 +66,6 @@ export const readLocalSales = () => {
     return []
   }
 }
+
+export const filterReportSales = (sales, { startMs = -Infinity, endMs = Infinity } = {}) => (Array.isArray(sales) ? sales : [])
+  .filter(sale => sale.createdAt >= startMs && sale.createdAt <= endMs && !sale.voided)

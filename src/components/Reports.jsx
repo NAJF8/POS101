@@ -3,7 +3,7 @@ import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
-import { readLocalSales, numberValue, dateValue } from '../services/reportSales'
+import { readLocalSales, numberValue, dateValue, filterReportSales } from '../services/reportSales'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -156,9 +156,10 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
 
   const { startMs, endMs } = useMemo(() => getLocalDayBounds(reportDate), [reportDate])
 
-  const filteredSales = useMemo(() => {
-    return sales.filter(s => s.createdAt >= startMs && s.createdAt <= endMs && (!s.voided))
-  }, [sales, startMs, endMs])
+  // One report dataset is shared by the visible report, browser print, and
+  // direct thermal print. Keep filtering here so every output follows the
+  // latest rendered filter state and never falls back to all sales.
+  const filteredSales = useMemo(() => filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs])
 
   const filteredExpenses = useMemo(() => {
     return expenses.filter(e => e.date >= startMs && e.date <= endMs)

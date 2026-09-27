@@ -4,6 +4,7 @@ import { productNames } from '../data/menu'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatNumber, formatDate, formatTime, formatDateTime } from '../utils.js'
+import { getOpenOrders } from '../services/orderState.js'
 const format = formatMoney
 
 /* ── Product Options ── */
@@ -269,7 +270,12 @@ export function DiscountDialog({ subtotal, current, onClose, onApply }) {
 /* ── Open Orders ── */
 export function OpenOrders({ orders, onClose, onSelect, onHistory }) {
   const [tab, setTab] = React.useState('open')
-  const list = orders.filter(o => tab === 'completed' ? o.completed : tab === 'held' ? o.held && !o.completed : !o.completed && !o.held)
+  const openOrders = getOpenOrders(orders)
+  const list = tab === 'completed'
+    ? orders.filter(o => o.completed)
+    : tab === 'held'
+      ? openOrders.filter(o => o.held)
+      : openOrders
   return (
     <Dialog onClose={onClose} className="open-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>

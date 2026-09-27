@@ -16,6 +16,7 @@ import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierU
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
+import { getOpenOrders } from './services/orderState.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
@@ -84,7 +85,7 @@ export default function App() {
   const activeDiscount = discountValue(subtotal, activeOrder.discount)
   const total = Math.max(0, subtotal - activeDiscount)
 
-  const openOrdersCount = orders.filter(o => o.held && !o.completed).length
+  const openOrdersCount = getOpenOrders(orders).length
 
   const catalogProducts = products
   // Categories are navigation data, not a projection of the current product
@@ -411,7 +412,8 @@ export default function App() {
   const printReportDirect = useCallback(report => {
     if (!directThermalReady) return false
     const reportDate = report.reportDate || report.dateFrom
-    const jobId = `report:${report.reportType}:${reportDate}`
+    const datasetKey = (report.sales || []).map(sale => sale.saleId || sale.id || sale.orderNumber).join(',') || 'empty'
+    const jobId = `report:${report.reportType}:${reportDate}:${datasetKey}`
     void printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
       .then(result => setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' }))
       .catch(error => setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` }))
