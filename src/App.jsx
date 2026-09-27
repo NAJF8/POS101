@@ -7,9 +7,10 @@ import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
+import { Purchases } from './components/Purchases'
 import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
-import { isAccConfigured, loginToAcc, logoutFromAcc, loadAccProducts, saveAccSale, openAccShift, closeAccShift, subscribeAuth } from './services/accSync'
+import { isAccConfigured, loginToAcc, logoutFromAcc, loadAccProducts, saveAccSale, saveAccExpense, saveAccPurchase, openAccShift, closeAccShift, subscribeAuth } from './services/accSync'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { formatNumber } from './utils.js'
 
@@ -17,7 +18,7 @@ const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], ta
 export const tablesEnabled = false
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 const SYNC_QUEUE_KEY = 'pos101.syncQueue'
-const transientSyncError = error => navigator.onLine === false || ['NETWORK_ERROR', 'NETWORK_REQUEST_FAILED', 'unavailable', 'failed-precondition'].includes(error?.code) || /fetch|network|offline|انقطاع|اتصال/i.test(String(error?.message || ''))
+const transientSyncError = error => navigator.onLine === false || ['NETWORK_ERROR', 'NETWORK_REQUEST_FAILED', 'unavailable', 'failed-precondition', 'internal', 'aborted', 'deadline-exceeded'].includes(error?.code) || /fetch|network|offline|انقطاع|اتصال|internal|aborted|deadline/i.test(String(error?.message || ''))
 const withSyncTimeout = (promise, ms = 8000) => Promise.race([
   promise,
   new Promise((_, reject) => window.setTimeout(() => reject(Object.assign(new Error('انتهت مهلة الاتصال بـ ACC-101.'), { code: 'NETWORK_REQUEST_FAILED' })), ms))
@@ -64,14 +65,14 @@ export default function App() {
   const queueFlushInFlight = useRef(false)
 
   useEffect(() => {
-    if (!session?.profile || !isAccConfigured()) return undefined
+    if (!session?.profile || session.profile.localOnly || !isAccConfigured()) return undefined
     let active = true
     loadAccProducts().then(rows => { if (active) setAccProducts(rows) }).catch(() => {})
     return () => { active = false }
   }, [session?.profile])
 
   const flushSaleQueue = useCallback(async () => {
-    if (!session?.profile || !isAccConfigured() || queueFlushInFlight.current) return
+    if (!session?.profile || session.profile.localOnly || !isAccConfigured() || queueFlushInFlight.current) return
     const queued = read(SYNC_QUEUE_KEY, [])
     if (!queued.length) return
     queueFlushInFlight.current = true
@@ -79,16 +80,38 @@ export default function App() {
     try {
       for (const entry of queued) {
         try {
-          await withSyncTimeout(saveAccSale(entry.sale, session.profile))
-          const sales = read('pos101.sales', [])
-          localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
+          if (entry.kind === 'expense') {
+            await withSyncTimeout(saveAccExpense(entry.expense, session.profile))
+            const expenses = read('pos101.expenses', [])
+            localStorage.setItem('pos101.expenses', JSON.stringify(expenses.map(row => row.id === entry.expense.id ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
+          } else if (entry.kind === 'purchase') {
+            await withSyncTimeout(saveAccPurchase(entry.purchase, session.profile))
+            const purchases = read('pos101.purchases', [])
+            localStorage.setItem('pos101.purchases', JSON.stringify(purchases.map(row => row.id === entry.purchase.id ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
+          } else {
+            await withSyncTimeout(saveAccSale(entry.sale, session.profile))
+            const sales = read('pos101.sales', [])
+            localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
+          }
+          window.dispatchEvent(new Event('pos101-sync-updated'))
         } catch (error) {
           if (transientSyncError(error)) {
             remaining.push(entry)
           } else {
             // Permanent failure during retry
-            const sales = read('pos101.sales', [])
-            localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'failed', syncError: String(error?.message || error) } : row)))
+            if (entry.kind === 'expense') {
+              const expenses = read('pos101.expenses', [])
+              localStorage.setItem('pos101.expenses', JSON.stringify(expenses.map(row => row.id === entry.expense.id ? { ...row, status: 'pending_sync', syncError: String(error?.message || error) } : row)))
+              remaining.push(entry)
+            } else if (entry.kind === 'purchase') {
+              const purchases = read('pos101.purchases', [])
+              localStorage.setItem('pos101.purchases', JSON.stringify(purchases.map(row => row.id === entry.purchase.id ? { ...row, status: 'pending_sync', syncError: String(error?.message || error) } : row)))
+              remaining.push(entry)
+            } else {
+              const sales = read('pos101.sales', [])
+              localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'failed', syncError: String(error?.message || error) } : row)))
+            }
+            window.dispatchEvent(new Event('pos101-sync-updated'))
             console.error('Permanent sync failure in queue:', error)
           }
         }
@@ -101,7 +124,7 @@ export default function App() {
   }, [session?.profile])
 
   useEffect(() => {
-    if (!session?.profile) return undefined
+    if (!session?.profile || session.profile.localOnly) return undefined
     // Auth restoration after a page refresh is asynchronous. Retry the queue
     // when Firebase confirms the user, rather than leaving a valid pending sale
     // stranded after the first pre-auth attempt.
@@ -490,6 +513,7 @@ export default function App() {
       {currentView === 'expenses' && session && (
         <Expenses session={session} onNavigate={setCurrentView} />
       )}
+      {currentView === 'purchases' && session && <Purchases session={session} onNavigate={setCurrentView} />}
       {currentView === 'expense-entry' && session && (
         <Expenses session={session} onNavigate={setCurrentView} />
       )}
