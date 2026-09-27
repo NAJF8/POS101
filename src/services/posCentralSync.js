@@ -21,7 +21,6 @@ import {
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
 const useEmulator = env.VITE_POS101_USE_FIREBASE_EMULATOR === 'true' && localHost
-const productionEnabled = env.VITE_POS101_ENABLE_PRODUCTION_SYNC === 'true'
 const emulatorHost = env.VITE_POS101_EMULATOR_HOST || '127.0.0.1'
 const emulatorProjectId = env.VITE_POS101_EMULATOR_PROJECT_ID || 'cmms-37512-pos-emulator'
 
@@ -98,7 +97,6 @@ const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(s
 
 const requireReady = async () => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
-  if (!useEmulator && !productionEnabled) throw Object.assign(new Error('المزامنة المركزية للإنتاج متوقفة حتى اعتماد Auth وRules واختبار Production.'), { code: 'PRODUCTION_SYNC_DISABLED' })
   await authReady
   if (!auth?.currentUser) throw Object.assign(new Error('تسجيل دخول Firebase مطلوب للمزامنة.'), { code: 'AUTH_REQUIRED' })
   if (auth.currentUser.email !== CENTRAL_SYNC_EMAIL || auth.currentUser.uid !== CENTRAL_SYNC_UID) {
@@ -189,7 +187,7 @@ export const syncCentralSales = async ({ initial = false } = {}) => {
 }
 
 export const subscribeCentralSales = callback => {
-  if (!configured || !db || !auth?.currentUser || (!useEmulator && !productionEnabled)) return () => {}
+  if (!configured || !db || !auth?.currentUser) return () => {}
   return onValue(salesRef(), snapshot => {
     const centralSales = centralValues(snapshot)
     const merged = mergeCentralSalesLocally(centralSales)
