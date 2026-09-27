@@ -49,6 +49,14 @@ export function Purchases({ onNavigate, session }) {
   const selectedInventory = inventory.find(row => String(row.id) === String(inventoryItemId))
   const total = useMemo(() => purchases.reduce((sum, row) => sum + Number(row.total_after_discount ?? row.total ?? 0), 0), [purchases])
   const saveRows = rows => { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); setPurchases(rows) }
+  const deletePurchase = id => {
+    if (!window.confirm('هل تريد حذف عملية الشراء هذه؟')) return
+    const nextPurchases = purchases.filter(row => String(row.id) !== String(id))
+    const nextQueue = read(SYNC_QUEUE_KEY, []).filter(entry => !(entry.kind === 'purchase' && String(entry.purchase?.id) === String(id)))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextPurchases))
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(nextQueue))
+    setPurchases(nextPurchases)
+  }
   const reset = () => { setItem(''); setInventoryItemId(''); setSupplierId(''); setQuantity('1'); setPurchaseUnit(''); setUnitCost(''); setSupplier(''); setPaymentMethod('cash'); setPaidAmount(''); setNotes('') }
   const submit = async e => {
     e.preventDefault()
@@ -106,8 +114,8 @@ export function Purchases({ onNavigate, session }) {
       <label className="expense-notes">ملاحظات<input value={notes} onChange={e => setNotes(e.target.value)} /></label>
     </div><div className="expense-form-actions"><button className="primary-action" type="submit">حفظ الشراء</button></div></form>
     <div className="report-card expense-total"><h3>إجمالي المشتريات: {formatMoney(total)}</h3></div>
-    <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>الصنف</th><th>الكمية</th><th>الإجمالي</th><th>المجهز</th><th>الحالة</th></tr></thead><tbody>
-      {purchases.length === 0 ? <tr><td colSpan="6" className="empty-cell">لا توجد مشتريات مسجلة</td></tr> : purchases.slice().reverse().map(row => <tr key={row.id}><td>{formatDateTime(row.date || row.createdAt)}</td><td>{row.inventory_item_name || row.item}</td><td>{row.quantity}</td><td className="expense-amount">{formatMoney(row.total_after_discount ?? row.total)}</td><td>{row.supplier_name || row.supplier || '—'}</td><td><span className={`sync-state ${row.status || 'disabled'}`}>{row.status === 'synced' ? 'متزامن' : row.status === 'pending_sync' ? 'بانتظار المزامنة' : row.status === 'failed' ? 'فشلت المزامنة' : 'محلي فقط'}</span></td></tr>)}
+    <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>الصنف</th><th>الكمية</th><th>الإجمالي</th><th>المجهز</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>
+      {purchases.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مشتريات مسجلة</td></tr> : purchases.slice().reverse().map(row => <tr key={row.id}><td>{formatDateTime(row.date || row.createdAt)}</td><td>{row.inventory_item_name || row.item}</td><td>{row.quantity}</td><td className="expense-amount">{formatMoney(row.total_after_discount ?? row.total)}</td><td>{row.supplier_name || row.supplier || '—'}</td><td><span className={`sync-state ${row.status || 'disabled'}`}>{row.status === 'synced' ? 'متزامن' : row.status === 'pending_sync' ? 'بانتظار المزامنة' : row.status === 'failed' ? 'فشلت المزامنة' : 'محلي فقط'}</span></td><td><button type="button" className="history-void" onClick={() => deletePurchase(row.id)} aria-label="حذف عملية الشراء" title="حذف">🗑️ حذف</button></td></tr>)}
     </tbody></table></div>
   </div>
 }

@@ -177,7 +177,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
 
   const printReportDirect = () => {
     if (!directThermalReady || !onDirectThermalPrint) return
-    const titleByType = { comprehensive: 'تقرير شامل', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
+    const titleByType = { comprehensive: 'تقرير شامل', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
     onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', dateFrom, dateTo, period: `${dateFrom} - ${dateTo}`, sales: filteredSales, expenses: filteredExpenses })
   }
 
@@ -202,6 +202,11 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
             <Icon name="file-text" size={40} />
             <b>تقرير شامل (صباحي ومسائي)</b>
             <small>جميع المبيعات والمصاريف على فترة محددة</small>
+          </button>
+          <button className="report-card-btn" onClick={() => setReportType('sales')}>
+            <Icon name="receipt" size={40} />
+            <b>تقرير الطلبات / المبيعات</b>
+            <small>كل عمليات البيع ضمن الفترة المحددة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('morning')}>
             <Icon name="sun" size={40} />
@@ -416,6 +421,23 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
             </table>
           </>
         })()}
+      </>
+    } else if (reportType === 'sales') {
+      title = 'تقرير الطلبات / المبيعات'
+      const stats = aggregateSales(filteredSales)
+      const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
+      const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
+      content = <>
+        <table className="print-table report-summary" data-testid="sales-report-summary">
+          <tbody>
+            <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(stats.count)}</td></tr>
+            <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(stats.net)}</td></tr>
+            <tr><td>إجمالي الخصم</td><td className="number-cell">{format(stats.discounts)}</td></tr>
+            <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
+            <tr><td>الإلكتروني</td><td className="number-cell">{format(electronicTotal)}</td></tr>
+          </tbody>
+        </table>
+        {thermalSalesDetails(filteredSales)}
       </>
     } else if (reportType === 'morning' || reportType === 'evening') {
       const isMorning = reportType === 'morning'
