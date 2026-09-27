@@ -108,6 +108,7 @@ export default function OrderHistoryMenu({ onClose, session }) {
     const audit = { id: crypto.randomUUID(), type: 'void', at: voidedAt, cashierId: session?.cashierId || null, cashierNameSnapshot: session?.cashierNameSnapshot || null }
     const nextSales = sales.map(entry => entry.id === sale.id ? { ...entry, status: 'voided', voidedAt, audit: [...(entry.audit || []), audit] } : entry)
     localStorage.setItem('pos101.sales', JSON.stringify(nextSales))
+    window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: nextSales.find(entry => entry.id === sale.id) }))
     setSales(nextSales)
     setSelectedSale(nextSales.find(entry => entry.id === sale.id))
   }

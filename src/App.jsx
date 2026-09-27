@@ -12,7 +12,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { CENTRAL_SYNC_EMAIL, centralAuth, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth } from './services/posCentralSync.js'
+import { CENTRAL_SYNC_EMAIL, CENTRAL_SYNC_UID, centralAuth, getCentralSyncState, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, syncCentralSales } from './services/posCentralSync.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 
@@ -56,7 +56,7 @@ export default function App() {
   const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const [syncBusy, setSyncBusy] = useState(false)
-  const [syncLabel, setSyncLabel] = useState('تسجيل دخول المزامنة')
+  const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
   const centralListener = useRef(null)
   const [salesMaintenanceOpen, setSalesMaintenanceOpen] = useState(false)
@@ -106,8 +106,19 @@ export default function App() {
 
   useEffect(() => {
     const stopAuth = subscribeCentralAuth(user => {
-      setSyncLabel(user ? 'مزامنة' : 'تسجيل دخول المزامنة')
-      if (!user) setSyncAuthStatus(null)
+      centralListener.current?.()
+      centralListener.current = null
+      setSyncLabel(user ? 'مزامنة' : 'المزامنة جاهزة')
+      if (!user) {
+        setSyncAuthStatus(null)
+        return
+      }
+      centralListener.current = subscribeCentralSales(({ centralCount }) => {
+        setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
+      })
+      if (getCentralSyncState().initialSyncCompleted) {
+        void syncCentralSales().catch(() => {})
+      }
     })
     return () => {
       stopAuth?.()
@@ -118,23 +129,41 @@ export default function App() {
   const loginSync = useCallback(async () => {
     if (syncBusy) return
     setSyncBusy(true)
-    setSyncLabel('جارٍ تسجيل الدخول...')
+    setSyncLabel('جاري المزامنة...')
     try {
       const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
-      if (user.email !== CENTRAL_SYNC_EMAIL) {
+      if (user.email !== CENTRAL_SYNC_EMAIL || user.uid !== CENTRAL_SYNC_UID) {
         await signOutCentral()
         throw new Error(`الحساب ${user.email || 'المختار'} غير مخول للمزامنة.`)
       }
       const providerId = user.providerData?.[0]?.providerId || 'google.com'
-      setSyncLabel('تم تسجيل دخول المزامنة')
-      setSyncAuthStatus({ ok: true, uid: user.uid, email: user.email, providerId })
+      const initial = !getCentralSyncState().initialSyncCompleted
+      const result = await syncCentralSales({ initial })
+      setSyncLabel('تمت المزامنة')
+      setSyncAuthStatus({ ok: true, uid: user.uid, email: user.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount })
     } catch (error) {
-      setSyncLabel('تسجيل دخول المزامنة')
+      setSyncLabel(navigator.onLine === false ? 'محلي - بانتظار الاتصال' : 'المزامنة جاهزة')
       setSyncAuthStatus({ ok: false, message: error.message })
     } finally {
       setSyncBusy(false)
     }
   }, [syncBusy])
+
+  useEffect(() => {
+    const retry = () => {
+      if (centralAuth()?.currentUser && getCentralSyncState().initialSyncCompleted) {
+        void syncCentralSales().catch(() => {})
+      }
+    }
+    window.addEventListener('pos101-sale-created', retry)
+    window.addEventListener('pos101-sale-updated', retry)
+    window.addEventListener('online', retry)
+    return () => {
+      window.removeEventListener('pos101-sale-created', retry)
+      window.removeEventListener('pos101-sale-updated', retry)
+      window.removeEventListener('online', retry)
+    }
+  }, [])
 
   const refreshThermalStatus = useCallback(async settings => {
     try {
@@ -475,7 +504,7 @@ export default function App() {
       {syncAuthStatus && (
         <div className={`print-status ${syncAuthStatus.ok ? '' : 'error'}`} role="status">
           {syncAuthStatus.ok ? (
-            <span>تم تسجيل دخول المزامنة — {syncAuthStatus.email} — UID: {syncAuthStatus.uid} — Provider: {syncAuthStatus.providerId}</span>
+            <span>تمت المزامنة{Number.isFinite(syncAuthStatus.uploaded) ? ` — ${syncAuthStatus.uploaded} مبيعات جديدة` : ''}</span>
           ) : (
             <span>{syncAuthStatus.message}</span>
           )}

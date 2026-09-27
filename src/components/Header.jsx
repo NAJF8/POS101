@@ -59,9 +59,9 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
               <Icon name="download" size={20} />
               <span>تنزيل نسخة المبيعات</span>
             </button>
-            <button className="header-btn outline-btn" type="button" onClick={onSyncSales} disabled={syncBusy} aria-label="تسجيل دخول المزامنة">
+            <button className="header-btn outline-btn" type="button" onClick={onSyncSales} disabled={syncBusy} aria-label="مزامنة المبيعات">
               <Icon name="refresh" size={20} />
-              <span>{syncBusy ? 'جارٍ...' : syncLabel}</span>
+              <span>{syncBusy ? 'جاري المزامنة...' : syncLabel}</span>
             </button>
             <button className="header-btn outline-btn maintenance-btn" type="button" onClick={onOpenSalesMaintenance} aria-label="تنظيف الطلبات القديمة">
               <span aria-hidden="true">⚠</span>

@@ -54,7 +54,8 @@ if (configured) {
 
 const SALES_KEY = 'pos101.sales'
 export const CENTRAL_SYNC_EMAIL = '101cofeehouse@gmail.com'
-const SYNC_ACTIVATED_AT_KEY = 'pos101.syncActivatedAt'
+export const CENTRAL_SYNC_UID = '4Tx0bMygd8gVuDDDOblnt3HOvo72'
+const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const readSales = () => {
@@ -75,51 +76,35 @@ const centralValues = snapshot => snapshot.exists()
   ? Object.entries(snapshot.val() || {}).map(([key, value]) => normalizeRemoteSale(value, key)).filter(sale => saleIdOf(sale))
   : []
 
-const mergeBySaleId = (localSales, centralSales) => {
+export const mergeBySaleId = (localSales, centralSales) => {
   const merged = new Map()
   for (const sale of localSales) if (saleIdOf(sale)) merged.set(saleIdOf(sale), sale)
-  for (const sale of centralSales) if (saleIdOf(sale) && !merged.has(saleIdOf(sale))) merged.set(saleIdOf(sale), sale)
+  for (const sale of centralSales) if (saleIdOf(sale)) {
+    const id = saleIdOf(sale)
+    const local = merged.get(id)
+    // Central is authoritative for a known sale update (void/audit/status),
+    // while local-only sales remain untouched until they are uploaded.
+    merged.set(id, local ? { ...local, ...sale, items: sale.items || local.items } : sale)
+  }
   return [...merged.values()]
 }
 
-const readSyncActivatedAt = () => {
-  const value = Number(localStorage.getItem(SYNC_ACTIVATED_AT_KEY))
-  return Number.isFinite(value) && value > 0 ? value : null
-}
+const readInitialSyncCompleted = () => localStorage.getItem(INITIAL_SYNC_COMPLETED_KEY) === 'true'
+const markInitialSyncCompleted = () => localStorage.setItem(INITIAL_SYNC_COMPLETED_KEY, 'true')
+const validSaleId = saleId => Boolean(saleId && !/[.#$\[\]/]/.test(saleId))
+export const isSaleEligibleForCentralUpload = sale => validSaleId(saleIdOf(sale))
 
-const activationTimeForUser = user => {
-  const existing = readSyncActivatedAt()
-  if (existing) return existing
-  const createdAt = Date.parse(user?.metadata?.creationTime || '')
-  if (!Number.isFinite(createdAt) || createdAt <= 0) throw new Error('تعذر تحديد وقت تفعيل المزامنة من Firebase Auth.')
-  localStorage.setItem(SYNC_ACTIVATED_AT_KEY, String(createdAt))
-  return createdAt
-}
-
-const eligibleForUpload = (sale, syncActivatedAt) => {
-  const createdAt = Number(sale?.createdAt)
-  return Number.isFinite(createdAt) && createdAt >= syncActivatedAt
-}
-
-const serializeSale = sale => ({
-  ...sale,
-  saleId: saleIdOf(sale),
-  id: saleIdOf(sale),
-  source: 'POS101',
-  source_channel: 'POS101',
-  syncedAt: Date.now(),
-})
+const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(sale) })
 
 const requireReady = async () => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   if (!useEmulator && !productionEnabled) throw Object.assign(new Error('المزامنة المركزية للإنتاج متوقفة حتى اعتماد Auth وRules واختبار Production.'), { code: 'PRODUCTION_SYNC_DISABLED' })
   await authReady
   if (!auth?.currentUser) throw Object.assign(new Error('تسجيل دخول Firebase مطلوب للمزامنة.'), { code: 'AUTH_REQUIRED' })
-  if (auth.currentUser.email !== CENTRAL_SYNC_EMAIL) {
+  if (auth.currentUser.email !== CENTRAL_SYNC_EMAIL || auth.currentUser.uid !== CENTRAL_SYNC_UID) {
     await signOut(auth)
-    throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_EMAIL' })
+    throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_ACCOUNT' })
   }
-  activationTimeForUser(auth.currentUser)
 }
 
 export const isCentralConfigured = () => configured
@@ -133,9 +118,9 @@ export const signInCentralWithGoogle = async () => {
   provider.setCustomParameters({ login_hint: CENTRAL_SYNC_EMAIL })
   const result = await signInWithPopup(auth, provider)
   const user = result.user
-  if (user.email !== CENTRAL_SYNC_EMAIL) {
+  if (user.email !== CENTRAL_SYNC_EMAIL || user.uid !== CENTRAL_SYNC_UID) {
     await signOut(auth)
-    throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_EMAIL' })
+    throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_ACCOUNT' })
   }
   return user
 }
@@ -147,37 +132,39 @@ export const inspectLocalSales = () => {
   return { count: sales.length, latestOrderNumber: latest?.orderNumber ?? null, latestCreatedAt: latest?.createdAt ?? null }
 }
 
-export const setCentralSyncActivatedAt = user => ({ syncActivatedAt: activationTimeForUser(user || auth?.currentUser) })
-export const getCentralSyncActivatedAt = () => ({ syncActivatedAt: readSyncActivatedAt() })
+export const getCentralSyncState = () => ({ initialSyncCompleted: readInitialSyncCompleted() })
 
 export const mergeCentralSalesLocally = centralSales => {
   const localSales = readSales()
   const merged = mergeBySaleId(localSales, centralSales)
-  if (merged.length !== localSales.length) {
+  if (JSON.stringify(merged) !== JSON.stringify(localSales)) {
     writeSales(merged)
     dispatchUpdated()
   }
   return merged
 }
 
-export const syncCentralSales = async () => {
+export const syncCentralSales = async ({ initial = false } = {}) => {
   await requireReady()
   const localSales = readSales()
   const before = await get(salesRef())
   const beforeCentral = centralValues(before)
   const centralIds = new Set(beforeCentral.map(saleIdOf))
-  const syncActivatedAt = activationTimeForUser(auth.currentUser)
-  const candidates = localSales.filter(sale => eligibleForUpload(sale, syncActivatedAt))
-  const uploadable = candidates.filter(sale => !centralIds.has(saleIdOf(sale)) && saleIdOf(sale))
+  const candidates = (initial || readInitialSyncCompleted())
+    ? localSales.filter(isSaleEligibleForCentralUpload)
+    : []
+  const uploadable = candidates
   let uploaded = 0
+  let updated = 0
   for (const sale of uploadable) {
     const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
     try {
       await set(saleRef, serializeSale(sale))
-      uploaded += 1
+      if (centralIds.has(saleIdOf(sale))) updated += 1
+      else uploaded += 1
     } catch (error) {
       // Another authorized device may have created the same sale concurrently.
-      // Treat an identical read-back as idempotent; never overwrite it.
+      // A successful read-back of the same saleId is an idempotent retry.
       const readBack = await get(saleRef)
       if (!readBack.exists() || saleIdOf(readBack.val()) !== saleIdOf(sale)) throw error
     }
@@ -188,13 +175,15 @@ export const syncCentralSales = async () => {
   const merged = mergeBySaleId(localSales, afterCentral)
   writeSales(merged)
   dispatchUpdated()
+  if (initial) markInitialSyncCompleted()
   return {
     uploaded,
     received: afterCentral.filter(sale => !localSales.some(local => saleIdOf(local) === saleIdOf(sale))).length,
     centralCount: afterCentral.length,
     mergedCount: merged.length,
     localCount: localSales.length,
-    syncActivatedAt,
+    updated,
+    initialSyncCompleted: readInitialSyncCompleted(),
     uploadBlocked: false,
   }
 }

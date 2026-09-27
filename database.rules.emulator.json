@@ -1,0 +1,17 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "pos101_authorized_uids": {
+      ".read": false,
+      ".write": false
+    },
+    "pos101_sales": {
+      ".read": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).val() === true",
+      "$saleId": {
+        ".write": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).val() === true && newData.exists() && newData.child('saleId').val() === $saleId",
+        ".validate": "newData.hasChildren(['saleId', 'createdAt', 'orderNumber', 'total'])"
+      }
+    }
+  }
+}
