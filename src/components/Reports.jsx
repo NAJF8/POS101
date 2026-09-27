@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
@@ -132,7 +132,16 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
   // Keep reporting local-only until the ACC/Firebase source is explicitly
   // reconciled. A report must never silently mix another cashier's data with
   // this device's local ledger.
-  const sales = useMemo(() => readLocalSales(), [])
+  const [sales, setSales] = useState(readLocalSales)
+  useEffect(() => {
+    const refresh = () => setSales(readLocalSales())
+    window.addEventListener('pos101-sales-updated', refresh)
+    window.addEventListener('pos101-sale-created', refresh)
+    return () => {
+      window.removeEventListener('pos101-sales-updated', refresh)
+      window.removeEventListener('pos101-sale-created', refresh)
+    }
+  }, [])
   const expenses = useMemo(() => {
     const rows = read('pos101.expenses', [])
     return rows.map(row => ({
