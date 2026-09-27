@@ -75,7 +75,9 @@ export default function App() {
   const openOrdersCount = orders.filter(o => o.held && !o.completed).length
 
   const catalogProducts = products
-  const catalogCategories = categories
+  // Categories are navigation data, not a projection of the current product
+  // list. Keep empty categories clickable so their empty state remains useful.
+  const catalogCategories = useMemo(() => categories.slice(), [])
   const visibleProducts = useMemo(
     () => catalogProducts.filter(p =>
       (categoryId(category) === categoryId('الكل') || categoryId(p.categoryId || p.category) === categoryId(category)) &&
