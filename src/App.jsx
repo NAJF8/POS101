@@ -12,7 +12,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { CENTRAL_SYNC_EMAIL, CENTRAL_SYNC_UID, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, readCentralSalesReadOnly, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly, syncCentralSales } from './services/posCentralSync.js'
+import { centralAuth, getCentralPermissions, getCentralRole, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, readCentralSalesReadOnly, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly, syncCentralSales } from './services/posCentralSync.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 
@@ -114,7 +114,7 @@ export default function App() {
       centralListener.current?.()
       centralListener.current = null
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
-      setSyncLabel(user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
+      setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (!user) {
         setSyncAuthStatus(null)
         return
@@ -168,11 +168,20 @@ export default function App() {
     setSyncLabel('جاري المزامنة...')
     try {
       const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
-      if (user.email !== CENTRAL_SYNC_EMAIL || user.uid !== CENTRAL_SYNC_UID) {
+      const role = getCentralRole(user)
+      const permissions = getCentralPermissions(user)
+      if (!permissions.centralRead) {
         await signOutCentral()
-        throw new Error(`الحساب ${user.email || 'المختار'} غير مخول للمزامنة.`)
+        throw new Error('هذا الحساب غير مخول للوصول المركزي.')
       }
       const providerId = user.providerData?.[0]?.providerId || 'google.com'
+      if (role === 'admin-viewer') {
+        const centralSales = await readCentralSalesReadOnly()
+        setAdminCentralSales(centralSales)
+        setSyncLabel('تم تحديث المبيعات')
+        setSyncAuthStatus({ ok: true, role, uid: user.uid, email: user.email, providerId, uploaded: 0, centralCount: centralSales.length, readOnly: true, message: 'تم تحديث المبيعات' })
+        return
+      }
       const initial = !getCentralSyncState().initialSyncCompleted
       const result = await syncCentralSales({ initial })
       setSyncLabel('تمت المزامنة')
@@ -563,7 +572,7 @@ export default function App() {
       {syncAuthStatus && (
         <div className={`print-status ${syncAuthStatus.ok ? '' : 'error'}`} role="status">
           {syncAuthStatus.ok ? (
-            <span>تمت المزامنة{Number.isFinite(syncAuthStatus.uploaded) ? ` — ${syncAuthStatus.uploaded} مبيعات جديدة` : ''}</span>
+            <span>{syncAuthStatus.message || 'تمت المزامنة'}{!syncAuthStatus.readOnly && Number.isFinite(syncAuthStatus.uploaded) ? ` — ${syncAuthStatus.uploaded} مبيعات جديدة` : ''}</span>
           ) : (
             <span>{syncAuthStatus.message}</span>
           )}

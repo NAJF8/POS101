@@ -52,7 +52,7 @@ if (configured) {
 }
 
 const SALES_KEY = 'pos101.sales'
-export const CENTRAL_SYNC_EMAIL = '101cofeehouse@gmail.com'
+const CASHIER_LOGIN_HINT_EMAIL = '101cofeehouse@gmail.com'
 export const CENTRAL_SYNC_UID = '4Tx0bMygd8gVuDDDOblnt3HOvo72'
 export const ADMIN_UID = 'rtDA9erW11geHfLpa3ZW3LacZR73'
 export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
@@ -101,9 +101,9 @@ const requireReady = async () => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   if (!auth?.currentUser) throw Object.assign(new Error('تسجيل دخول Firebase مطلوب للمزامنة.'), { code: 'AUTH_REQUIRED' })
-  if (auth.currentUser.email !== CENTRAL_SYNC_EMAIL || auth.currentUser.uid !== CENTRAL_SYNC_UID) {
+  if (getCentralRole(auth.currentUser) !== 'cashier-sync') {
     await signOut(auth)
-    throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_ACCOUNT' })
+    throw Object.assign(new Error('هذا الحساب لا يملك صلاحية رفع المبيعات.'), { code: 'CENTRAL_WRITE_BLOCKED' })
   }
 }
 
@@ -111,18 +111,27 @@ export const isCentralConfigured = () => configured
 export const isCentralEmulator = () => useEmulator
 export const centralAuth = () => auth
 export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, callback) : () => {}
-export const isCentralCashierUser = user => Boolean(user?.email === CENTRAL_SYNC_EMAIL && user?.uid === CENTRAL_SYNC_UID)
-export const isCentralAdminUser = user => Boolean(user?.email === ADMIN_EMAIL && user?.uid === ADMIN_UID)
+export const getCentralRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
+export const getCentralPermissions = user => {
+  const role = getCentralRole(user)
+  return role === 'cashier-sync'
+    ? { centralRead: true, centralWrite: true, uploadLocalSales: true, autoUpload: true, realtimeRead: true, downloadMerge: true }
+    : role === 'admin-viewer'
+      ? { centralRead: true, centralWrite: false, uploadLocalSales: false, autoUpload: false, realtimeRead: true, downloadMerge: true }
+      : { centralRead: false, centralWrite: false, uploadLocalSales: false, autoUpload: false, realtimeRead: false, downloadMerge: false }
+}
+export const isCentralCashierUser = user => getCentralRole(user) === 'cashier-sync'
+export const isCentralAdminUser = user => getCentralRole(user) === 'admin-viewer'
 export const signInCentralWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
   await authReady
   const provider = new GoogleAuthProvider()
-  provider.setCustomParameters({ login_hint: CENTRAL_SYNC_EMAIL })
+  provider.setCustomParameters({ login_hint: CASHIER_LOGIN_HINT_EMAIL })
   const result = await signInWithPopup(auth, provider)
   const user = result.user
-  if (user.email !== CENTRAL_SYNC_EMAIL || user.uid !== CENTRAL_SYNC_UID) {
+  if (!isCentralCashierUser(user)) {
     await signOut(auth)
-    throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_ACCOUNT' })
+    throw Object.assign(new Error('هذا الحساب لا يملك صلاحية رفع المبيعات.'), { code: 'CENTRAL_WRITE_BLOCKED' })
   }
   return user
 }
@@ -203,7 +212,7 @@ export const syncCentralSales = async ({ initial = false } = {}) => {
 }
 
 export const subscribeCentralSales = callback => {
-  if (!configured || !db || !auth?.currentUser) return () => {}
+  if (!configured || !db || !isCentralCashierUser(auth?.currentUser)) return () => {}
   return onValue(salesRef(), snapshot => {
     const centralSales = centralValues(snapshot)
     const merged = mergeCentralSalesLocally(centralSales)
