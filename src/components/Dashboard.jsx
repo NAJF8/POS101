@@ -4,7 +4,7 @@ import { Icon } from './Icons'
 export default function Dashboard({ onNavigate, onLogout }) {
   const cards = [
     { id: 'pos', title: 'الكاشير', icon: 'monitor', action: () => onNavigate('pos') },
-    { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => alert('تحت التطوير') },
+    { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => onNavigate('orders') },
     { id: 'inventory', title: 'المخزون', icon: 'box', action: () => alert('تحت التطوير') },
     { id: 'reports', title: 'التقارير', icon: 'chart', action: () => onNavigate('reports') },
     { id: 'expenses', title: 'المصاريف', icon: 'wallet', action: () => onNavigate('expenses') },

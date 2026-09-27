@@ -462,8 +462,17 @@ export default function App() {
         />
       )}
 
-      {currentView === 'dashboard' && session && (
+      {currentView === 'dashboard' && (session || adminReady) && (
         <Dashboard onNavigate={setCurrentView} onLogout={logout} />
+      )}
+
+      {currentView === 'orders' && (session || adminReady) && (
+        <OrderHistoryMenu
+          session={session}
+          salesOverride={adminReady ? adminCentralSales : null}
+          readOnly
+          onClose={() => setCurrentView('dashboard')}
+        />
       )}
 
       {currentView === 'pos' && session && (
@@ -510,7 +519,7 @@ export default function App() {
       )}
       {currentView === 'reports-captain' && session && <Reports session={session} onNavigate={setCurrentView} />}
 
-      {adminReady && !session && (
+      {adminReady && !session && currentView === 'dashboard' && (
         <section className="admin-central-readonly" dir="rtl" aria-label="مركز مبيعات الإدارة">
           <header className="admin-central-head">
             <div><h1>الإدارة متصلة</h1><p>قراءة مركزية مباشرة — {adminCentralSales.length} مبيعات فريدة</p></div>
@@ -523,7 +532,7 @@ export default function App() {
       )}
 
       {/* Login gate */}
-      {!session && (
+      {!session && !adminReady && (
         <ShiftLogin
           shifts={shifts}
           onClose={() => {}}
