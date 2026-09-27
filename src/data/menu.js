@@ -20,7 +20,8 @@ const rows = [
   ['مشروبات باردة','آيس لاتيه كلاسيك','Classic Iced Latte',5000],['مشروبات باردة','آيس سبانيش لاتيه','Spanish Iced Latte',5500],['مشروبات باردة','لاتيه بنكهات','Flavored Latte',5500],['مشروبات باردة','لاتيه فستق','Pistachio Latte',5500],['مشروبات باردة','آيس موكا','Iced Mocha',5500],['مشروبات باردة','ماتشا','Matcha',6500],['مشروبات باردة','سموذي','Smoothie',5500],['مشروبات باردة','ميلك شيك','Milkshake',6000],['مشروبات باردة','آيس تي','Iced Tea',5000],['مشروبات باردة','آيس أمريكانو','Iced Americano',4500],['مشروبات باردة','عصير برتقال','Orange Juice',4500],['مشروبات باردة','ليمون بالنعناع','Mint Lemonade',4500],['مشروبات باردة','حليب بالموز','Banana Milk',4500],['مشروبات باردة','كركديه','Hibiscus',5000],['مشروبات باردة','موهيتو','Mojito',5000],['مشروبات باردة','مشروب مكسيكي','Mexican Drink',4000],
   ['مشروبات 101','سكنجر 101','Skenger 101',5000],['مشروبات 101','فرابيه','Frappe',5500],['مشروبات 101','كولدن شيل','Golden Shake',5500],['مشروبات 101','صيف','Summer',4500],
   ['حلويات','براوني','Brownie',4000],['حلويات','براوني مع آيس كريم','Brownie with Ice Cream',5000],['حلويات','افوكاتو','Affogato',5500],['حلويات','تشيز كيك','Cheesecake',5500],['حلويات','موس كيك','Mousse Cake',5000],['حلويات','سان أوريجينال','San Original',6000],['حلويات','سان بلوبيري','San Blueberry',5500],['حلويات','مافن','Muffin',3000],['حلويات','كوكيز','Cookies',3000],['حلويات','كيك تراميسو','Tiramisu Cake',5000],
-  ['إضافات/أخرى','مياه معدنية','Mineral Water',1000]
+  ['إضافات/أخرى','مياه معدنية','Mineral Water',1000],
+  ['ساندويتشات','ساندويش دجاج','Chicken Sandwich',3500]
 ]
 
 const imageMap = {
@@ -70,7 +71,19 @@ const imageMap = {
   50:'assets/products/1789207678103-2c05a4ed28a64c75bc307ca1d0ab0378.png',
 }
 
-export const products = rows.map(([category, name, english, price], index) => ({ id: index + 1, category, categoryId: categoryId(category), name, english, price, image: imageMap[index + 1] ? `${import.meta.env.BASE_URL}${imageMap[index + 1]}` : null, unavailable: price === null, configurable: ['لاتيه كلاسيك','سبانيش لاتيه','لاتيه بنكهات','آيس لاتيه كلاسيك','آيس سبانيش لاتيه','موكا'].includes(name), favorite: index < 6 }))
+export const products = rows.map(([category, name, english, price], index) => ({
+  id: index + 1,
+  category,
+  categoryId: categoryId(category),
+  category_id: category === 'ساندويتشات' ? 'sandwiches' : categoryId(category),
+  name,
+  english,
+  price,
+  image: imageMap[index + 1] ? `${import.meta.env.BASE_URL}${imageMap[index + 1]}` : null,
+  unavailable: price === null,
+  configurable: ['لاتيه كلاسيك','سبانيش لاتيه','لاتيه بنكهات','آيس لاتيه كلاسيك','آيس سبانيش لاتيه','موكا'].includes(name),
+  favorite: index < 6,
+}))
 
 // The authoritative menu currently stores Arabic in `name` and the optional
 // secondary English label in `english`; alternate established keys stay safe.
