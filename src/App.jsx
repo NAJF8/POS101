@@ -11,7 +11,7 @@ import { Purchases } from './components/Purchases'
 import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, readPendingSaleCount, readSalesCount, reconcileSalesQueue, buildSalesBackup } from './services/salesSyncQueue'
+import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
 import { formatNumber } from './utils.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -53,20 +53,7 @@ export default function App() {
   const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
   const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
-  const [syncNotice, setSyncNotice] = useState(null)
-  const [pendingSaleCount, setPendingSaleCount] = useState(() => readPendingSaleCount())
-  const [syncBusy, setSyncBusy] = useState(false)
   const saleInFlight = useRef(false)
-  const syncSalesNow = useCallback(() => {
-    if (syncBusy) return
-    setSyncBusy(true)
-    try {
-      reconcileSalesQueue()
-      const count = readPendingSaleCount()
-      setPendingSaleCount(count)
-      setSyncNotice({ status: 'pending', text: `تم تجهيز ${formatNumber(readSalesCount())} عملية للمزامنة. المبيعات محفوظة بأمان على الجهاز ولم تُرسل إلى Firebase بعد.` })
-    } finally { setSyncBusy(false) }
-  }, [syncBusy])
 
   const downloadSalesBackup = useCallback(() => {
     const backup = buildSalesBackup()
@@ -77,14 +64,6 @@ export default function App() {
     anchor.download = `pos101-sales-backup-${backup.createdAt.replace(/[:.]/g, '-')}.json`
     anchor.click()
     URL.revokeObjectURL(url)
-    setSyncNotice({ status: 'pending', text: `تم تنزيل نسخة المبيعات المحلية (${formatNumber(backup.salesCount)} عملية)` })
-  }, [])
-
-  useEffect(() => {
-    const refreshPending = () => setPendingSaleCount(readPendingSaleCount())
-    window.addEventListener('pos101-sync-updated', refreshPending)
-    refreshPending()
-    return () => window.removeEventListener('pos101-sync-updated', refreshPending)
   }, [])
 
 
@@ -217,8 +196,6 @@ export default function App() {
     // 2. Persist the local ledger and deferred queue. No Firebase, ACC, Auth,
     // or Cloud Function call is allowed on this cashier-critical path.
     enqueueSale(sale)
-    setPendingSaleCount(readPendingSaleCount())
-    setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
     window.setTimeout(() => { saleInFlight.current = false }, 350)
     return true
   }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint])
@@ -329,8 +306,6 @@ export default function App() {
     return true
   }, [directThermalReady, printerSettings])
   const login = useCallback(async cashier => {
-    // A local shift is sufficient to sell. ACC-specific session fields and
-    // remote shift creation remain deliberately unused until phase two.
     setSession({
       cashierId: cashier.cashierId || cashier.shiftId,
       cashierNameSnapshot: cashier.name,
@@ -354,14 +329,6 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      {syncNotice && (
-        <div className={`sync-notice ${syncNotice.status}`} role="status">
-          {syncNotice.text || (syncNotice.status === 'pending'
-            ? `بيع محفوظ محلياً — بانتظار المزامنة (${formatNumber(syncNotice.count)})`
-            : `تم تأكيد مزامنة ${formatNumber(syncNotice.count)} بيع مع ACC-101`)}
-          <button type="button" onClick={() => setSyncNotice(null)} aria-label="إغلاق حالة المزامنة">×</button>
-        </div>
-      )}
       {session && (
         <Header
           session={session}
@@ -369,10 +336,7 @@ export default function App() {
           onCashierMenu={() => setModal('cashier-menu')}
           onLogout={logout}
           openOrdersCount={openOrdersCount}
-          onSyncSales={syncSalesNow}
           onDownloadSalesBackup={downloadSalesBackup}
-          pendingSaleCount={pendingSaleCount}
-          syncBusy={syncBusy}
           currentView={currentView}
           onNavigate={setCurrentView}
         />

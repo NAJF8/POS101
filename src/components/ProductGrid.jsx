@@ -93,7 +93,7 @@ export default function ProductGrid({
               </div>
             </button>
           })}
-          {products.length === 0 && <div className="empty-state">لا يوجد منتجات تطابق البحث</div>}
+          {products.length === 0 && <div className="empty-state">{query ? 'لا توجد منتجات تطابق البحث' : 'لا توجد منتجات في هذا القسم'}</div>}
         </div>
       </div>
     </section>

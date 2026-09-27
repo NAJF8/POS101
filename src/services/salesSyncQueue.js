@@ -41,6 +41,38 @@ export const readPendingSaleCount = () => {
   }, 0)
 }
 
+const centralIdentity = sale => ({
+  saleId: saleIdOf(sale),
+  operationKey: operationKeyOf(sale),
+})
+
+// Reconciliation is deliberately identity-only. It never uploads or changes
+// sale content; it marks a local row synced only after the same central
+// saleId/operationKey was independently read from Firebase.
+export const reconcileSalesAgainstCentral = centralSales => {
+  const central = new Map()
+  for (const sale of centralSales || []) {
+    const identity = centralIdentity(sale)
+    if (identity.saleId) central.set(`id:${identity.saleId}`, sale)
+    if (identity.operationKey) central.set(`op:${identity.operationKey}`, sale)
+  }
+  const sales = readJson(SALES_KEY, [])
+  const queue = readJson(QUEUE_KEY, [])
+  const reconciledIds = new Set()
+  for (const sale of sales) {
+    const identity = centralIdentity(sale)
+    if ((identity.saleId && central.has(`id:${identity.saleId}`)) || (identity.operationKey && central.has(`op:${identity.operationKey}`))) {
+      reconciledIds.add(identity.saleId)
+    }
+  }
+  if (!reconciledIds.size) return { reconciled: 0, remaining: readPendingSaleCount() }
+  writeJson(SALES_KEY, sales.map(sale => reconciledIds.has(saleIdOf(sale))
+    ? { ...sale, status: 'synced', syncConfirmedAt: Date.now(), syncSource: 'firebase-readback' }
+    : sale))
+  writeJson(QUEUE_KEY, queue.filter(entry => !isSaleEntry(entry) || !reconciledIds.has(saleIdOf(entry.sale))))
+  return { reconciled: reconciledIds.size, remaining: readPendingSaleCount() }
+}
+
 export const pendingSale = (sale, error) => ({
   ...sale,
   status: 'pending_sync',
@@ -54,11 +86,6 @@ export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
   if (!saleId) throw new Error('Cannot queue a sale without saleId.')
   const sales = readJson(SALES_KEY, [])
   if (!sales.some(row => sameSaleIdentity(row, sale))) writeJson(SALES_KEY, [...sales, sale])
-
-  const queue = readJson(QUEUE_KEY, [])
-  if (!queue.some(entry => isSaleEntry(entry) && sameSaleIdentity(entry.sale, sale))) {
-    writeJson(QUEUE_KEY, [...queue, { kind: 'sale', sale: pendingSale(sale, error), queuedAt }])
-  }
   return sale
 }
 
@@ -82,8 +109,7 @@ export const reconcileSalesQueue = () => {
 
 export const buildSalesBackup = (createdAt = new Date().toISOString()) => {
   const sales = readJson(SALES_KEY, [])
-  const syncQueue = readJson(QUEUE_KEY, [])
-  return { createdAt, salesCount: sales.length, 'pos101.sales': sales, 'pos101.syncQueue': syncQueue }
+  return { createdAt, salesCount: sales.length, 'pos101.sales': sales }
 }
 
 export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {

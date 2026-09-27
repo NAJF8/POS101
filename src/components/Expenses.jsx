@@ -1,20 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { isAccConfigured, saveAccExpense } from '../services/accSync'
 import { formatMoney, formatDateTime } from '../utils.js'
 
 const STORAGE_KEY = 'pos101.expenses'
-const SYNC_QUEUE_KEY = 'pos101.syncQueue'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
 const normalize = rows => rows.map(row => row?.id ? row : { ...row, id: makeId() })
 const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
-const transientSyncError = error => navigator.onLine === false || ['NETWORK_ERROR', 'NETWORK_REQUEST_FAILED', 'unavailable', 'failed-precondition', 'internal', 'aborted', 'deadline-exceeded'].includes(error?.code) || /fetch|network|offline|انقطاع|اتصال|internal|aborted|deadline/i.test(String(error?.message || ''))
-const updateStoredExpense = (id, patch) => {
-  const rows = read(STORAGE_KEY, []).map(row => row.id === id ? { ...row, ...patch } : row)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(rows))
-}
 
 export function Expenses({ onNavigate, onBack, session }) {
   const [expenses, setExpenses] = useState(() => {
@@ -34,7 +27,6 @@ export function Expenses({ onNavigate, onBack, session }) {
   const [category, setCategory] = useState('مشتريات')
   const [person, setPerson] = useState('علي')
   const [notes, setNotes] = useState('')
-  const syncEnabled = isAccConfigured() && !session?.profile?.localOnly
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
   const saveRows = rows => { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); setExpenses(rows) }
@@ -46,25 +38,9 @@ export function Expenses({ onNavigate, onBack, session }) {
       saveRows(expenses.map(row => row.id === editingId ? { ...row, amount: numericAmount, category, person, notes: notes.trim() } : row))
       resetForm(); alert('تم تعديل المصروف بنجاح'); return
     }
-    const row = { id: makeId(), amount: numericAmount, category, date: Date.now(), shift: session?.name || 'وردية غير محددة', shiftId: session?.accShiftId || '', person, notes: notes.trim(), status: syncEnabled ? 'pending_sync' : 'disabled' }
+    const row = { id: makeId(), amount: numericAmount, category, date: Date.now(), shift: session?.name || 'وردية غير محددة', shiftId: '', person, notes: notes.trim(), status: 'disabled' }
     saveRows([...expenses, row])
     resetForm()
-    if (!syncEnabled) return
-    const queued = read(SYNC_QUEUE_KEY, []).filter(entry => entry.kind !== 'expense' || entry.expense?.id !== row.id)
-    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...queued, { kind: 'expense', expense: row, queuedAt: Date.now() }]))
-    void (async () => {
-      try {
-        await saveAccExpense(row, session?.profile)
-        updateStoredExpense(row.id, { status: 'synced', syncConfirmedAt: Date.now() })
-        localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(read(SYNC_QUEUE_KEY, []).filter(entry => entry.kind !== 'expense' || entry.expense?.id !== row.id)))
-        setExpenses(read(STORAGE_KEY, []))
-      } catch (error) {
-        // Local persistence already succeeded; keep the row and queue for a later retry.
-        updateStoredExpense(row.id, { status: 'pending_sync', syncError: String(error?.message || error) })
-        setExpenses(read(STORAGE_KEY, []))
-        if (!transientSyncError(error)) console.error('ACC Expense Sync Deferred:', error)
-      }
-    })()
   }
   const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || 'علي'); setNotes(expense.notes || ''); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const confirmDelete = () => { if (!deleting) return; saveRows(expenses.filter(row => row.id !== deleting.id)); setDeleting(null) }
@@ -82,7 +58,7 @@ export function Expenses({ onNavigate, onBack, session }) {
       </div><div className="expense-form-actions"><button className="primary-action" type="submit">{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
-        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td>{formatDateTime(expense.date)}</td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className={`sync-state ${expense.status || 'disabled'}`}>{expense.status === 'synced' ? 'متزامن' : expense.status === 'pending_sync' ? 'بانتظار المزامنة' : expense.status === 'failed' ? 'فشلت المزامنة' : 'محلي فقط'}</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
+        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td>{formatDateTime(expense.date)}</td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className="sync-state disabled">محلي فقط</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
       </tbody></table></div>
       {deleting && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog expense-delete-dialog"><h2>تأكيد حذف المصروف</h2><p>سيتم حذف هذا السجل فقط:</p><dl><div><dt>المبلغ</dt><dd>{format(deleting.amount)}</dd></div><div><dt>النوع</dt><dd>{deleting.category}</dd></div><div><dt>الوصف</dt><dd>{deleting.notes || '—'}</dd></div><div><dt>التاريخ</dt><dd>{formatDateTime(deleting.date)}</dd></div></dl><div className="dialog-actions"><button className="secondary-action" onClick={() => setDeleting(null)}>إلغاء</button><button className="delete-expense" onClick={confirmDelete}>تأكيد الحذف</button></div></div></div>}
     </div>
