@@ -651,6 +651,13 @@ input, textarea, select { cursor: text; }
 .admin-identity b { overflow-wrap: anywhere; font-size: 13px; }
 .admin-identity .admin-uid { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .admin-identity small { color: var(--muted); line-height: 1.5; }
+.admin-central-readonly { width: min(1200px, calc(100% - 32px)); margin: 24px auto; padding: 22px; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px rgba(30, 45, 25, .08); }
+.admin-central-head, .admin-central-actions { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.admin-central-head { border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+.admin-central-head h1 { margin: 0; color: var(--green); font-size: 22px; }
+.admin-central-head p, .admin-central-actions span { color: var(--muted); margin: 5px 0 0; }
+.admin-central-actions { padding: 14px 0; }
+.admin-central-table-wrap { overflow-x: auto; margin-bottom: 20px; }
 
 /* Confirmation content owns three separate rows: heading, message, footer. */
 .confirm-dialog {

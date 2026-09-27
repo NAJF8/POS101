@@ -1,0 +1,25 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$uid": {
+        "isSuperAdmin": {
+          ".validate": "newData.val() === true ? (auth.token.email === 'mohameadalhaear100@gmail.com') : true"
+        }
+      }
+    },
+    "roles": { ".read": "auth != null", ".write": "auth != null" },
+    "assets": { ".read": "auth != null", ".write": "auth != null" },
+    "workOrders": { ".read": "auth != null", ".write": "auth != null" },
+    "breakdowns": { ".read": "auth != null", ".write": "auth != null" },
+    "spareParts": { ".read": "auth != null", ".write": "auth != null" },
+    "auditLogs": { ".read": "auth != null", ".write": "auth != null" },
+    "pos101_sales": {
+      ".read": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73')",
+      ".write": "auth != null && auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72'"
+    }
+  }
+}

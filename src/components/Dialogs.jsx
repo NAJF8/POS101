@@ -491,18 +491,18 @@ export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogo
        <div className="admin-login-panel" dir="rtl">
          <div className="admin-login-heading">
            <h3>تسجيل دخول الإدارة</h3>
-           <p>دخول Google مستقل للإعداد. لا يمنح هذا الحساب صلاحية قراءة المبيعات في هذه المرحلة.</p>
+           <p>دخول Google للإدارة — قراءة مركزية فقط، دون رفع مبيعات.</p>
          </div>
          {adminUser ? (
            <div className="admin-identity" role="status">
              <div><span>Admin email</span><b dir="ltr">{adminUser.email || 'غير متاح'}</b></div>
              <div><span>Admin Firebase UID</span><b dir="ltr" className="admin-uid">{adminUser.uid}</b></div>
-             <small>تم التقاط الهوية فقط. لم يتم تعديل Rules ولم يتم تحميل المبيعات.</small>
+             <small>الإدارة متصلة: قراءة وRealtime فقط، والرفع محظور.</small>
              <button className="secondary-action" type="button" onClick={onAdminLogout}>تسجيل خروج الإدارة</button>
            </div>
          ) : (
            <button className="secondary-action admin-login-button" type="button" onClick={onAdminLogin} disabled={adminBusy}>
-             {adminBusy ? 'جارٍ فتح Google…' : 'المتابعة بحساب Google'}
+             {adminBusy ? 'جارٍ فتح Google…' : 'تسجيل دخول الإدارة'}
            </button>
          )}
          {adminError && <p className="form-error" role="alert">{adminError}</p>}

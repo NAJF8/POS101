@@ -54,6 +54,8 @@ if (configured) {
 const SALES_KEY = 'pos101.sales'
 export const CENTRAL_SYNC_EMAIL = '101cofeehouse@gmail.com'
 export const CENTRAL_SYNC_UID = '4Tx0bMygd8gVuDDDOblnt3HOvo72'
+export const ADMIN_UID = 'rtDA9erW11geHfLpa3ZW3LacZR73'
+export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
@@ -110,6 +112,7 @@ export const isCentralEmulator = () => useEmulator
 export const centralAuth = () => auth
 export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, callback) : () => {}
 export const isCentralCashierUser = user => Boolean(user?.email === CENTRAL_SYNC_EMAIL && user?.uid === CENTRAL_SYNC_UID)
+export const isCentralAdminUser = user => Boolean(user?.email === ADMIN_EMAIL && user?.uid === ADMIN_UID)
 export const signInCentralWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
   await authReady
@@ -129,6 +132,10 @@ export const signInAdminWithGoogle = async () => {
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ prompt: 'select_account' })
   const result = await signInWithPopup(auth, provider)
+  if (!isCentralAdminUser(result.user)) {
+    await signOut(auth)
+    throw Object.assign(new Error('الحساب الإداري المحدد غير مطابق. اختر حساب الإدارة الصحيح.'), { code: 'UNAUTHORIZED_ADMIN_ACCOUNT' })
+  }
   return result.user
 }
 export const signOutCentral = () => auth ? signOut(auth) : Promise.resolve()
@@ -202,5 +209,18 @@ export const subscribeCentralSales = callback => {
     const merged = mergeCentralSalesLocally(centralSales)
     callback({ centralCount: centralSales.length, mergedCount: merged.length })
   }, () => {})
+}
+
+export const subscribeCentralSalesReadOnly = callback => {
+  if (!configured || !db || !isCentralAdminUser(auth?.currentUser)) return () => {}
+  return onValue(salesRef(), snapshot => {
+    callback(centralValues(snapshot))
+  }, () => {})
+}
+
+export const readCentralSalesReadOnly = async () => {
+  if (!configured || !db || !isCentralAdminUser(auth?.currentUser)) throw new Error('تسجيل دخول الإدارة مطلوب للقراءة.')
+  const snapshot = await get(salesRef())
+  return centralValues(snapshot)
 }
 

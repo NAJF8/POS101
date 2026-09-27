@@ -124,7 +124,7 @@ const thermalMaterialsStyles = `
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 `
 
-export default function Reports({ onNavigate, session, onDirectThermalPrint, directThermalReady = false }) {
+export default function Reports({ onNavigate, session, onDirectThermalPrint, directThermalReady = false, salesOverride = null }) {
   const [reportType, setReportType] = useState(null)
   
   const [reportDate, setReportDate] = useState(getDefaultReportDate)
@@ -132,7 +132,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
   // Keep reporting local-only until the ACC/Firebase source is explicitly
   // reconciled. A report must never silently mix another cashier's data with
   // this device's local ledger.
-  const [sales, setSales] = useState(readLocalSales)
+  const [sales, setSales] = useState(() => salesOverride || readLocalSales())
   useEffect(() => {
     const refresh = () => setSales(readLocalSales())
     window.addEventListener('pos101-sales-updated', refresh)
@@ -142,6 +142,7 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       window.removeEventListener('pos101-sale-created', refresh)
     }
   }, [])
+  useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
   const expenses = useMemo(() => {
     const rows = read('pos101.expenses', [])
     return rows.map(row => ({

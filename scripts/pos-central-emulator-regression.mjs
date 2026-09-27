@@ -12,8 +12,8 @@ const makeClient = name => {
   connectDatabaseEmulator(db, '127.0.0.1', 9000)
   return { auth, db }
 }
-const seedAuthorizedUid = async uid => {
-  const response = await fetch(`http://127.0.0.1:9000/pos101_authorized_uids/${uid}.json?ns=cmms-37512-default-rtdb&access_token=owner`, { method: 'PUT', body: 'true' })
+const seedAuthorizedUid = async (uid, permissions) => {
+  const response = await fetch(`http://127.0.0.1:9000/pos101_authorized_uids/${uid}.json?ns=cmms-37512-default-rtdb&access_token=owner`, { method: 'PUT', body: JSON.stringify(permissions) })
   if (!response.ok) throw new Error(`Emulator seed failed: ${response.status}`)
 }
 const uniqueSales = value => Object.values(value || {}).filter(sale => sale?.saleId).length
@@ -24,8 +24,8 @@ const c = makeClient('emulator-c')
 const userA = (await createUserWithEmailAndPassword(a.auth, `pos101-a-${Date.now()}@example.test`, 'TestPass123!')).user
 const userB = (await createUserWithEmailAndPassword(b.auth, `pos101-b-${Date.now()}@example.test`, 'TestPass123!')).user
 const userC = (await createUserWithEmailAndPassword(c.auth, `pos101-c-${Date.now()}@example.test`, 'TestPass123!')).user
-await seedAuthorizedUid(userA.uid)
-await seedAuthorizedUid(userB.uid)
+await seedAuthorizedUid(userA.uid, { read: true, write: true })
+await seedAuthorizedUid(userB.uid, { read: true, write: false })
 
 const sales = Array.from({ length: 70 }, (_, index) => ({
   saleId: `historical-sale-${index + 1}`,
@@ -55,6 +55,8 @@ assert.equal(uniqueSales((await get(ref(a.db, 'pos101_sales'))).val()), 71)
 
 await assert.rejects(() => get(ref(c.db, 'pos101_sales')))
 await assert.rejects(() => set(ref(c.db, 'pos101_sales/unauthorized'), newSale))
+assert.equal(uniqueSales((await get(ref(b.db, 'pos101_sales'))).val()), 71)
+await assert.rejects(() => set(ref(b.db, 'pos101_sales/admin-write-blocked'), newSale))
 await assert.rejects(() => set(ref(a.db, 'other_cmms_path/test'), { mustNotWrite: true }))
 
 stop()

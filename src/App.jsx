@@ -12,7 +12,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { CENTRAL_SYNC_EMAIL, CENTRAL_SYNC_UID, centralAuth, getCentralSyncState, isCentralCashierUser, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, syncCentralSales } from './services/posCentralSync.js'
+import { CENTRAL_SYNC_EMAIL, CENTRAL_SYNC_UID, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, readCentralSalesReadOnly, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly, syncCentralSales } from './services/posCentralSync.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 
@@ -61,6 +61,8 @@ export default function App() {
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
+  const [adminCentralSales, setAdminCentralSales] = useState([])
+  const [adminRefreshBusy, setAdminRefreshBusy] = useState(false)
   const centralListener = useRef(null)
   const [salesMaintenanceOpen, setSalesMaintenanceOpen] = useState(false)
   const saleInFlight = useRef(false)
@@ -111,10 +113,14 @@ export default function App() {
     const stopAuth = subscribeCentralAuth(user => {
       centralListener.current?.()
       centralListener.current = null
-      setAdminAuthUser(user && !isCentralCashierUser(user) ? user : null)
+      setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setSyncLabel(user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (!user) {
         setSyncAuthStatus(null)
+        return
+      }
+      if (isCentralAdminUser(user)) {
+        centralListener.current = subscribeCentralSalesReadOnly(setAdminCentralSales)
         return
       }
       if (!isCentralCashierUser(user)) return
@@ -128,6 +134,7 @@ export default function App() {
     return () => {
       stopAuth?.()
       centralListener.current?.()
+      setAdminCentralSales([])
     }
   }, [])
 
@@ -148,6 +155,12 @@ export default function App() {
     setAdminAuthError('')
     await signOutCentral()
   }, [])
+
+  const refreshAdminCentralSales = useCallback(async () => {
+    if (adminRefreshBusy) return
+    setAdminRefreshBusy(true)
+    try { setAdminCentralSales(await readCentralSalesReadOnly()) } catch (error) { setAdminAuthError(error?.message || 'تعذر تحديث القراءة المركزية.') } finally { setAdminRefreshBusy(false) }
+  }, [adminRefreshBusy])
 
   const loginSync = useCallback(async () => {
     if (syncBusy) return
@@ -420,6 +433,8 @@ export default function App() {
   }, [session])
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
 
+  const adminReady = isCentralAdminUser(adminAuthUser)
+
   return (
     <main className="app-shell">
       {session && (
@@ -486,6 +501,18 @@ export default function App() {
         <Expenses session={session} onNavigate={setCurrentView} />
       )}
       {currentView === 'reports-captain' && session && <Reports session={session} onNavigate={setCurrentView} />}
+
+      {adminReady && !session && (
+        <section className="admin-central-readonly" dir="rtl" aria-label="مركز مبيعات الإدارة">
+          <header className="admin-central-head">
+            <div><h1>الإدارة متصلة</h1><p>قراءة مركزية مباشرة — {adminCentralSales.length} مبيعات فريدة</p></div>
+            <button className="secondary-action" type="button" onClick={logoutAdmin}>تسجيل خروج الإدارة</button>
+          </header>
+          <div className="admin-central-actions"><button type="button" onClick={refreshAdminCentralSales} disabled={adminRefreshBusy}>{adminRefreshBusy ? 'جارٍ تحديث القراءة…' : 'تحديث القراءة'}</button><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
+          <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
+          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} salesOverride={adminCentralSales} onNavigate={() => {}} />
+        </section>
+      )}
 
       {/* Login gate */}
       {!session && (
