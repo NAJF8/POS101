@@ -641,6 +641,16 @@ input, textarea, select { cursor: text; }
 }
 .cashier-login form input { direction: ltr; text-align: right; }
 .cashier-login form .primary-action { width: 100%; min-height: 50px; margin-top: 4px; }
+.admin-login-panel { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.admin-login-heading h3 { margin: 0; color: var(--green); font-size: 17px; }
+.admin-login-heading p { margin: 5px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.admin-login-button, .admin-identity .secondary-action { width: 100%; min-height: 44px; }
+.admin-identity { display: grid; gap: 8px; padding: 11px; border: 1px solid #cbdcc9; border-radius: 9px; background: #f5faf3; color: var(--coffee); }
+.admin-identity > div { display: grid; gap: 2px; }
+.admin-identity span { color: var(--muted); font-size: 11px; }
+.admin-identity b { overflow-wrap: anywhere; font-size: 13px; }
+.admin-identity .admin-uid { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.admin-identity small { color: var(--muted); line-height: 1.5; }
 
 /* Confirmation content owns three separate rows: heading, message, footer. */
 .confirm-dialog {

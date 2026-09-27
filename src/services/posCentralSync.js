@@ -109,6 +109,7 @@ export const isCentralConfigured = () => configured
 export const isCentralEmulator = () => useEmulator
 export const centralAuth = () => auth
 export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, callback) : () => {}
+export const isCentralCashierUser = user => Boolean(user?.email === CENTRAL_SYNC_EMAIL && user?.uid === CENTRAL_SYNC_UID)
 export const signInCentralWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
   await authReady
@@ -121,6 +122,14 @@ export const signInCentralWithGoogle = async () => {
     throw Object.assign(new Error(`حساب المزامنة المسموح به هو ${CENTRAL_SYNC_EMAIL} فقط.`), { code: 'UNAUTHORIZED_SYNC_ACCOUNT' })
   }
   return user
+}
+export const signInAdminWithGoogle = async () => {
+  if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
+  await authReady
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  const result = await signInWithPopup(auth, provider)
+  return result.user
 }
 export const signOutCentral = () => auth ? signOut(auth) : Promise.resolve()
 

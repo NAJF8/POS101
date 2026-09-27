@@ -457,7 +457,7 @@ export function Receipt({ sale }) {
 }
 
 /* ── Shift Login ── */
-export function ShiftLogin({ shifts, onClose, onLogin }) {
+export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogout, adminUser, adminBusy, adminError }) {
   const [shiftId, setShiftId] = React.useState(shifts[0]?.shiftId || '')
   const [error, setError] = React.useState('')
   const [busy, setBusy] = React.useState(false)
@@ -488,6 +488,25 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
          {error && <p className="form-error" role="alert">{error}</p>}
          <button className="primary-action" type="submit" disabled={busy}>{busy ? 'جارٍ فتح الوردية…' : 'بدء الوردية محلياً'}</button>
       </form>
+       <div className="admin-login-panel" dir="rtl">
+         <div className="admin-login-heading">
+           <h3>تسجيل دخول الإدارة</h3>
+           <p>دخول Google مستقل للإعداد. لا يمنح هذا الحساب صلاحية قراءة المبيعات في هذه المرحلة.</p>
+         </div>
+         {adminUser ? (
+           <div className="admin-identity" role="status">
+             <div><span>Admin email</span><b dir="ltr">{adminUser.email || 'غير متاح'}</b></div>
+             <div><span>Admin Firebase UID</span><b dir="ltr" className="admin-uid">{adminUser.uid}</b></div>
+             <small>تم التقاط الهوية فقط. لم يتم تعديل Rules ولم يتم تحميل المبيعات.</small>
+             <button className="secondary-action" type="button" onClick={onAdminLogout}>تسجيل خروج الإدارة</button>
+           </div>
+         ) : (
+           <button className="secondary-action admin-login-button" type="button" onClick={onAdminLogin} disabled={adminBusy}>
+             {adminBusy ? 'جارٍ فتح Google…' : 'المتابعة بحساب Google'}
+           </button>
+         )}
+         {adminError && <p className="form-error" role="alert">{adminError}</p>}
+       </div>
     </Dialog>
   )
 }

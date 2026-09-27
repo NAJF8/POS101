@@ -12,7 +12,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { CENTRAL_SYNC_EMAIL, CENTRAL_SYNC_UID, centralAuth, getCentralSyncState, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, syncCentralSales } from './services/posCentralSync.js'
+import { CENTRAL_SYNC_EMAIL, CENTRAL_SYNC_UID, centralAuth, getCentralSyncState, isCentralCashierUser, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, syncCentralSales } from './services/posCentralSync.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 
@@ -58,6 +58,9 @@ export default function App() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
+  const [adminAuthUser, setAdminAuthUser] = useState(null)
+  const [adminAuthBusy, setAdminAuthBusy] = useState(false)
+  const [adminAuthError, setAdminAuthError] = useState('')
   const centralListener = useRef(null)
   const [salesMaintenanceOpen, setSalesMaintenanceOpen] = useState(false)
   const saleInFlight = useRef(false)
@@ -108,11 +111,13 @@ export default function App() {
     const stopAuth = subscribeCentralAuth(user => {
       centralListener.current?.()
       centralListener.current = null
-      setSyncLabel(user ? 'مزامنة' : 'المزامنة جاهزة')
+      setAdminAuthUser(user && !isCentralCashierUser(user) ? user : null)
+      setSyncLabel(user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (!user) {
         setSyncAuthStatus(null)
         return
       }
+      if (!isCentralCashierUser(user)) return
       centralListener.current = subscribeCentralSales(({ centralCount }) => {
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
@@ -124,6 +129,24 @@ export default function App() {
       stopAuth?.()
       centralListener.current?.()
     }
+  }, [])
+
+  const loginAdmin = useCallback(async () => {
+    if (adminAuthBusy) return
+    setAdminAuthBusy(true)
+    setAdminAuthError('')
+    try {
+      await signInAdminWithGoogle()
+    } catch (error) {
+      setAdminAuthError(error?.message || 'تعذر تسجيل دخول الإدارة.')
+    } finally {
+      setAdminAuthBusy(false)
+    }
+  }, [adminAuthBusy])
+
+  const logoutAdmin = useCallback(async () => {
+    setAdminAuthError('')
+    await signOutCentral()
   }, [])
 
   const loginSync = useCallback(async () => {
@@ -151,7 +174,7 @@ export default function App() {
 
   useEffect(() => {
     const retry = () => {
-      if (centralAuth()?.currentUser && getCentralSyncState().initialSyncCompleted) {
+      if (isCentralCashierUser(centralAuth()?.currentUser) && getCentralSyncState().initialSyncCompleted) {
         void syncCentralSales().catch(() => {})
       }
     }
@@ -466,7 +489,16 @@ export default function App() {
 
       {/* Login gate */}
       {!session && (
-        <ShiftLogin shifts={shifts} onClose={() => {}} onLogin={login} />
+        <ShiftLogin
+          shifts={shifts}
+          onClose={() => {}}
+          onLogin={login}
+          onAdminLogin={loginAdmin}
+          onAdminLogout={logoutAdmin}
+          adminUser={adminAuthUser}
+          adminBusy={adminAuthBusy}
+          adminError={adminAuthError}
+        />
       )}
 
       {/* Modals */}
