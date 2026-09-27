@@ -12,7 +12,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralPermissions, getCentralRole, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, readCentralSalesReadOnly, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly, syncCentralSales } from './services/posCentralSync.js'
+import { centralAuth, getCentralPermissions, getCentralRole, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, mergeCentralSalesLocally, readCentralSalesReadOnly, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly, syncCentralSales } from './services/posCentralSync.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 
@@ -120,7 +120,11 @@ export default function App() {
         return
       }
       if (isCentralAdminUser(user)) {
-        centralListener.current = subscribeCentralSalesReadOnly(setAdminCentralSales)
+        centralListener.current = subscribeCentralSalesReadOnly(centralSales => {
+          // Admin central sync is read-only, but the downloaded rows must still
+          // feed the shared local read models used by Order History and Reports.
+          setAdminCentralSales(mergeCentralSalesLocally(centralSales))
+        })
         return
       }
       if (!isCentralCashierUser(user)) return
@@ -159,7 +163,10 @@ export default function App() {
   const refreshAdminCentralSales = useCallback(async () => {
     if (adminRefreshBusy) return
     setAdminRefreshBusy(true)
-    try { setAdminCentralSales(await readCentralSalesReadOnly()) } catch (error) { setAdminAuthError(error?.message || 'تعذر تحديث القراءة المركزية.') } finally { setAdminRefreshBusy(false) }
+    try {
+      const centralSales = await readCentralSalesReadOnly()
+      setAdminCentralSales(mergeCentralSalesLocally(centralSales))
+    } catch (error) { setAdminAuthError(error?.message || 'تعذر تحديث القراءة المركزية.') } finally { setAdminRefreshBusy(false) }
   }, [adminRefreshBusy])
 
   const loginSync = useCallback(async () => {
@@ -177,9 +184,10 @@ export default function App() {
       const providerId = user.providerData?.[0]?.providerId || 'google.com'
       if (role === 'admin-viewer') {
         const centralSales = await readCentralSalesReadOnly()
-        setAdminCentralSales(centralSales)
+        const mergedSales = mergeCentralSalesLocally(centralSales)
+        setAdminCentralSales(mergedSales)
         setSyncLabel('تم تحديث المبيعات')
-        setSyncAuthStatus({ ok: true, role, uid: user.uid, email: user.email, providerId, uploaded: 0, centralCount: centralSales.length, readOnly: true, message: 'تم تحديث المبيعات' })
+        setSyncAuthStatus({ ok: true, role, uid: user.uid, email: user.email, providerId, uploaded: 0, centralCount: centralSales.length, mergedCount: mergedSales.length, readOnly: true, message: 'تم تحديث المبيعات' })
         return
       }
       const initial = !getCentralSyncState().initialSyncCompleted
