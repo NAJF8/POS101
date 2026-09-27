@@ -1,8 +1,11 @@
 ﻿import { initializeApp, getApps } from 'firebase/app'
+import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions'
 import {
   getAuth,
+  browserLocalPersistence,
   connectAuthEmulator,
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth'
@@ -37,13 +40,18 @@ let configured = Boolean(firebaseConfig.apiKey && firebaseConfig.messagingSender
 let app = null
 let auth = null
 let db = null
+let functions = null
+let authPersistenceReady = Promise.resolve()
 if (configured) {
   app = getApps().find(item => item.name === 'pos101-acc') || initializeApp(firebaseConfig, 'pos101-acc')
   auth = getAuth(app)
+  authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => {})
   db = getDatabase(app)
+  functions = getFunctions(app, env.VITE_FIREBASE_FUNCTIONS_REGION || 'europe-west1')
   if (useEmulator) {
     connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true })
     connectDatabaseEmulator(db, emulatorHost, 9000)
+    connectFunctionsEmulator(functions, emulatorHost, Number(env.VITE_FIREBASE_FUNCTIONS_EMULATOR_PORT || 5001))
   }
 }
 
@@ -60,10 +68,42 @@ const saleFingerprint = sale => JSON.stringify({
   items: (sale.items || []).map(item => ({ product_id: item.accProductId || item.product_id || item.id, quantity: Number(item.quantity || 0), unit_price: Number(item.price || 0) })),
   subtotal: Number(sale.subtotal || 0), discount: Number(sale.discount || 0), total: Number(sale.total || 0), payment_method: sale.paymentMethod || ''
 })
+const roundInventory = value => Math.round((Number(value) + Number.EPSILON) * 1000000) / 1000000
+const locationBalances = item => item?.location_quantities && typeof item.location_quantities === 'object' ? { ...item.location_quantities } : { main_storage: Number(item?.quantity ?? 0) }
+const toBaseQuantity = ({ quantity, unit, baseUnit, conversionFactor = 1 }) => {
+  const qty = Number(quantity), factor = Number(conversionFactor)
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(factor) || factor <= 0) throw new Error('كمية أو معامل تحويل غير صالح.')
+  if (unit === baseUnit) return qty
+  if ((unit === 'L' && baseUnit === 'ml') || (unit === 'kg' && baseUnit === 'g')) return qty * 1000
+  if (['bottle', 'box', 'carton', 'pack', 'bag', 'piece'].includes(unit)) return qty * factor
+  throw new Error(`لا يمكن تحويل ${unit} إلى ${baseUnit} بدون معامل تحويل واضح.`)
+}
+const weightedAverageCost = ({ oldQuantity, oldUnitCost, addedQuantity, addedTotalCost }) => {
+  const before = Number(oldQuantity), oldCost = Number(oldUnitCost), added = Number(addedQuantity), addedCost = Number(addedTotalCost)
+  if ([before, oldCost, added, addedCost].some(value => !Number.isFinite(value) || value < 0) || before + added <= 0) throw new Error('مدخلات متوسط التكلفة غير صالحة.')
+  return (before * oldCost + addedCost) / (before + added)
+}
 
 export const isAccConfigured = () => configured
 export const isAccEmulator = () => useEmulator
 export const accAuth = () => auth
+const waitForAuthUser = async () => {
+  await authPersistenceReady
+  if (auth.currentUser) return auth.currentUser
+  return new Promise(resolve => {
+    let unsubscribe = () => {}
+    const timeout = window.setTimeout(() => {
+      unsubscribe()
+      resolve(null)
+    }, 5000)
+    unsubscribe = onAuthStateChanged(auth, user => {
+      if (!user) return
+      window.clearTimeout(timeout)
+      unsubscribe()
+      resolve(user)
+    })
+  })
+}
 export const subscribeAuth = callback => {
   if (!configured) return () => {}
   return onAuthStateChanged(auth, callback)
@@ -71,6 +111,7 @@ export const subscribeAuth = callback => {
 
 export async function loginToAcc(email, password) {
   ensureConfigured()
+  await authPersistenceReady
   const credential = await signInWithEmailAndPassword(auth, String(email).trim(), password)
   const profileSnap = await get(ref(db, `users/${credential.user.uid}`))
   const profile = profileSnap.exists() ? profileSnap.val() : null
@@ -140,6 +181,7 @@ async function consumeRecipe(productId, quantity, sourceKey, userId, date) {
     } else {
       if (Number.isFinite(recordedBefore) && Number.isFinite(recordedAfter) && before !== recordedBefore) throw new Error('╪¬╪╣╪º╪▒╪╢ ┘ü┘è ╪▒╪╡┘è╪» ┘à╪º╪»╪⌐ ╪º┘ä┘ê╪╡┘ü╪⌐ ╪ú╪½┘å╪º╪í ╪º╪│╪¬╪ª┘å╪º┘ü ╪º┘ä╪╣┘à┘ä┘è╪⌐.')
       if (before < required) throw new Error(`╪º┘ä┘à╪«╪▓┘ê┘å ┘ä╪º ┘è┘â┘ü┘è ┘ä┘à╪º╪»╪⌐ ╪º┘ä┘ê╪╡┘ü╪⌐: ${item.name_ar || item.name || itemId}`)
+      await update(ref(db), { [`inventory_items/${itemId}/inventory_operation_id`]: operationId })
       const quantityTxn = await runTransaction(quantityRef, current => {
         // RTDB may invoke a transaction once with a null local cache before
         // supplying the server value. Do not turn that transient state into a
@@ -217,19 +259,31 @@ export async function saveAccSale(sale, profile) {
 
 export async function saveAccExpense(expense, profile) {
   ensureConfigured()
-  const user = auth.currentUser
-  if (!user || !profile?.id) throw new Error('╪º┘å╪¬┘ç╪¬ ╪¼┘ä╪│╪⌐ ╪º┘ä┘â╪º╪┤┘è╪▒. ╪│╪¼┘æ┘ä ╪º┘ä╪»╪«┘ê┘ä ┘à╪¼╪»╪»╪º┘ï.')
-  const id = cleanKey(`pos101:${expense.id}`)
-  const record = { id, source_channel: 'POS101', date: todayBaghdad(), month: monthOf(), amount: Number(expense.amount), category: expense.category || '╪ú╪«╪▒┘ë', description: expense.notes || '', payment_method: 'cash', paid_amount: Number(expense.amount), payment_status: 'paid', shift_id: expense.shiftId || '', created_at: new Date().toISOString(), created_by: user.uid, created_by_name: profile.name || '' }
-  const existing = await get(ref(db, `expenses/${id}`))
-  if (existing.exists()) return { ...existing.val(), already_processed: true }
-  const cashId = cleanKey(`pos101:expense:${id}`)
-  await update(ref(db), {
-    [`expenses/${id}`]: record,
-    [`cash_movements/${cashId}`]: { id: cashId, type: 'OUT', amount: record.amount, date: record.date, month: record.month, payment_method: 'cash', source_type: 'expense', source_id: id, source_key: `expense:${id}`, created_at: record.created_at, created_by: user.uid, auto: true },
-  })
-  return { ...record, already_processed: false }
+  if (!functions) throw new Error('ACC Functions غير مهيأة.')
+  const user = await waitForAuthUser()
+  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
+  const callable = httpsCallable(functions, 'createPosExpense')
+  return (await callable({ expenseId: expense.id, amount: expense.amount, category: expense.category, description: expense.notes, paymentMethod: 'cash' })).data
 }
+
+export async function loadAccPurchaseCatalog() {
+  ensureConfigured()
+  const [inventorySnapshot, suppliersSnapshot] = await Promise.all([get(ref(db, 'inventory_items')), get(ref(db, 'suppliers'))])
+  return {
+    inventory: values(inventorySnapshot).filter(item => item.active !== false),
+    suppliers: values(suppliersSnapshot).filter(item => item.active !== false),
+  }
+}
+
+export async function saveAccPurchase(purchase, profile) {
+  ensureConfigured()
+  if (!functions) throw new Error('ACC Functions غير مهيأة.')
+  const user = auth.currentUser
+  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
+  const callable = httpsCallable(functions, 'createPosPurchase')
+  return (await callable({ purchaseId: purchase.id, inventoryItemId: purchase.inventory_item_id, quantity: purchase.quantity, unit: purchase.purchase_unit || purchase.unit, unitPurchasePrice: purchase.unit_cost, discount: purchase.discount || 0, supplierId: purchase.supplier_id, paymentMethod: purchase.payment_method || 'cash', paidAmount: purchase.paid_amount, notes: purchase.notes, date: purchase.date })).data
+}
+
 
 export async function openAccShift(profile, openingCash = 0, note = '') {
   ensureConfigured()

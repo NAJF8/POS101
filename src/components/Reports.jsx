@@ -4,6 +4,7 @@ import { loadAccReports } from '../services/accSync'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
+import { readLocalSales, numberValue } from '../services/reportSales'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -59,7 +60,7 @@ const thermalComprehensiveStyles = `
   .summary-highlight td, tr.summary-highlight td { font-size: 12pt !important; font-weight: 900 !important; border-top: .6mm solid #000 !important; border-bottom: .6mm solid #000 !important; }
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
-  
+
   .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
   .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
   .thermal-card-head { display: flex; min-width: 0; gap: 2mm; justify-content: space-between; align-items: baseline; border-bottom: .2mm dashed #555; padding-bottom: 1mm; margin-bottom: 1mm; }
@@ -112,13 +113,16 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
   const [dateTo, setDateTo] = useState(todayStr)
   
   useEffect(() => {
-    if (!session?.profile) return undefined
+    if (!session?.profile || session.profile.localOnly) return undefined
     let active = true
     loadAccReports().then(data => { if (active) setRemote(data) }).catch(() => {})
     return () => { active = false }
   }, [session])
 
-  const sales = useMemo(() => remote ? remote.sales.map(row => ({ ...row, id: row.id, createdAt: Date.parse(row.created_at || row.date) || 0, total: Number(row.total_after_discount || 0), discount: Number(row.discount_amount || 0), paymentMethod: row.payment_method, shift: row.shift_id, order: { items: row.items || [] } })) : read('pos101.sales', []), [remote])
+  // Sales are authoritative in the cashier's local ledger. ACC is an optional
+  // sync destination and must never replace local sales with an empty/partial
+  // remote result, especially while offline.
+  const sales = useMemo(() => readLocalSales(), [remote])
   const expenses = useMemo(() => remote ? remote.expenses.map(row => ({ ...row, date: Date.parse(row.date || row.created_at) || 0, amount: Number(row.amount || 0), shift: row.shift_id, notes: row.description })) : read('pos101.expenses', []), [remote])
 
   const startMs = new Date(dateFrom).setHours(0, 0, 0, 0)
@@ -235,13 +239,13 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
     
     // Aggregation logic
     const aggregateSales = (sList) => {
-      const gross = sList.reduce((acc, s) => acc + s.subtotal, 0)
-      const discounts = sList.reduce((acc, s) => acc + s.discount, 0)
+      const gross = sList.reduce((acc, s) => acc + numberValue(s.subtotal), 0)
+      const discounts = sList.reduce((acc, s) => acc + numberValue(s.discount), 0)
       
       // Calculate refunds explicitly from adjustments
       const refunds = sList.reduce((acc, s) => {
         if (!s.order?.adjustments) return acc;
-        return acc + s.order.adjustments.filter(a => a.type === 'refund').reduce((sum, a) => sum + (a.amount || 0), 0)
+        return acc + s.order.adjustments.filter(a => a.type === 'refund').reduce((sum, a) => sum + numberValue(a.amount), 0)
       }, 0)
 
       const net = gross - discounts - refunds
@@ -328,6 +332,8 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
       const totalRevenue = filteredSales.reduce((sum, s) => sum + Number(s.total || 0), 0)
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const netBalance = totalRevenue - expensesTotal
+      const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
+      const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
 
       // Aggregate products sold
       const productMap = new Map()
@@ -354,6 +360,9 @@ export default function Reports({ onNavigate, session, onDirectThermalPrint, dir
             <tr><td>إجمالي الخصم</td><td className="number-cell">{format(stats.discounts)}</td></tr>
             <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(totalServiceCharge)}</td></tr>
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
+            <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
+            <tr><td>الإلكتروني</td><td className="number-cell">{format(electronicTotal)}</td></tr>
+            <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(stats.count)}</td></tr>
             <tr className="summary-highlight"><td>صافي البيع</td><td className="number-cell">{format(totalRevenue)}</td></tr>
             <tr className="summary-negative"><td>صافي الوارد</td><td className="number-cell">{format(netBalance < 0 ? netBalance : -1 * (expensesTotal - totalRevenue > 0 ? expensesTotal - totalRevenue : 0))}</td></tr>
           </tbody>
