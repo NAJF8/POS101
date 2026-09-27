@@ -660,6 +660,20 @@ input, textarea, select { cursor: text; }
 .confirm-actions button:first-child:hover { background: #ede8df; }
 .danger-button { background: var(--danger); color: #fff; }
 .danger-button:hover:not(:disabled) { background: #963f3a; }
+.sales-maintenance-dialog { width: min(720px, 100%); direction: rtl; }
+.sales-maintenance-dialog h2 { color: var(--danger); margin: 0 0 10px; }
+.maintenance-warning, .maintenance-note { color: var(--muted); line-height: 1.65; margin: 0 0 14px; }
+.maintenance-warning { padding: 11px 13px; border-radius: 9px; background: #fff7f6; border: 1px solid #e7c2be; color: #7b302c; }
+.maintenance-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }
+.maintenance-summary > div { display: grid; gap: 3px; padding: 10px; border-radius: 8px; background: #fbfaf8; border: 1px solid var(--line); }
+.maintenance-summary dt { color: var(--muted); font-size: 12px; }
+.maintenance-summary dd { margin: 0; font-weight: 800; overflow-wrap: anywhere; }
+.maintenance-error, .maintenance-success { padding: 11px 13px; border-radius: 9px; line-height: 1.65; margin: 0 0 14px; }
+.maintenance-error { color: #7b302c; background: #fff7f6; border: 1px solid #e7c2be; }
+.maintenance-success { display: grid; gap: 4px; color: #245433; background: #f0f8f1; border: 1px solid #b9d9bf; }
+.maintenance-actions { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 10px; }
+.maintenance-actions button { min-height: 46px; border-radius: 9px; font-weight: 800; }
+@media (max-width: 560px) { .maintenance-summary, .maintenance-actions { grid-template-columns: 1fr; } }
 
 /* Product options: compact, touch-safe RTL layout. */
 .options-dialog { direction: rtl; display: flex; flex-direction: column; gap: 14px; padding: 20px; overflow: hidden; }
@@ -715,6 +729,7 @@ input, textarea, select { cursor: text; }
 .theme-btn { padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.06); }
 .theme-btn:hover { background: rgba(255,255,255,0.15); }
 .outline-btn { border: 1px solid rgba(255,255,255,0.2); }
+.maintenance-btn { color: #ffe5df; border-color: rgba(255, 190, 180, 0.45); }
 .brand-left { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; margin-right: 12px; }
 
 .edit-btn { color: var(--muted); background: transparent; padding: 4px; border-radius: 4px; }

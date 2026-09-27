@@ -13,7 +13,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, onSyncSales, syncBusy = false, syncLabel = 'مزامنة' }) {
+export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, onSyncSales, syncBusy = false, syncLabel = 'مزامنة', onOpenSalesMaintenance }) {
   const now = useLiveClock()
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
@@ -62,6 +62,10 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
             <button className="header-btn outline-btn" type="button" onClick={onSyncSales} disabled={syncBusy} aria-label="تسجيل دخول المزامنة">
               <Icon name="refresh" size={20} />
               <span>{syncBusy ? 'جارٍ...' : syncLabel}</span>
+            </button>
+            <button className="header-btn outline-btn maintenance-btn" type="button" onClick={onOpenSalesMaintenance} aria-label="تنظيف الطلبات القديمة">
+              <span aria-hidden="true">⚠</span>
+              <span>تنظيف الطلبات القديمة</span>
             </button>
             <button className="header-btn outline-btn" onClick={() => window.dispatchEvent(new CustomEvent('open-history'))}>
               <Icon name="receipt" size={20} />
