@@ -10,20 +10,13 @@ import { Expenses } from './components/Expenses'
 import { Purchases } from './components/Purchases'
 import { categories, products } from './data/menu'
 import { Icon } from './components/Icons'
-import { isAccConfigured, loginToAcc, logoutFromAcc, loadAccProducts, saveAccSale, saveAccExpense, saveAccPurchase, openAccShift, closeAccShift, subscribeAuth } from './services/accSync'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, markSaleSynced, readSaleQueue, retainQueuedSale } from './services/salesSyncQueue'
+import { enqueueSale, readPendingSaleCount, reconcileSalesQueue, buildSalesBackup } from './services/salesSyncQueue'
 import { formatNumber } from './utils.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
-const SYNC_QUEUE_KEY = 'pos101.syncQueue'
-const transientSyncError = error => navigator.onLine === false || ['NETWORK_ERROR', 'NETWORK_REQUEST_FAILED', 'unavailable', 'failed-precondition', 'internal', 'aborted', 'deadline-exceeded'].includes(error?.code) || /fetch|network|offline|انقطاع|اتصال|internal|aborted|deadline/i.test(String(error?.message || ''))
-const withSyncTimeout = (promise, ms = 8000) => Promise.race([
-  promise,
-  new Promise((_, reject) => window.setTimeout(() => reject(Object.assign(new Error('انتهت مهلة الاتصال بـ ACC-101.'), { code: 'NETWORK_REQUEST_FAILED' })), ms))
-])
 const orderSubtotal = order => order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
 const discountValue = (subtotal, discount) => {
   if (!discount) return 0
@@ -60,85 +53,40 @@ export default function App() {
   const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
   const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
-  const [accProducts, setAccProducts] = useState([])
   const [syncNotice, setSyncNotice] = useState(null)
+  const [pendingSaleCount, setPendingSaleCount] = useState(() => readPendingSaleCount())
+  const [syncBusy, setSyncBusy] = useState(false)
   const saleInFlight = useRef(false)
-  const queueFlushInFlight = useRef(false)
-
-  useEffect(() => {
-    if (!session?.profile || session.profile.localOnly || !isAccConfigured()) return undefined
-    let active = true
-    loadAccProducts().then(rows => { if (active) setAccProducts(rows) }).catch(() => {})
-    return () => { active = false }
-  }, [session?.profile])
-
-  const flushSaleQueue = useCallback(async () => {
-    if (!session?.profile || session.profile.localOnly || !isAccConfigured() || queueFlushInFlight.current) return
-    const queued = readSaleQueue().concat(read(SYNC_QUEUE_KEY, []).filter(entry => entry?.kind === 'expense' || entry?.kind === 'purchase'))
-    if (!queued.length) return
-    queueFlushInFlight.current = true
-    const remaining = []
+  const syncSalesNow = useCallback(() => {
+    if (syncBusy) return
+    setSyncBusy(true)
     try {
-      for (const entry of queued) {
-        try {
-          if (entry.kind === 'expense') {
-            await withSyncTimeout(saveAccExpense(entry.expense, session.profile))
-            const expenses = read('pos101.expenses', [])
-            localStorage.setItem('pos101.expenses', JSON.stringify(expenses.map(row => row.id === entry.expense.id ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
-          } else if (entry.kind === 'purchase') {
-            await withSyncTimeout(saveAccPurchase(entry.purchase, session.profile))
-            const purchases = read('pos101.purchases', [])
-            localStorage.setItem('pos101.purchases', JSON.stringify(purchases.map(row => row.id === entry.purchase.id ? { ...row, status: 'synced', syncConfirmedAt: Date.now() } : row)))
-          } else {
-            await withSyncTimeout(saveAccSale(entry.sale, session.profile))
-            markSaleSynced(entry.sale)
-          }
-          window.dispatchEvent(new Event('pos101-sync-updated'))
-        } catch (error) {
-          if (entry.kind !== 'expense' && entry.kind !== 'purchase') {
-            // A sale is recoverable until saveAccSale has returned success.
-            // This includes missing/expired Auth, offline, permission/session
-            // refresh, and failures after a partial Firebase write.
-            retainQueuedSale(entry, error)
-            remaining.push({ ...entry, kind: 'sale', sale: { ...entry.sale, status: 'pending_sync', syncError: String(error?.message || error) } })
-          } else if (transientSyncError(error)) {
-            remaining.push(entry)
-          } else {
-            // Permanent failure during retry
-            if (entry.kind === 'expense') {
-              const expenses = read('pos101.expenses', [])
-              localStorage.setItem('pos101.expenses', JSON.stringify(expenses.map(row => row.id === entry.expense.id ? { ...row, status: 'pending_sync', syncError: String(error?.message || error) } : row)))
-              remaining.push(entry)
-            } else if (entry.kind === 'purchase') {
-              const purchases = read('pos101.purchases', [])
-              localStorage.setItem('pos101.purchases', JSON.stringify(purchases.map(row => row.id === entry.purchase.id ? { ...row, status: 'pending_sync', syncError: String(error?.message || error) } : row)))
-              remaining.push(entry)
-            } else {
-              const sales = read('pos101.sales', [])
-              localStorage.setItem('pos101.sales', JSON.stringify(sales.map(row => row.saleId === entry.sale.saleId ? { ...row, status: 'failed', syncError: String(error?.message || error) } : row)))
-            }
-            window.dispatchEvent(new Event('pos101-sync-updated'))
-            console.error('Permanent sync failure in queue:', error)
-          }
-        }
-      }
-      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(remaining))
-      setSyncNotice(remaining.length ? { status: 'pending', count: remaining.length } : { status: 'synced', count: queued.length })
-    } finally {
-      queueFlushInFlight.current = false
-    }
-  }, [session?.profile])
+      reconcileSalesQueue()
+      const count = readPendingSaleCount()
+      setPendingSaleCount(count)
+      setSyncNotice({ status: 'pending', text: `تم حفظ وتجهيز ${formatNumber(count)} عملية للمزامنة — لم يتم إرسالها إلى ACC بعد` })
+    } finally { setSyncBusy(false) }
+  }, [syncBusy])
+
+  const downloadSalesBackup = useCallback(() => {
+    const backup = buildSalesBackup()
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `pos101-sales-backup-${backup.createdAt.replace(/[:.]/g, '-')}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setSyncNotice({ status: 'pending', text: `تم تنزيل نسخة المبيعات المحلية (${formatNumber(backup.salesCount)} عملية)` })
+  }, [])
 
   useEffect(() => {
-    if (!session?.profile || session.profile.localOnly) return undefined
-    // Auth restoration after a page refresh is asynchronous. Retry the queue
-    // when Firebase confirms the user, rather than leaving a valid pending sale
-    // stranded after the first pre-auth attempt.
-    const unsubscribe = subscribeAuth(user => { if (user) void flushSaleQueue() })
-    void flushSaleQueue()
-    window.addEventListener('online', flushSaleQueue)
-    return () => { unsubscribe(); window.removeEventListener('online', flushSaleQueue) }
-  }, [session?.profile, flushSaleQueue])
+    const refreshPending = () => setPendingSaleCount(readPendingSaleCount())
+    window.addEventListener('pos101-sync-updated', refreshPending)
+    refreshPending()
+    return () => window.removeEventListener('pos101-sync-updated', refreshPending)
+  }, [])
+
 
   const activeOrder = orders[active] || orders[0]
   const subtotal = orderSubtotal(activeOrder)
@@ -147,8 +95,8 @@ export default function App() {
 
   const openOrdersCount = orders.filter(o => o.held && !o.completed).length
 
-  const catalogProducts = accProducts.length ? accProducts : products
-  const catalogCategories = useMemo(() => ['الكل', ...Array.from(new Set(catalogProducts.map(p => p.category).filter(Boolean)))], [catalogProducts])
+  const catalogProducts = products
+  const catalogCategories = categories
   const visibleProducts = useMemo(
     () => catalogProducts.filter(p =>
       (category === 'الكل' || p.category === category) &&
@@ -266,46 +214,14 @@ export default function App() {
     setPendingPayment(null)
     window.setTimeout(() => setModal(null), 350)
 
-    // 2. Persist the local ledger and retry queue before any ACC/Firebase work.
-    // The queue is the recovery record for missing Auth, offline, catalog, and
-    // ambiguous network responses.
+    // 2. Persist the local ledger and deferred queue. No Firebase, ACC, Auth,
+    // or Cloud Function call is allowed on this cashier-critical path.
     enqueueSale(sale)
-
-    // 3. Try ACC Sync
-    let mappedItems = sale.items
-    try {
-      if (!isAccConfigured()) {
-        setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
-        return true
-      }
-
-      mappedItems = originalItems.map(item => {
-        // Keep a previously loaded ACC identity usable after a page reload
-        // while the live catalog is temporarily unavailable.
-        const remote = accProducts.find(p => String(p.id) === String(item.accProductId || item.product_id || item.id)) || (item.accProductId ? item : null)
-        if (!remote) throw new Error(`الصنف غير مربوط في ACC-101: ${item.name}`)
-        return { ...item, accProductId: remote.id, product_id: remote.id, name: remote.name, english: remote.english, price: Number(item.price) }
-      })
-
-      enqueueSale({ ...sale, items: mappedItems })
-
-      const syncedSale = { ...sale, items: mappedItems, status: 'synced', syncConfirmedAt: Date.now() }
-      await withSyncTimeout(saveAccSale(syncedSale, session.profile))
-
-      markSaleSynced(syncedSale)
-      return true
-
-    } catch (error) {
-      // No sale error is terminal here: without confirmed Firebase success the
-      // sale must remain retryable and must not disappear from the queue.
-      enqueueSale({ ...sale, items: mappedItems }, { error })
-      setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
-      return true
-
-    } finally {
-      window.setTimeout(() => { saleInFlight.current = false }, 350)
-    }
-  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, accProducts, requestSalePrint])
+    setPendingSaleCount(readPendingSaleCount())
+    setSyncNotice({ status: 'pending', count: 1, saleId: sale.saleId })
+    window.setTimeout(() => { saleInFlight.current = false }, 350)
+    return true
+  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -413,12 +329,8 @@ export default function App() {
     return true
   }, [directThermalReady, printerSettings])
   const login = useCallback(async cashier => {
-    const profile = await loginToAcc(cashier.email, cashier.password)
-    const remoteShift = await openAccShift(profile, 0, `POS101 ${cashier.name}`)
-    const remoteProducts = await loadAccProducts()
-    setAccProducts(remoteProducts)
-    // Keep the selected shift on the session so completed sales can be grouped
-    // correctly by the morning/evening reports.
+    // A local shift is sufficient to sell. ACC-specific session fields and
+    // remote shift creation remain deliberately unused until phase two.
     setSession({
       cashierId: cashier.cashierId || cashier.shiftId,
       cashierNameSnapshot: cashier.name,
@@ -426,23 +338,16 @@ export default function App() {
       shiftName: cashier.name,
       name: cashier.name,
       openedAt: Date.now(),
-      status: 'open'
-      , profile
-      , accShiftId: remoteShift.id
+      status: 'open',
+      localOnly: true,
     })
     setModal(null)
   }, [])
   const logout = useCallback(async () => {
-    if (session?.accShiftId) {
-      const counted = window.prompt('أدخل النقد الفعلي لإغلاق الوردية (د.ع):', '')
-      if (counted === null) return
-      try { await closeAccShift(session.accShiftId, Number(counted)) } catch (error) { window.alert(error?.message || 'تعذر إغلاق الوردية في ACC-101'); return }
-    }
     if (session) {
       const shifts = read('pos101.shifts', [])
       localStorage.setItem('pos101.shifts', JSON.stringify([...shifts, { ...session, closedAt: Date.now(), status: 'closed' }]))
     }
-    await logoutFromAcc().catch(() => {})
     setSession(null); setModal(null)
   }, [session])
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
@@ -451,9 +356,9 @@ export default function App() {
     <main className="app-shell">
       {syncNotice && (
         <div className={`sync-notice ${syncNotice.status}`} role="status">
-          {syncNotice.status === 'pending'
+          {syncNotice.text || (syncNotice.status === 'pending'
             ? `بيع محفوظ محلياً — بانتظار المزامنة (${formatNumber(syncNotice.count)})`
-            : `تم تأكيد مزامنة ${formatNumber(syncNotice.count)} بيع مع ACC-101`}
+            : `تم تأكيد مزامنة ${formatNumber(syncNotice.count)} بيع مع ACC-101`)}
           <button type="button" onClick={() => setSyncNotice(null)} aria-label="إغلاق حالة المزامنة">×</button>
         </div>
       )}
@@ -464,6 +369,10 @@ export default function App() {
           onCashierMenu={() => setModal('cashier-menu')}
           onLogout={logout}
           openOrdersCount={openOrdersCount}
+          onSyncSales={syncSalesNow}
+          onDownloadSalesBackup={downloadSalesBackup}
+          pendingSaleCount={pendingSaleCount}
+          syncBusy={syncBusy}
           currentView={currentView}
           onNavigate={setCurrentView}
         />

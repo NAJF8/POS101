@@ -459,19 +459,17 @@ export function Receipt({ sale }) {
 /* ── Shift Login ── */
 export function ShiftLogin({ shifts, onClose, onLogin }) {
   const [shiftId, setShiftId] = React.useState(shifts[0]?.shiftId || '')
-  const [email, setEmail] = React.useState('')
-  const [password, setPassword] = React.useState('')
   const [error, setError] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
 
   const submit = async e => {
-    e.preventDefault()
+    e?.preventDefault?.()
     setError('')
     const shift = shifts.find(c => c.shiftId === shiftId)
     if (!shift) return
     setBusy(true)
-    try { await onLogin({ ...shift, email, password }) } catch (err) { setError(err?.message || 'تعذر تسجيل الدخول.') } finally { setBusy(false) }
+    try { await onLogin({ ...shift }) } catch (err) { setError(err?.message || 'تعذر تسجيل الدخول.') } finally { setBusy(false) }
   }
 
   return (
@@ -479,8 +477,6 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
       <img src={logoUrl} alt="101 COFFEE HOUSE" style={{ maxHeight: '100px', objectFit: 'contain', marginBottom: '1rem' }} />
        <h2>دخول الكاشير والوردية</h2>
        <form onSubmit={submit}>
-         <label>البريد الإلكتروني<input type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" /></label>
-         <label>كلمة المرور<input type="password" required value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>
          <label>
           الوردية
           <select value={shiftId} onChange={e => setShiftId(e.target.value)}>
@@ -490,7 +486,7 @@ export function ShiftLogin({ shifts, onClose, onLogin }) {
           </select>
         </label>
          {error && <p className="form-error" role="alert">{error}</p>}
-         <button className="primary-action" type="submit" disabled={busy}>{busy ? 'جارٍ التحقق…' : 'دخول'}</button>
+         <button className="primary-action" type="submit" disabled={busy}>{busy ? 'جارٍ فتح الوردية…' : 'بدء الوردية محلياً'}</button>
       </form>
     </Dialog>
   )

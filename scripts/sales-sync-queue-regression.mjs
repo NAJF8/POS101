@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+
+const store = new Map();
+globalThis.localStorage = { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, String(value)), removeItem: key => store.delete(key) };
+const queue = await import('../src/services/salesSyncQueue.js');
+const sale = { saleId: 'old-local-sale', operationKey: 'pos101:old-local-sale', items: [{ id: 'ready-test', quantity: 1, price: 1000 }], status: 'pending_sync' };
+localStorage.setItem('pos101.sales', JSON.stringify([sale]));
+assert.equal(queue.readPendingSaleCount(), 1);
+assert.equal(queue.reconcileSalesQueue().added, 1);
+assert.equal(queue.readSaleQueue().length, 1);
+assert.equal(queue.reconcileSalesQueue().added, 0);
+assert.equal(queue.readPendingSaleCount(), 1);
+const restored = JSON.parse(localStorage.getItem('pos101.sales'))[0];
+assert.equal(restored.status, 'pending_sync');
+assert.deepEqual(restored, sale);
+const backup = queue.buildSalesBackup('2026-09-27T12:00:00.000Z');
+assert.equal(backup.createdAt, '2026-09-27T12:00:00.000Z');
+assert.equal(backup.salesCount, 1);
+assert.equal(backup['pos101.sales'].length, 1);
+assert.equal(backup['pos101.syncQueue'].length, 1);
+console.log(JSON.stringify({ local_only: true, production_target_used: 'NO', results: { old_sale_reconciled: true, duplicate_prevented: true, local_ledger_unchanged: true, backup_complete: true } }, null, 2));
