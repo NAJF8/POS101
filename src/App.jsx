@@ -12,7 +12,8 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralPermissions, getCentralRole, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, mergeCentralSalesLocally, readCentralSalesReadOnly, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly, syncCentralSales } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, runAdminCentralRefresh, runCashierCentralSync, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly } from './services/posCentralSync.js'
+import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 
@@ -62,7 +63,6 @@ export default function App() {
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
   const [adminCentralSales, setAdminCentralSales] = useState([])
-  const [adminRefreshBusy, setAdminRefreshBusy] = useState(false)
   const centralListener = useRef(null)
   const [salesMaintenanceOpen, setSalesMaintenanceOpen] = useState(false)
   const saleInFlight = useRef(false)
@@ -120,10 +120,8 @@ export default function App() {
         return
       }
       if (isCentralAdminUser(user)) {
-        centralListener.current = subscribeCentralSalesReadOnly(centralSales => {
-          // Admin central sync is read-only, but the downloaded rows must still
-          // feed the shared local read models used by Order History and Reports.
-          setAdminCentralSales(mergeCentralSalesLocally(centralSales))
+        centralListener.current = subscribeCentralSalesReadOnly(({ mergedSales }) => {
+          setAdminCentralSales(mergedSales)
         })
         return
       }
@@ -132,7 +130,7 @@ export default function App() {
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
       if (getCentralSyncState().initialSyncCompleted) {
-        void syncCentralSales().catch(() => {})
+        void runCashierCentralSync().catch(() => {})
       }
     })
     return () => {
@@ -160,52 +158,43 @@ export default function App() {
     await signOutCentral()
   }, [])
 
-  const refreshAdminCentralSales = useCallback(async () => {
-    if (adminRefreshBusy) return
-    setAdminRefreshBusy(true)
-    try {
-      const centralSales = await readCentralSalesReadOnly()
-      setAdminCentralSales(mergeCentralSalesLocally(centralSales))
-    } catch (error) { setAdminAuthError(error?.message || 'تعذر تحديث القراءة المركزية.') } finally { setAdminRefreshBusy(false) }
-  }, [adminRefreshBusy])
-
-  const loginSync = useCallback(async () => {
-    if (syncBusy) return
+  const onCentralSyncStart = useCallback(() => {
     setSyncBusy(true)
-    setSyncLabel('جاري المزامنة...')
-    try {
-      const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
-      const role = getCentralRole(user)
-      const permissions = getCentralPermissions(user)
-      if (!permissions.centralRead) {
-        await signOutCentral()
-        throw new Error('هذا الحساب غير مخول للوصول المركزي.')
-      }
-      const providerId = user.providerData?.[0]?.providerId || 'google.com'
-      if (role === 'admin-viewer') {
-        const centralSales = await readCentralSalesReadOnly()
-        const mergedSales = mergeCentralSalesLocally(centralSales)
-        setAdminCentralSales(mergedSales)
-        setSyncLabel('تم تحديث المبيعات')
-        setSyncAuthStatus({ ok: true, role, uid: user.uid, email: user.email, providerId, uploaded: 0, centralCount: centralSales.length, mergedCount: mergedSales.length, readOnly: true, message: 'تم تحديث المبيعات' })
-        return
-      }
-      const initial = !getCentralSyncState().initialSyncCompleted
-      const result = await syncCentralSales({ initial })
-      setSyncLabel('تمت المزامنة')
-      setSyncAuthStatus({ ok: true, uid: user.uid, email: user.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount })
-    } catch (error) {
-      setSyncLabel(navigator.onLine === false ? 'محلي - بانتظار الاتصال' : 'المزامنة جاهزة')
-      setSyncAuthStatus({ ok: false, message: error.message })
-    } finally {
-      setSyncBusy(false)
+    setSyncLabel(isCentralAdminUser(centralAuth()?.currentUser) ? 'جاري تحديث المبيعات...' : 'جاري المزامنة...')
+  }, [])
+
+  const onCentralSyncSuccess = useCallback(({ role, result }) => {
+    const user = centralAuth()?.currentUser
+    const providerId = user?.providerData?.[0]?.providerId || 'google.com'
+    if (role === 'admin-viewer') {
+      setAdminCentralSales(result.mergedSales)
+      setSyncLabel('تم تحديث المبيعات')
+      setSyncAuthStatus({ ok: true, role, uid: user?.uid, email: user?.email, providerId, uploaded: 0, centralCount: result.centralCount, mergedCount: result.mergedCount, readOnly: true, message: 'تم تحديث المبيعات' })
+      return
     }
-  }, [syncBusy])
+    setSyncLabel('تمت المزامنة')
+    setSyncAuthStatus({ ok: true, uid: user?.uid, email: user?.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount })
+  }, [])
+
+  const onCentralSyncError = useCallback(error => {
+    setSyncLabel(navigator.onLine === false ? 'محلي - بانتظار الاتصال' : isCentralAdminUser(centralAuth()?.currentUser) ? 'تحديث المبيعات' : 'المزامنة جاهزة')
+    setSyncAuthStatus({ ok: false, message: error?.message || 'تعذر تنفيذ المزامنة.' })
+  }, [])
+
+  const handleCentralSyncClick = useMemo(() => createCentralSyncClickHandler({
+    getCurrentUser: () => centralAuth()?.currentUser,
+    signIn: signInCentralWithGoogle,
+    runAdminRefresh: runAdminCentralRefresh,
+    runCashierSync: () => runCashierCentralSync({ initial: !getCentralSyncState().initialSyncCompleted }),
+    onStart: onCentralSyncStart,
+    onSuccess: onCentralSyncSuccess,
+    onError: onCentralSyncError,
+  }), [onCentralSyncStart, onCentralSyncSuccess, onCentralSyncError])
 
   useEffect(() => {
     const retry = () => {
       if (isCentralCashierUser(centralAuth()?.currentUser) && getCentralSyncState().initialSyncCompleted) {
-        void syncCentralSales().catch(() => {})
+        void runCashierCentralSync().catch(() => {})
       }
     }
     window.addEventListener('pos101-sale-created', retry)
@@ -462,7 +451,7 @@ export default function App() {
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
-          onSyncSales={loginSync}
+          onSyncSales={handleCentralSyncClick}
           syncBusy={syncBusy}
           syncLabel={syncLabel}
           onOpenSalesMaintenance={() => setSalesMaintenanceOpen(true)}
@@ -525,7 +514,7 @@ export default function App() {
             <div><h1>الإدارة متصلة</h1><p>قراءة مركزية مباشرة — {adminCentralSales.length} مبيعات فريدة</p></div>
             <button className="secondary-action" type="button" onClick={logoutAdmin}>تسجيل خروج الإدارة</button>
           </header>
-          <div className="admin-central-actions"><button type="button" onClick={refreshAdminCentralSales} disabled={adminRefreshBusy}>{adminRefreshBusy ? 'جارٍ تحديث القراءة…' : 'تحديث القراءة'}</button><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
+          <div className="admin-central-actions"><button type="button" onClick={handleCentralSyncClick} disabled={syncBusy}>{syncBusy ? 'جارٍ تحديث المبيعات...' : 'تحديث المبيعات'}</button><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
           <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} salesOverride={adminCentralSales} onNavigate={() => {}} />
         </section>

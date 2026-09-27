@@ -97,14 +97,14 @@ export const isSaleEligibleForCentralUpload = sale => validSaleId(saleIdOf(sale)
 
 const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(sale) })
 
-const requireReady = async () => {
+const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   if (!auth?.currentUser) throw Object.assign(new Error('تسجيل دخول Firebase مطلوب للمزامنة.'), { code: 'AUTH_REQUIRED' })
-  if (getCentralRole(auth.currentUser) !== 'cashier-sync') {
-    await signOut(auth)
-    throw Object.assign(new Error('هذا الحساب لا يملك صلاحية رفع المبيعات.'), { code: 'CENTRAL_WRITE_BLOCKED' })
+  if (getCentralRole(auth.currentUser) !== expectedRole) {
+    throw Object.assign(new Error(expectedRole === 'cashier-sync' ? 'هذا الحساب لا يملك صلاحية رفع المبيعات.' : 'تسجيل دخول الإدارة مطلوب للقراءة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
   }
+  return auth.currentUser
 }
 
 export const isCentralConfigured = () => configured
@@ -127,13 +127,7 @@ export const signInCentralWithGoogle = async () => {
   await authReady
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ login_hint: CASHIER_LOGIN_HINT_EMAIL })
-  const result = await signInWithPopup(auth, provider)
-  const user = result.user
-  if (!isCentralCashierUser(user)) {
-    await signOut(auth)
-    throw Object.assign(new Error('هذا الحساب لا يملك صلاحية رفع المبيعات.'), { code: 'CENTRAL_WRITE_BLOCKED' })
-  }
-  return user
+  return (await signInWithPopup(auth, provider)).user
 }
 export const signInAdminWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
@@ -167,8 +161,8 @@ export const mergeCentralSalesLocally = centralSales => {
   return merged
 }
 
-export const syncCentralSales = async ({ initial = false } = {}) => {
-  await requireReady()
+export const runCashierCentralSync = async ({ initial = false } = {}) => {
+  await requireRole('cashier-sync')
   const localSales = readSales()
   const before = await get(salesRef())
   const beforeCentral = centralValues(before)
@@ -211,6 +205,16 @@ export const syncCentralSales = async ({ initial = false } = {}) => {
   }
 }
 
+const readAndMergeAdminSales = async () => {
+  await requireRole('admin-viewer')
+  const snapshot = await get(salesRef())
+  const centralSales = centralValues(snapshot)
+  const mergedSales = mergeCentralSalesLocally(centralSales)
+  return { centralSales, mergedSales, centralCount: centralSales.length, mergedCount: mergedSales.length }
+}
+
+export const runAdminCentralRefresh = readAndMergeAdminSales
+
 export const subscribeCentralSales = callback => {
   if (!configured || !db || !isCentralCashierUser(auth?.currentUser)) return () => {}
   return onValue(salesRef(), snapshot => {
@@ -223,13 +227,13 @@ export const subscribeCentralSales = callback => {
 export const subscribeCentralSalesReadOnly = callback => {
   if (!configured || !db || !isCentralAdminUser(auth?.currentUser)) return () => {}
   return onValue(salesRef(), snapshot => {
-    callback(centralValues(snapshot))
+    const centralSales = centralValues(snapshot)
+    const mergedSales = mergeCentralSalesLocally(centralSales)
+    callback({ centralSales, mergedSales, centralCount: centralSales.length, mergedCount: mergedSales.length })
   }, () => {})
 }
 
 export const readCentralSalesReadOnly = async () => {
-  if (!configured || !db || !isCentralAdminUser(auth?.currentUser)) throw new Error('تسجيل دخول الإدارة مطلوب للقراءة.')
-  const snapshot = await get(salesRef())
-  return centralValues(snapshot)
+  return (await readAndMergeAdminSales()).centralSales
 }
 
