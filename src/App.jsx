@@ -5,6 +5,7 @@ import OrderPanel from './components/OrderPanel'
 import { ProductOptions, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
+import Settings from './components/Settings'
 import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
 import { Purchases } from './components/Purchases'
@@ -12,7 +13,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, runAdminCentralRefresh, runCashierCentralSync, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralSales, subscribeCentralSalesReadOnly } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, runAdminCentralRefresh, runCashierCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
@@ -65,6 +66,8 @@ export default function App() {
   const [adminAuthError, setAdminAuthError] = useState('')
   const [adminCentralSales, setAdminCentralSales] = useState([])
   const centralListener = useRef(null)
+  const productListener = useRef(null)
+  const [centralProducts, setCentralProducts] = useState([])
   const [salesMaintenanceOpen, setSalesMaintenanceOpen] = useState(false)
   const saleInFlight = useRef(false)
 
@@ -87,12 +90,16 @@ export default function App() {
 
   const openOrdersCount = getOpenOrders(orders).length
 
-  const catalogProducts = products
+  const catalogProducts = useMemo(() => {
+    const merged = new Map(products.map(product => [String(product.id), product]))
+    for (const product of centralProducts) merged.set(String(product.id), { ...merged.get(String(product.id)), ...product })
+    return [...merged.values()]
+  }, [centralProducts])
   // Categories are navigation data, not a projection of the current product
   // list. Keep empty categories clickable so their empty state remains useful.
   const catalogCategories = useMemo(() => categories.slice(), [])
   const visibleProducts = useMemo(
-    () => catalogProducts.filter(p =>
+    () => catalogProducts.filter(p => p.enabled !== false &&
       (categoryId(category) === categoryId('الكل') || categoryId(p.categoryId || p.category) === categoryId(category)) &&
       `${p.name} ${p.english}`.toLowerCase().includes(query.toLowerCase())
     ),
@@ -114,11 +121,17 @@ export default function App() {
     const stopAuth = subscribeCentralAuth(user => {
       centralListener.current?.()
       centralListener.current = null
+      productListener.current?.()
+      productListener.current = null
+      setCentralProducts([])
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (!user) {
         setSyncAuthStatus(null)
         return
+      }
+      if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
+        productListener.current = subscribeCentralProducts(setCentralProducts)
       }
       if (isCentralAdminUser(user)) {
         centralListener.current = subscribeCentralSalesReadOnly(({ mergedSales }) => {
@@ -137,6 +150,7 @@ export default function App() {
     return () => {
       stopAuth?.()
       centralListener.current?.()
+      productListener.current?.()
       setAdminCentralSales([])
     }
   }, [])
@@ -442,6 +456,11 @@ export default function App() {
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
 
   const adminReady = isCentralAdminUser(adminAuthUser)
+  const saveProduct = useCallback(async product => {
+    const saved = await saveCentralProduct(product)
+    setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
+    return saved
+  }, [])
 
   return (
     <main className="app-shell">
@@ -464,6 +483,10 @@ export default function App() {
 
       {currentView === 'dashboard' && (session || adminReady) && (
         <Dashboard onNavigate={setCurrentView} onLogout={logout} />
+      )}
+
+      {currentView === 'settings' && (session || adminReady) && (
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={adminReady} onSave={saveProduct} onNavigate={setCurrentView} />
       )}
 
       {currentView === 'orders' && (session || adminReady) && (

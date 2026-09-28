@@ -58,6 +58,7 @@ export const ADMIN_UID = 'rtDA9erW11geHfLpa3ZW3LacZR73'
 export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
+const productsRef = () => ref(db, 'pos101_products')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const readSales = () => {
   try {
@@ -235,5 +236,62 @@ export const subscribeCentralSalesReadOnly = callback => {
 
 export const readCentralSalesReadOnly = async () => {
   return (await readAndMergeAdminSales()).centralSales
+}
+
+// Product management is deliberately isolated from pos101_sales. Existing
+// static menu records are never deleted or rewritten; this path contains only
+// new products and explicit updates/hide/show overlays keyed by product ID.
+export const isCentralProductReader = user => isCentralCashierUser(user) || isCentralAdminUser(user)
+export const isCentralProductAdmin = user => isCentralAdminUser(user)
+const requireProductRole = async (write = false) => {
+  if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  await authReady
+  const user = auth?.currentUser
+  if (!user || !isCentralProductReader(user) || (write && !isCentralProductAdmin(user))) {
+    throw Object.assign(new Error(write ? 'صلاحية إدارة المنتجات مطلوبة.' : 'تسجيل دخول POS مطلوب لقراءة المنتجات.'), { code: 'PRODUCT_PERMISSION_DENIED' })
+  }
+  return user
+}
+
+const normalizeProduct = (value, id) => ({
+  ...value,
+  id: String(value?.id || id),
+  name: String(value?.name || '').trim(),
+  english: String(value?.english || '').trim(),
+  category: String(value?.category || '').trim(),
+  categoryId: value?.categoryId || value?.category_id || value?.category || '',
+  price: Number(value?.price ?? 0),
+  image: value?.image || null,
+  enabled: value?.enabled !== false,
+})
+
+export const loadCentralProducts = async () => {
+  await requireProductRole(false)
+  const snapshot = await get(productsRef())
+  return snapshot.exists()
+    ? Object.entries(snapshot.val() || {}).map(([id, value]) => normalizeProduct(value, id))
+    : []
+}
+
+export const subscribeCentralProducts = callback => {
+  if (!configured || !db || !isCentralProductReader(auth?.currentUser)) return () => {}
+  return onValue(productsRef(), snapshot => {
+    const products = snapshot.exists()
+      ? Object.entries(snapshot.val() || {}).map(([id, value]) => normalizeProduct(value, id))
+      : []
+    callback(products)
+  }, () => callback([]))
+}
+
+export const saveCentralProduct = async product => {
+  await requireProductRole(true)
+  const id = String(product?.id || '').trim() || `product-${crypto.randomUUID()}`
+  const record = normalizeProduct({ ...product, id, updatedAt: new Date().toISOString(), updatedBy: auth.currentUser.uid }, id)
+  if (!record.name) throw Object.assign(new Error('اسم المنتج مطلوب.'), { code: 'PRODUCT_NAME_REQUIRED' })
+  if (!Number.isFinite(record.price) || record.price < 0) throw Object.assign(new Error('السعر يجب أن يكون رقماً لا يقل عن صفر.'), { code: 'PRODUCT_PRICE_INVALID' })
+  await set(ref(db, `pos101_products/${id}`), record)
+  const readBack = await get(ref(db, `pos101_products/${id}`))
+  if (!readBack.exists() || String(readBack.val()?.id || id) !== id) throw new Error('تعذر التحقق من حفظ المنتج.')
+  return normalizeProduct(readBack.val(), id)
 }
 

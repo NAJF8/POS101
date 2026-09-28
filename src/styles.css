@@ -30,6 +30,50 @@
   --cart-w: 360px;
 }
 
+/* Settings / product management */
+.settings-page { min-height: calc(100vh - 88px); padding: 28px clamp(16px, 4vw, 56px) 48px; background: #f8f6f1; color: #26382e; }
+.settings-heading, .settings-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.settings-heading { max-width: 1180px; margin: 0 auto 20px; }
+.settings-heading h1 { margin: 8px 0 3px; font-size: clamp(28px, 4vw, 42px); }
+.settings-heading p, .settings-card-heading p { margin: 0; color: #718078; }
+.back-link { border: 0; background: transparent; color: #536849; cursor: pointer; display: inline-flex; gap: 7px; align-items: center; font-weight: 700; padding: 0; }
+.settings-lock, .product-status { border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 800; background: #e8f0e8; color: #3f6249; white-space: nowrap; }
+.settings-card { max-width: 1180px; margin: auto; background: white; border: 1px solid #e8e3d9; border-radius: 20px; padding: clamp(16px, 3vw, 28px); box-shadow: 0 12px 35px rgba(45, 54, 43, .06); }
+.settings-card h2 { margin: 0 0 5px; font-size: 23px; }
+.settings-card-heading .primary-action { white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.settings-readonly, .settings-notice { border-radius: 12px; padding: 12px 14px; background: #fff8e7; color: #80601b; margin: 18px 0 0; }
+.settings-product-list { display: grid; gap: 10px; margin-top: 22px; }
+.settings-product-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 11px; border: 1px solid #eeeae2; border-radius: 14px; }
+.settings-product-row.is-hidden { background: #fafafa; opacity: .8; }
+.settings-product-image { width: 62px; height: 62px; border-radius: 12px; object-fit: cover; background: #f0eee8; }
+.settings-product-info { min-width: 0; }
+.settings-product-info h3 { margin: 0 0 4px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-product-info p { margin: 0; color: #758078; font-size: 13px; }
+.product-status.hidden { background: #f5e7e3; color: #9a4d3f; }
+.settings-product-actions { display: flex; gap: 7px; }
+.settings-product-actions button { border: 1px solid #d9ded8; background: #fff; color: #536849; border-radius: 9px; padding: 8px 11px; cursor: pointer; font-weight: 700; }
+.settings-product-actions button:last-child { color: #93554b; }
+.settings-product-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.product-form-dialog { width: min(620px, calc(100vw - 28px)); max-height: min(92vh, 760px); overflow: auto; }
+.product-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 18px; }
+.product-form-grid label, .product-image-picker { display: grid; gap: 7px; color: #536058; font-size: 13px; font-weight: 700; }
+.product-form-grid input, .product-form-grid select { width: 100%; box-sizing: border-box; border: 1px solid #d8ded8; border-radius: 10px; min-height: 42px; padding: 9px 11px; background: #fff; color: #26382e; font: inherit; }
+.product-image-picker { margin-top: 16px; border: 1px dashed #b8c9ba; border-radius: 12px; padding: 12px; background: #fbfdf9; }
+.product-image-picker input { font: inherit; }
+.product-image-picker span { color: #718078; font-weight: 500; }
+.product-image-preview { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: #718078; font-size: 12px; }
+.product-image-preview img { width: 76px; height: 76px; object-fit: cover; border-radius: 12px; background: #f0eee8; }
+.product-enabled-toggle { display: flex; gap: 8px; align-items: center; margin-top: 15px; font-weight: 700; color: #536058; }
+@media (max-width: 680px) {
+  .settings-heading, .settings-card-heading { flex-direction: column; }
+  .settings-card-heading .primary-action { width: 100%; justify-content: center; }
+  .settings-product-row { grid-template-columns: 52px minmax(0, 1fr) auto; gap: 9px; }
+  .settings-product-image { width: 52px; height: 52px; }
+  .settings-product-row .product-status { grid-column: 2; justify-self: start; }
+  .settings-product-actions { grid-column: 3; grid-row: 1 / span 2; flex-direction: column; }
+  .product-form-grid { grid-template-columns: 1fr; }
+}
+
 @media (min-width: 1300px) {
   :root {
     --cart-w: 420px;
