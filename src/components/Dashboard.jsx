@@ -1,7 +1,8 @@
 ﻿import React from 'react'
 import { Icon } from './Icons'
+import OperationalDay from './OperationalDay'
 
-export default function Dashboard({ onNavigate, onLogout }) {
+export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled = true, operationalDay, operationalDaySummary, operationalDayLoading, operationalDayError, onStartOperationalDay, onEndOperationalDay }) {
   const cards = [
     { id: 'pos', title: 'الكاشير', icon: 'monitor', action: () => onNavigate('pos') },
     { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => onNavigate('orders') },
@@ -22,6 +23,7 @@ export default function Dashboard({ onNavigate, onLogout }) {
 
   return (
     <div className="dashboard-container" dir="rtl">
+      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} loading={operationalDayLoading} error={operationalDayError} onStart={onStartOperationalDay} onEnd={onEndOperationalDay} />}
       <div className="dashboard-grid">
         {cards.map(card => (
           <button 

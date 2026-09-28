@@ -1447,6 +1447,32 @@ input, textarea, select { cursor: text; }
   .expenses-header { align-items: stretch; flex-direction: column; }
 }
 
+/* Operational business day */
+.operational-day-card { width: min(1080px, calc(100% - 32px)); margin: 24px auto 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 8px 22px rgba(45,54,43,.07); }
+.operational-day-heading, .operational-day-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.operational-day-heading small { color: var(--muted); font-weight: 700; }
+.operational-day-heading h2 { margin: 3px 0 0; color: var(--coffee); font-size: 22px; }
+.operational-day-status { padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: 12px; }
+.operational-day-status.open { color: #236248; background: #e6f2ea; }
+.operational-day-status.closed { color: var(--muted); background: #f1eee8; }
+.operational-day-meta { justify-content: flex-start; flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.operational-day-meta b { color: var(--coffee); }
+.operational-day-action { margin-top: 14px; min-height: 40px; padding: 8px 18px; }
+.operational-day-warning { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 14px; padding: 10px 12px; color: #7b542c; background: #fff8e8; border: 1px solid #ead6a8; border-radius: 9px; font-size: 13px; }
+.operational-day-warning button { border: 0; color: #8a3d2d; background: transparent; text-decoration: underline; font-weight: 800; cursor: pointer; }
+.operational-day-warning span { color: #536058; }
+.operational-day-dialog, .operational-day-required-dialog { width: min(560px, calc(100vw - 32px)); padding: 26px; }
+.operational-day-dialog h2, .operational-day-required-dialog h2 { margin: 0 0 12px; color: var(--coffee); }
+.operational-day-dialog p, .operational-day-required-dialog p { margin: 7px 0; color: var(--muted); }
+.operational-day-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+.operational-day-summary span { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border-radius: 8px; background: #f7f5f0; color: var(--muted); }
+.operational-day-summary b { color: var(--coffee); }
+@media (max-width: 600px) {
+  .operational-day-card { width: min(100% - 20px, 1080px); padding: 15px; }
+  .operational-day-heading h2 { font-size: 18px; }
+  .operational-day-summary { grid-template-columns: 1fr; }
+}
+
 /* Thermal receipt print contract: 80mm paper, 72.1mm driver printable limit.
    Keep receipt content at 70mm for a small physical margin on both sides. */
 @media print {

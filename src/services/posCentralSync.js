@@ -15,6 +15,7 @@ import {
   getDatabase,
   onValue,
   ref,
+  runTransaction,
   set,
 } from 'firebase/database'
 
@@ -59,6 +60,7 @@ export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const productsRef = () => ref(db, 'pos101_products')
+const operationalDaysRef = () => ref(db, 'pos101_operational_days')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const readSales = () => {
   try {
@@ -143,6 +145,68 @@ export const signInAdminWithGoogle = async () => {
   return result.user
 }
 export const signOutCentral = () => auth ? signOut(auth) : Promise.resolve()
+
+const operationalDayIdOf = day => String(day?.id || day?.operationalDayId || '').trim()
+const localBusinessDate = timestamp => {
+  const date = new Date(timestamp)
+  const pad = value => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+const operationalDayValues = snapshot => snapshot.exists()
+  ? Object.entries(snapshot.val() || {}).map(([id, value]) => ({ ...value, id: operationalDayIdOf(value) || id }))
+  : []
+const latestOpenOperationalDay = days => days
+  .filter(day => day.status === 'open' && operationalDayIdOf(day))
+  .sort((left, right) => Number(right.startedAt || 0) - Number(left.startedAt || 0))[0] || null
+
+export const subscribeOperationalDay = callback => {
+  if (!configured || !db || !auth?.currentUser || !isCentralCashierUser(auth.currentUser)) {
+    callback(null)
+    return () => {}
+  }
+  return onValue(operationalDaysRef(), snapshot => callback(latestOpenOperationalDay(operationalDayValues(snapshot))), () => callback(null))
+}
+
+export const readOpenOperationalDay = async () => {
+  await requireRole('cashier-sync')
+  return latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef())))
+}
+
+export const startOperationalDay = async ({ startedBy = {} } = {}) => {
+  const user = await requireRole('cashier-sync')
+  const now = Date.now()
+  const transaction = await runTransaction(operationalDaysRef(), current => {
+    const days = Object.entries(current || {}).map(([id, value]) => ({ ...value, id: operationalDayIdOf(value) || id }))
+    if (latestOpenOperationalDay(days)) return current
+    const id = crypto.randomUUID()
+    return {
+      ...(current || {}),
+      [id]: {
+        id,
+        operationalDayId: id,
+        businessDate: localBusinessDate(now),
+        startedAt: now,
+        startedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
+        endedAt: null,
+        endedBy: null,
+        status: 'open',
+      },
+    }
+  })
+  return latestOpenOperationalDay(operationalDayValues(transaction.snapshot))
+}
+
+export const endOperationalDay = async (day, { endedBy = {} } = {}) => {
+  const user = await requireRole('cashier-sync')
+  const id = operationalDayIdOf(day)
+  if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
+  const dayRef = ref(db, `pos101_operational_days/${id}`)
+  const transaction = await runTransaction(dayRef, current => {
+    if (!current || current.status !== 'open') return current
+    return { ...current, status: 'closed', endedAt: Date.now(), endedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' } }
+  })
+  return transaction.snapshot.exists() ? { ...transaction.snapshot.val(), id } : null
+}
 
 export const inspectLocalSales = () => {
   const sales = readSales().filter(sale => saleIdOf(sale))

@@ -13,11 +13,11 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, runAdminCentralRefresh, runCashierCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, runAdminCentralRefresh, runCashierCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
-import SalesMaintenanceTool from './components/SalesMaintenanceTool.jsx'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
+import { readLocalSales } from './services/reportSales.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
@@ -68,7 +68,10 @@ export default function App() {
   const centralListener = useRef(null)
   const productListener = useRef(null)
   const [centralProducts, setCentralProducts] = useState([])
-  const [salesMaintenanceOpen, setSalesMaintenanceOpen] = useState(false)
+  const [operationalDay, setOperationalDay] = useState(null)
+  const [operationalDayLoading, setOperationalDayLoading] = useState(false)
+  const [operationalDayError, setOperationalDayError] = useState('')
+  const operationalDayListener = useRef(null)
   const saleInFlight = useRef(false)
 
   const downloadSalesBackup = useCallback(() => {
@@ -121,14 +124,20 @@ export default function App() {
     const stopAuth = subscribeCentralAuth(user => {
       centralListener.current?.()
       centralListener.current = null
+      operationalDayListener.current?.()
+      operationalDayListener.current = null
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
+      setOperationalDay(null)
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (!user) {
         setSyncAuthStatus(null)
         return
+      }
+      if (isCentralCashierUser(user)) {
+        operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
       }
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         productListener.current = subscribeCentralProducts(setCentralProducts)
@@ -151,9 +160,50 @@ export default function App() {
       stopAuth?.()
       centralListener.current?.()
       productListener.current?.()
+      operationalDayListener.current?.()
       setAdminCentralSales([])
     }
   }, [])
+
+  const operationalDaySummary = useMemo(() => {
+    const rows = operationalDay?.id ? readLocalSales().filter(sale => sale.operationalDayId === operationalDay.id && !sale.voided) : []
+    return rows.reduce((summary, sale) => {
+      const value = Number(sale.total || 0)
+      const method = sale.paymentMethod || sale.payment?.method
+      return {
+        count: summary.count + 1,
+        total: summary.total + value,
+        cash: summary.cash + (method === 'cash' ? value : 0),
+        electronic: summary.electronic + (method === 'electronic' ? value : 0),
+        discount: summary.discount + Number(sale.discount || 0),
+      }
+    }, { count: 0, total: 0, cash: 0, electronic: 0, discount: 0 })
+  }, [operationalDay])
+
+  const handleStartOperationalDay = useCallback(async () => {
+    setOperationalDayError('')
+    setOperationalDayLoading(true)
+    try {
+      if (!centralAuth()?.currentUser) await signInCentralWithGoogle()
+      const day = await startOperationalDay({ startedBy: { name: session?.name || session?.shiftName || '' } })
+      setOperationalDay(day)
+      setModal(null)
+    } catch (error) {
+      setOperationalDayError(error?.message || 'تعذر بدء اليوم التشغيلي.')
+      throw error
+    } finally { setOperationalDayLoading(false) }
+  }, [session])
+
+  const handleEndOperationalDay = useCallback(async () => {
+    setOperationalDayError('')
+    try {
+      const closed = await endOperationalDay(operationalDay, { endedBy: { name: session?.name || session?.shiftName || '' } })
+      setOperationalDay(closed?.status === 'open' ? closed : null)
+    } catch (error) {
+      setOperationalDayError(error?.message || 'تعذر إنهاء اليوم التشغيلي.')
+      throw error
+    }
+  }, [operationalDay, session])
 
   const loginAdmin = useCallback(async () => {
     if (adminAuthBusy) return
@@ -276,6 +326,11 @@ export default function App() {
 
   const initiateComplete = useCallback(payment => {
     if (!session || !activeOrder.items.length || saleInFlight.current) return false
+    if (operationalDay?.status !== 'open') {
+      setOperationalDayError('يجب بدء اليوم التشغيلي أولاً')
+      setModal('operational-day-required')
+      return false
+    }
     setPendingPayment(payment)
     setModal('seller-selection')
     return true
@@ -283,6 +338,19 @@ export default function App() {
 
   const finalizeSale = useCallback(async (sellerName) => {
     if (!session || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
+
+    let currentOperationalDay = operationalDay
+    try {
+      currentOperationalDay = await readOpenOperationalDay()
+    } catch {
+      currentOperationalDay = null
+    }
+    if (!currentOperationalDay || currentOperationalDay.status !== 'open') {
+      setOperationalDay(null)
+      setOperationalDayError('يجب بدء اليوم التشغيلي أولاً')
+      setModal('operational-day-required')
+      return false
+    }
 
     saleInFlight.current = true
     const payment = pendingPayment
@@ -303,6 +371,8 @@ export default function App() {
       shift: session.name,
       seller: sellerName,
       createdAt: Date.now(),
+      businessDate: currentOperationalDay.businessDate,
+      operationalDayId: currentOperationalDay.id,
       subtotal,
       discount: activeDiscount,
       discountDetails: activeOrder.discount ? { ...activeOrder.discount, value: activeDiscount } : null,
@@ -325,7 +395,7 @@ export default function App() {
     enqueueSale(sale)
     window.setTimeout(() => { saleInFlight.current = false }, 350)
     return true
-  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint])
+  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -472,17 +542,13 @@ export default function App() {
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
-          onSyncSales={handleCentralSyncClick}
-          syncBusy={syncBusy}
-          syncLabel={syncLabel}
-          onOpenSalesMaintenance={() => setSalesMaintenanceOpen(true)}
           currentView={currentView}
           onNavigate={setCurrentView}
         />
       )}
 
       {currentView === 'dashboard' && (session || adminReady) && (
-        <Dashboard onNavigate={setCurrentView} onLogout={logout} />
+        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} />
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
@@ -532,7 +598,7 @@ export default function App() {
         </div>
       )}
 
-      {currentView === 'reports' && session && <Reports session={session} onNavigate={setCurrentView} onDirectThermalPrint={printReportDirect} directThermalReady={directThermalReady} />}
+      {currentView === 'reports' && session && <Reports session={session} operationalDay={operationalDay} onNavigate={setCurrentView} onDirectThermalPrint={printReportDirect} directThermalReady={directThermalReady} />}
       {currentView === 'expenses' && session && (
         <Expenses session={session} onNavigate={setCurrentView} />
       )}
@@ -570,7 +636,7 @@ export default function App() {
 
       {/* Modals */}
       {modal === 'cashier-menu' && <CashierMenu session={session} onClose={() => setModal(null)} onLogout={logout} />}
-      {salesMaintenanceOpen && <SalesMaintenanceTool onClose={() => setSalesMaintenanceOpen(false)} />}
+      {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>يجب بدء اليوم التشغيلي أولاً</h2><p>لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setModal(null)}>رجوع</button><button type="button" className="primary-action" disabled={operationalDayLoading} onClick={handleStartOperationalDay}>{operationalDayLoading ? 'جارٍ بدء اليوم…' : 'بدء اليوم'}</button></div></div></div>}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
       {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}
       {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct} />}

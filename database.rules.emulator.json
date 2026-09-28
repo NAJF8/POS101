@@ -19,6 +19,13 @@
       "$productId": {
         ".validate": "newData.hasChildren(['id', 'name', 'price', 'enabled']) && newData.child('id').val() === $productId && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('price').isNumber() && newData.child('price').val() >= 0 && newData.child('enabled').isBoolean()"
       }
+    },
+    "pos101_operational_days": {
+      ".read": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('read').val() === true",
+      ".write": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('write').val() === true",
+      "$dayId": {
+        ".validate": "newData.hasChildren(['id', 'operationalDayId', 'businessDate', 'startedAt', 'startedBy', 'status']) && newData.child('id').val() === $dayId && newData.child('operationalDayId').val() === $dayId && newData.child('businessDate').isString() && newData.child('startedAt').isNumber() && (newData.child('status').val() === 'open' || newData.child('status').val() === 'closed')"
+      }
     }
   }
 }
