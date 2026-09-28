@@ -136,7 +136,7 @@ export default function App() {
         setSyncAuthStatus(null)
         return
       }
-      if (isCentralCashierUser(user)) {
+      if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
       }
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
@@ -548,7 +548,7 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady) && (
-        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} />
+        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} />
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
@@ -614,7 +614,7 @@ export default function App() {
             <div><h1>الإدارة متصلة</h1><p>قراءة مركزية مباشرة — {adminCentralSales.length} مبيعات فريدة</p></div>
             <button className="secondary-action" type="button" onClick={logoutAdmin}>تسجيل خروج الإدارة</button>
           </header>
-          <div className="admin-central-actions"><button type="button" onClick={handleCentralSyncClick} disabled={syncBusy}>{syncBusy ? 'جارٍ تحديث المبيعات...' : 'تحديث المبيعات'}</button><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
+          <div className="admin-central-actions"><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
           <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} salesOverride={adminCentralSales} onNavigate={() => {}} />
         </section>

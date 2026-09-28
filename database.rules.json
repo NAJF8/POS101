@@ -30,7 +30,7 @@
     },
     "pos101_operational_days": {
       ".read": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73')",
-      ".write": "auth != null && auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72'",
+      ".write": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73')",
       "$dayId": {
         ".validate": "newData.hasChildren(['id', 'operationalDayId', 'businessDate', 'startedAt', 'startedBy', 'status']) && newData.child('id').val() === $dayId && newData.child('operationalDayId').val() === $dayId && newData.child('businessDate').isString() && newData.child('startedAt').isNumber() && (newData.child('status').val() === 'open' || newData.child('status').val() === 'closed')"
       }

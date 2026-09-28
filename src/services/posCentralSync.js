@@ -110,6 +110,17 @@ const requireRole = async expectedRole => {
   return auth.currentUser
 }
 
+const requireOperationalDayRole = async () => {
+  if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  await authReady
+  const user = auth?.currentUser
+  if (!user) throw Object.assign(new Error('تسجيل دخول POS مطلوب لإدارة اليوم التشغيلي.'), { code: 'AUTH_REQUIRED' })
+  if (!isOperationalDayUser(user)) {
+    throw Object.assign(new Error('هذا الحساب غير مخول لإدارة اليوم التشغيلي.'), { code: 'OPERATIONAL_DAY_PERMISSION_DENIED' })
+  }
+  return user
+}
+
 export const isCentralConfigured = () => configured
 export const isCentralEmulator = () => useEmulator
 export const centralAuth = () => auth
@@ -125,6 +136,7 @@ export const getCentralPermissions = user => {
 }
 export const isCentralCashierUser = user => getCentralRole(user) === 'cashier-sync'
 export const isCentralAdminUser = user => getCentralRole(user) === 'admin-viewer'
+export const isOperationalDayUser = user => isCentralCashierUser(user) || isCentralAdminUser(user)
 export const signInCentralWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
   await authReady
@@ -160,7 +172,7 @@ const latestOpenOperationalDay = days => days
   .sort((left, right) => Number(right.startedAt || 0) - Number(left.startedAt || 0))[0] || null
 
 export const subscribeOperationalDay = callback => {
-  if (!configured || !db || !auth?.currentUser || !isCentralCashierUser(auth.currentUser)) {
+  if (!configured || !db || !auth?.currentUser || !isOperationalDayUser(auth.currentUser)) {
     callback(null)
     return () => {}
   }
@@ -168,12 +180,12 @@ export const subscribeOperationalDay = callback => {
 }
 
 export const readOpenOperationalDay = async () => {
-  await requireRole('cashier-sync')
+  await requireOperationalDayRole()
   return latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef())))
 }
 
 export const startOperationalDay = async ({ startedBy = {} } = {}) => {
-  const user = await requireRole('cashier-sync')
+  const user = await requireOperationalDayRole()
   const now = Date.now()
   const transaction = await runTransaction(operationalDaysRef(), current => {
     const days = Object.entries(current || {}).map(([id, value]) => ({ ...value, id: operationalDayIdOf(value) || id }))
@@ -197,7 +209,7 @@ export const startOperationalDay = async ({ startedBy = {} } = {}) => {
 }
 
 export const endOperationalDay = async (day, { endedBy = {} } = {}) => {
-  const user = await requireRole('cashier-sync')
+  const user = await requireOperationalDayRole()
   const id = operationalDayIdOf(day)
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
   const dayRef = ref(db, `pos101_operational_days/${id}`)
