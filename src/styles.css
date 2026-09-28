@@ -1154,6 +1154,8 @@ input, textarea, select { cursor: text; }
 /* Dashboard & Reports Layouts */
 .dashboard-container {
   display: flex;
+  flex-direction: row;
+  gap: 28px;
   justify-content: center;
   align-items: center;
   min-height: calc(100vh - 64px);
@@ -1447,17 +1449,28 @@ input, textarea, select { cursor: text; }
   .expenses-header { align-items: stretch; flex-direction: column; }
 }
 
-/* Operational business day */
-.operational-day-card { width: min(1080px, calc(100% - 32px)); margin: 24px auto 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 8px 22px rgba(45,54,43,.07); }
-.operational-day-heading, .operational-day-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.operational-day-heading small { color: var(--muted); font-weight: 700; }
-.operational-day-heading h2 { margin: 3px 0 0; color: var(--coffee); font-size: 22px; }
-.operational-day-status { padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: 12px; }
+/* Operational business day: compact dashboard card; behavior stays in the component. */
+.operational-day-card { width: min(460px, 100%); min-height: 124px; flex: 0 0 auto; padding: 16px 18px; background: #fff; border: 1px solid rgba(64,83,59,.14); border-radius: 18px; box-shadow: 0 5px 16px rgba(45,54,43,.06); }
+.operational-day-heading { display: flex; align-items: center; justify-content: space-between; }
+.operational-day-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.operational-day-icon { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 32px; border-radius: 10px; color: var(--green); background: #eef4eb; }
+.operational-day-title > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.operational-day-label { color: var(--coffee); font-size: 13px; font-weight: 800; white-space: nowrap; }
+.operational-day-status { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.operational-day-status i { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: currentColor; }
 .operational-day-status.open { color: #236248; background: #e6f2ea; }
-.operational-day-status.closed { color: var(--muted); background: #f1eee8; }
-.operational-day-meta { justify-content: flex-start; flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.operational-day-status.closed { color: #756f64; background: #f1eee8; }
+.operational-day-body { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-top: 14px; }
+.operational-day-main-info { min-width: 0; }
+.operational-day-main-info > strong { display: block; color: var(--coffee); font-size: 21px; line-height: 1.15; letter-spacing: .01em; }
+.operational-day-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 7px; color: var(--muted); font-size: 11px; }
 .operational-day-meta b { color: var(--coffee); }
-.operational-day-action { margin-top: 14px; min-height: 40px; padding: 8px 18px; }
+.operational-day-empty { min-width: 0; }
+.operational-day-empty strong { display: block; color: var(--coffee); font-size: 15px; line-height: 1.25; }
+.operational-day-empty small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.operational-day-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 36px; margin: 0; padding: 7px 13px; border-radius: 9px; font-size: 12px; white-space: nowrap; transition: background-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.operational-day-action:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(45,54,43,.1); }
+.operational-day-card.is-open .operational-day-action { background: #5b6257; }
 .operational-day-warning { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 14px; padding: 10px 12px; color: #7b542c; background: #fff8e8; border: 1px solid #ead6a8; border-radius: 9px; font-size: 13px; }
 .operational-day-warning button { border: 0; color: #8a3d2d; background: transparent; text-decoration: underline; font-weight: 800; cursor: pointer; }
 .operational-day-warning span { color: #536058; }
@@ -1468,9 +1481,17 @@ input, textarea, select { cursor: text; }
 .operational-day-summary span { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border-radius: 8px; background: #f7f5f0; color: var(--muted); }
 .operational-day-summary b { color: var(--coffee); }
 @media (max-width: 600px) {
-  .operational-day-card { width: min(100% - 20px, 1080px); padding: 15px; }
-  .operational-day-heading h2 { font-size: 18px; }
+  .dashboard-container { flex-direction: column; align-items: stretch; gap: 18px; padding: 14px 10px 24px; }
+  .operational-day-card { width: 100%; min-height: 0; padding: 15px; }
+  .operational-day-title > div { gap: 7px; }
+  .operational-day-body { align-items: end; gap: 10px; }
+  .operational-day-main-info > strong { font-size: 19px; }
   .operational-day-summary { grid-template-columns: 1fr; }
+}
+
+@media (min-width: 601px) and (max-width: 1180px) {
+  .dashboard-container { flex-direction: column; gap: 20px; }
+  .operational-day-card { width: min(460px, 100%); }
 }
 
 /* Thermal receipt print contract: 80mm paper, 72.1mm driver printable limit.

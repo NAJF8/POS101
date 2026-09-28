@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
 
 const money = value => formatMoney(Number(value || 0))
@@ -9,6 +10,7 @@ export default function OperationalDay({ day, summary, loading, error, onStart, 
   const open = day?.status === 'open'
   const forgotten = open && day.startedAt && new Date(day.startedAt).toDateString() !== new Date().toDateString()
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])
+  const startedTime = useMemo(() => day?.startedAt ? formatTime(day.startedAt, { hour: '2-digit', minute: '2-digit', hour12: true }) : '—', [day?.startedAt])
 
   const start = async () => {
     if (busy) return
@@ -21,27 +23,38 @@ export default function OperationalDay({ day, summary, loading, error, onStart, 
     try { await onEnd(); setEndOpen(false) } finally { setBusy(false) }
   }
 
-  return <section className="operational-day-card" dir="rtl" aria-label="اليوم التشغيلي">
+  return <section className={`operational-day-card ${open ? 'is-open' : 'is-closed'}`} dir="rtl" aria-label="اليوم التشغيلي">
     <div className="operational-day-heading">
-      <div>
-        <small>اليوم التشغيلي</small>
-        <h2>{open ? day.businessDate : 'لا يوجد يوم تشغيلي مفتوح'}</h2>
+      <div className="operational-day-title">
+        <span className="operational-day-icon"><Icon name="clock" size={17} /></span>
+        <div>
+          <span className="operational-day-label">اليوم التشغيلي</span>
+          <span className={`operational-day-status ${open ? 'open' : 'closed'}`}><i />{open ? 'مفتوح' : 'مغلق'}</span>
+        </div>
       </div>
-      <span className={`operational-day-status ${open ? 'open' : 'closed'}`}>{open ? 'مفتوح' : 'مغلق'}</span>
     </div>
-    {open ? <>
-      <div className="operational-day-meta">
-        <span>بدأ: <b>{startedLabel}</b></span>
-        <span>المبيعات: <b>{formatNumber(summary.count)}</b></span>
-        <span>الإجمالي: <b>{money(summary.total)}</b></span>
+    {open ? <div className="operational-day-body">
+      <div className="operational-day-main-info">
+        <strong>{day.businessDate}</strong>
+        <div className="operational-day-meta">
+          <span>بدأ <b>{startedTime}</b></span>
+          <span>المبيعات <b>{formatNumber(summary.count)}</b></span>
+          <span>الإجمالي <b>{money(summary.total)}</b></span>
+        </div>
       </div>
-      {forgotten && <div className="operational-day-warning" role="status">
-        اليوم التشغيلي السابق ما زال مفتوحاً — بدأ {formatTime(day.startedAt, { hour: '2-digit', minute: '2-digit' })}.
-        <button type="button" onClick={() => setEndOpen(true)}>إنهاء اليوم</button>
-        <span>استمرار اليوم الحالي</span>
-      </div>}
-      {!forgotten && <button className="primary-action operational-day-action" type="button" onClick={() => setEndOpen(true)}>إنهاء اليوم</button>}
-    </> : <button className="primary-action operational-day-action" type="button" disabled={loading || busy} onClick={start}>{busy || loading ? 'جارٍ بدء اليوم…' : 'بدء اليوم'}</button>}
+      {forgotten
+        ? <div className="operational-day-warning" role="status">
+            <span>اليوم السابق ما زال مفتوحاً</span>
+            <button type="button" onClick={() => setEndOpen(true)}>إنهاء اليوم</button>
+          </div>
+        : <button className="primary-action operational-day-action" type="button" onClick={() => setEndOpen(true)}>إنهاء اليوم</button>}
+    </div> : <div className="operational-day-body">
+      <div className="operational-day-empty">
+        <strong>لا يوجد يوم تشغيلي مفتوح</strong>
+        <small>ابدأ اليوم لبدء تسجيل المبيعات</small>
+      </div>
+      <button className="primary-action operational-day-action" type="button" disabled={loading || busy} onClick={start}><Icon name="arrow" size={15} />{busy || loading ? 'جارٍ بدء اليوم…' : 'بدء اليوم'}</button>
+    </div>}
     {error && <p className="form-error" role="alert">{error}</p>}
 
     {endOpen && <div className="overlay">
