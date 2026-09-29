@@ -22,8 +22,8 @@
       ".write": "auth != null && auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72'"
     },
     "pos101_products": {
-      ".read": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73')",
-      ".write": "auth != null && auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73'",
+      ".read": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73' || root.child('pos101_authorized_uids').child(auth.uid).child('read').val() === true)",
+      ".write": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73' || root.child('pos101_authorized_uids').child(auth.uid).child('write').val() === true)",
       "$productId": {
         ".validate": "newData.hasChildren(['id', 'name', 'price', 'enabled']) && newData.child('id').val() === $productId && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('price').isNumber() && newData.child('price').val() >= 0 && newData.child('enabled').isBoolean()"
       }

@@ -13,7 +13,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, runAdminCentralRefresh, runCashierCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, runAdminCentralRefresh, runCashierCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -64,6 +64,7 @@ export default function App() {
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
+  const [productAuthUser, setProductAuthUser] = useState(null)
   const [adminCentralSales, setAdminCentralSales] = useState([])
   const centralListener = useRef(null)
   const productListener = useRef(null)
@@ -137,6 +138,16 @@ export default function App() {
     if (!catalogCategories.includes(category)) setCategory('الكل')
   }, [catalogCategories, category])
 
+  useEffect(() => {
+    const settingsRoute = currentView === 'settings'
+    document.documentElement.classList.toggle('settings-route', settingsRoute)
+    document.body.classList.toggle('settings-route', settingsRoute)
+    return () => {
+      document.documentElement.classList.remove('settings-route')
+      document.body.classList.remove('settings-route')
+    }
+  }, [currentView])
+
   // Persist state
   useEffect(() => localStorage.setItem('pos101.orders', JSON.stringify(orders)), [orders])
   useEffect(() => localStorage.setItem('pos101.nextNumber', nextNumber), [nextNumber])
@@ -155,6 +166,7 @@ export default function App() {
       setCentralProducts([])
       setOperationalDay(null)
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
+      setProductAuthUser(isCentralProductManager(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (!user) {
         setSyncAuthStatus(null)
@@ -186,6 +198,7 @@ export default function App() {
       productListener.current?.()
       operationalDayListener.current?.()
       setAdminCentralSales([])
+      setProductAuthUser(null)
     }
   }, [])
 
@@ -577,6 +590,7 @@ export default function App() {
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
 
   const adminReady = isCentralAdminUser(adminAuthUser)
+  const productManagerReady = isCentralProductManager(productAuthUser)
   const saveProduct = useCallback(async product => {
     const saved = await saveCentralProduct(product)
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
@@ -584,7 +598,7 @@ export default function App() {
   }, [])
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''}`}>
       {session && (
         <Header
           session={session}
@@ -603,7 +617,7 @@ export default function App() {
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={adminReady} onSave={saveProduct} onNavigate={setCurrentView} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} />
       )}
 
       {currentView === 'orders' && (session || adminReady) && (

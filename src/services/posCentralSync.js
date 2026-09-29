@@ -318,12 +318,13 @@ export const readCentralSalesReadOnly = async () => {
 // static menu records are never deleted or rewritten; this path contains only
 // new products and explicit updates/hide/show overlays keyed by product ID.
 export const isCentralProductReader = user => isCentralCashierUser(user) || isCentralAdminUser(user)
-export const isCentralProductAdmin = user => isCentralAdminUser(user)
+export const isCentralProductManager = user => isCentralProductReader(user)
+export const isCentralProductAdmin = isCentralProductManager
 const requireProductRole = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
-  if (!user || !isCentralProductReader(user) || (write && !isCentralProductAdmin(user))) {
+  if (!user || !isCentralProductReader(user) || (write && !isCentralProductManager(user))) {
     throw Object.assign(new Error(write ? 'صلاحية إدارة المنتجات مطلوبة.' : 'تسجيل دخول POS مطلوب لقراءة المنتجات.'), { code: 'PRODUCT_PERMISSION_DENIED' })
   }
   return user
@@ -337,7 +338,7 @@ const normalizeProduct = (value, id) => ({
   category: String(value?.category || '').trim(),
   categoryId: value?.categoryId || value?.category_id || value?.category || '',
   price: Number(value?.price ?? 0),
-  image: value?.image || null,
+  image: value?.image || value?.imageUrl || value?.image_url || value?.photoUrl || value?.photo_url || null,
   enabled: value?.enabled !== false,
   productType: value?.productType || (value?.parentProductId ? 'child' : 'parent'),
   parentProductId: value?.parentProductId ? String(value.parentProductId) : '',

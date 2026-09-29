@@ -90,7 +90,7 @@ export function VariantModal({ product, variants, onClose, onSelect }) {
         {variants.map(variant => {
           const name = productNames(variant).arabic || variant.name
           return <button type="button" className="variant-choice" key={variant.id} onClick={() => onSelect(variant)}>
-            <span className="variant-thumb">{variant.image ? <img src={variant.image} alt="" /> : <b>101</b>}</span>
+            <span className="variant-thumb">{variant.image ? <img src={variant.image} alt="" onError={event => { event.currentTarget.style.display = 'none' }} /> : <b>101</b>}</span>
             <span className="variant-choice-name">{name}</span>
             <b className="variant-choice-price" dir="ltr">{format(variant.price)}</b>
           </button>
