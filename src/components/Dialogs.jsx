@@ -76,6 +76,31 @@ export function ProductOptions({ product, onClose, onAdd }) {
   )
 }
 
+/* ── Product variants ── */
+export function VariantModal({ product, variants, onClose, onSelect }) {
+  const parentName = productNames(product).arabic || product.name
+  return (
+    <Dialog onClose={onClose} className="variant-dialog">
+      <button className="close" onClick={onClose} aria-label="إغلاق"><Icon name="x" /></button>
+      <div className="dialog-heading">
+        <h2>اختر نوع {parentName}</h2>
+        <p>اختر النوع لإضافته إلى السلة بالسعر الخاص به.</p>
+      </div>
+      <div className="variant-list">
+        {variants.map(variant => {
+          const name = productNames(variant).arabic || variant.name
+          return <button type="button" className="variant-choice" key={variant.id} onClick={() => onSelect(variant)}>
+            <span className="variant-thumb">{variant.image ? <img src={variant.image} alt="" /> : <b>101</b>}</span>
+            <span className="variant-choice-name">{name}</span>
+            <b className="variant-choice-price" dir="ltr">{format(variant.price)}</b>
+          </button>
+        })}
+      </div>
+      <button type="button" className="secondary-action variant-cancel" onClick={onClose}>إلغاء</button>
+    </Dialog>
+  )
+}
+
 /* ── Order Type ── */
 export function OrderType({ onClose, onChoose }) {
   const types = [['داخل الكوفي', 'table'], ['توصيل', 'delivery']]

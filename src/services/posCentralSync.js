@@ -339,6 +339,9 @@ const normalizeProduct = (value, id) => ({
   price: Number(value?.price ?? 0),
   image: value?.image || null,
   enabled: value?.enabled !== false,
+  productType: value?.productType || (value?.parentProductId ? 'child' : 'parent'),
+  parentProductId: value?.parentProductId ? String(value.parentProductId) : '',
+  displayName: value?.displayName || '',
 })
 
 export const loadCentralProducts = async () => {

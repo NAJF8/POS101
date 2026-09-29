@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
-import { ProductOptions, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
+import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Settings from './components/Settings'
@@ -102,10 +102,34 @@ export default function App() {
   // list. Keep empty categories clickable so their empty state remains useful.
   const catalogCategories = useMemo(() => categories.slice(), [])
   const visibleProducts = useMemo(
-    () => catalogProducts.filter(p => p.enabled !== false &&
-      (categoryId(category) === categoryId('الكل') || categoryId(p.categoryId || p.category) === categoryId(category)) &&
-      `${p.name} ${p.english}`.toLowerCase().includes(query.toLowerCase())
-    ),
+    () => {
+      const allChildren = new Map()
+      const activeChildren = new Map()
+      for (const product of catalogProducts) {
+        if (!product.parentProductId) continue
+        const key = String(product.parentProductId)
+        const list = allChildren.get(key) || []
+        list.push(product)
+        allChildren.set(key, list)
+        if (product.enabled !== false) {
+          const active = activeChildren.get(key) || []
+          active.push(product)
+          activeChildren.set(key, active)
+        }
+      }
+      const needle = query.trim().toLowerCase()
+      return catalogProducts
+        .filter(product => !product.parentProductId && product.enabled !== false)
+        .map(product => ({ ...product, variantProducts: activeChildren.get(String(product.id)) || [] }))
+        .filter(product => {
+          const children = allChildren.get(String(product.id)) || []
+          if (children.length > 0 && product.variantProducts.length === 0) return false
+          const inCategory = categoryId(category) === categoryId('الكل') || categoryId(product.categoryId || product.category) === categoryId(category)
+          const ownText = `${product.name || ''} ${product.english || ''}`.toLowerCase()
+          const childText = product.variantProducts.map(child => `${child.name || ''} ${child.english || ''}`).join(' ').toLowerCase()
+          return inCategory && (!needle || ownText.includes(needle) || childText.includes(needle))
+        })
+    },
     [catalogProducts, category, query]
   )
 
@@ -290,11 +314,38 @@ export default function App() {
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o)) : o)), [active])
   const addProduct = useCallback(p => {
-    update(o => ({ ...o, items: [...o.items, { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }] }))
+    const item = { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }
+    update(o => {
+      const variantLine = item.variantId || item.childProductId
+      if (!variantLine) return { ...o, items: [...o.items, item] }
+      const existing = o.items.find(current => String(current.variantId || current.childProductId || '') === String(variantLine))
+      if (!existing) return { ...o, items: [...o.items, item] }
+      return { ...o, items: o.items.map(current => current === existing ? { ...current, quantity: current.quantity + (item.quantity || 1) } : current) }
+    })
     setCartScrollRequest(v => v + 1)
     setModal(null)
   }, [update])
-  const selectProduct = useCallback(p => p.configurable ? (setSelected(p), setModal('options')) : addProduct({ ...p, quantity: 1 }), [addProduct])
+  const selectProduct = useCallback(p => {
+    if (p.variantProducts?.length) { setSelected(p); setModal('variants'); return }
+    if (p.configurable) { setSelected(p); setModal('options'); return }
+    addProduct({ ...p, quantity: 1 })
+  }, [addProduct])
+  const selectVariant = useCallback((parent, child) => {
+    const parentName = parent.name || ''
+    const childName = child.name || ''
+    addProduct({
+      ...child,
+      name: `${parentName} - ${childName}`,
+      displayName: `${parentName} - ${childName}`,
+      english: parent.english && child.english ? `${parent.english} - ${child.english}` : child.english || parent.english,
+      parentProductId: parent.id,
+      childProductId: child.id,
+      variantId: child.id,
+      productId: child.id,
+      productType: 'child',
+      quantity: 1,
+    })
+  }, [addProduct])
   const updateQuantity = useCallback((lineId, delta) => update(o => ({ ...o, items: o.items.flatMap(i => i.lineId === lineId ? (i.quantity + delta <= 0 ? [] : [{ ...i, quantity: i.quantity + delta }]) : [i]) })), [update])
   const removeItem = useCallback(lineId => update(o => ({ ...o, items: o.items.filter(i => i.lineId !== lineId) })), [update])
   const chooseType = useCallback(t => { update(o => ({ ...o, orderType: t })); setModal(t === 'داخل الكوفي' && tablesEnabled ? 'tables' : 'payment') }, [update])
@@ -640,6 +691,7 @@ export default function App() {
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
       {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}
       {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct} />}
+      {modal === 'variants' && selected && <VariantModal product={selected} variants={selected.variantProducts || []} onClose={() => setModal(null)} onSelect={child => selectVariant(selected, child)} />}
       {modal === 'orderType' && <OrderType onClose={() => setModal(null)} onChoose={chooseType} />}
       {modal === 'tables' && <TableSelection orders={orders} onClose={() => setModal(null)} onChoose={chooseTable} />}
       {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
