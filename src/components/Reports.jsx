@@ -4,6 +4,7 @@ import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { readLocalSales, numberValue, dateValue, filterReportSales } from '../services/reportSales'
+import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -165,8 +166,13 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     : filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs, reportScope, operationalDay])
 
   const filteredExpenses = useMemo(() => {
-    return expenses.filter(e => e.date >= startMs && e.date <= endMs)
-  }, [expenses, startMs, endMs])
+    return expenses.filter(e => {
+      if (reportScope === 'operational' && operationalDay?.id && e.operationalDayId) {
+        return e.operationalDayId === operationalDay.id
+      }
+      return e.date >= startMs && e.date <= endMs
+    })
+  }, [expenses, startMs, endMs, reportScope, operationalDay])
 
   const printReport = (format) => {
     const paper = document.querySelector('.report-paper')
@@ -210,7 +216,10 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   const printReportDirect = () => {
     if (!directThermalReady || !onDirectThermalPrint) return
     const titleByType = { comprehensive: 'تقرير شامل', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
-    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate, dateFrom: reportDate, dateTo: reportDate, period: reportDate, sales: filteredSales, expenses: filteredExpenses })
+    const summary = reportType === 'comprehensive'
+      ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
+      : undefined
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate, dateFrom: reportDate, dateTo: reportDate, period: reportDate, sales: filteredSales, expenses: filteredExpenses, ...(summary ? { summary } : {}) })
   }
 
   const renderReportCards = () => (
@@ -366,10 +375,9 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     if (reportType === 'comprehensive') {
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
-      const expensesTotal = filteredExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
-      const totalRevenue = filteredSales.reduce((sum, s) => sum + Number(s.total || 0), 0)
+      const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses)
+      const { grossSales, discounts, netIncomeAfterDiscount, expenses: expensesTotal } = summary
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
-      const netBalance = totalRevenue - expensesTotal
       const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
       const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
 
@@ -392,17 +400,15 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
         {/* ── Summary Table ── */}
         <table className="print-table report-summary">
           <tbody>
-            <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(stats.gross)}</td></tr>
+            <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(grossSales)}</td></tr>
+            <tr><td>إجمالي الخصومات</td><td className="number-cell">{format(discounts)}</td></tr>
+            <tr className="summary-highlight"><td>صافي الدخل بعد الخصم</td><td className="number-cell">{format(netIncomeAfterDiscount)}</td></tr>
             <tr><td>إجمالي المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
-            <tr><td>إجمالي الإيرادات</td><td className="number-cell">{format(totalRevenue)}</td></tr>
-            <tr><td>إجمالي الخصم</td><td className="number-cell">{format(stats.discounts)}</td></tr>
             <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(totalServiceCharge)}</td></tr>
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
             <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
             <tr><td>الإلكتروني</td><td className="number-cell">{format(electronicTotal)}</td></tr>
             <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(stats.count)}</td></tr>
-            <tr className="summary-highlight"><td>صافي البيع</td><td className="number-cell">{format(totalRevenue)}</td></tr>
-            <tr className="summary-negative"><td>صافي الوارد</td><td className="number-cell">{format(netBalance < 0 ? netBalance : -1 * (expensesTotal - totalRevenue > 0 ? expensesTotal - totalRevenue : 0))}</td></tr>
           </tbody>
         </table>
 
@@ -454,6 +460,16 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
             </table>
           </>
         })()}
+
+        <section className="net-incoming-section" data-testid="comprehensive-net-incoming">
+          <h3>صافي الوارد</h3>
+          <table className="print-table report-summary">
+            <tbody>
+              <tr><td>صافي الوارد بدون المصاريف والخصم</td><td className="number-cell">{format(summary.netIncomingWithoutExpensesAndDiscount)}</td></tr>
+              <tr className="summary-highlight"><td>صافي الوارد بعد المصاريف والخصم</td><td className="number-cell">{format(summary.netIncomingAfterExpensesAndDiscount)}</td></tr>
+            </tbody>
+          </table>
+        </section>
       </>
     } else if (reportType === 'sales') {
       title = 'تقرير الطلبات / المبيعات'
