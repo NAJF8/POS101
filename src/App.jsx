@@ -18,6 +18,7 @@ import { createCentralSyncClickHandler } from './services/centralSyncController.
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
 import { readLocalSales } from './services/reportSales.js'
+import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
@@ -72,6 +73,7 @@ export default function App() {
   const [operationalDay, setOperationalDay] = useState(null)
   const [operationalDayLoading, setOperationalDayLoading] = useState(false)
   const [operationalDayError, setOperationalDayError] = useState('')
+  const [ledgerVersion, setLedgerVersion] = useState(0)
   const operationalDayListener = useRef(null)
   const saleInFlight = useRef(false)
 
@@ -203,19 +205,21 @@ export default function App() {
   }, [])
 
   const operationalDaySummary = useMemo(() => {
-    const rows = operationalDay?.id ? readLocalSales().filter(sale => sale.operationalDayId === operationalDay.id && !sale.voided) : []
-    return rows.reduce((summary, sale) => {
-      const value = Number(sale.total || 0)
-      const method = sale.paymentMethod || sale.payment?.method
-      return {
-        count: summary.count + 1,
-        total: summary.total + value,
-        cash: summary.cash + (method === 'cash' ? value : 0),
-        electronic: summary.electronic + (method === 'electronic' ? value : 0),
-        discount: summary.discount + Number(sale.discount || 0),
-      }
-    }, { count: 0, total: 0, cash: 0, electronic: 0, discount: 0 })
-  }, [operationalDay])
+    const expenses = read('pos101.expenses', [])
+    return calculateOperationalDaySummary(readLocalSales(), expenses, operationalDay?.id)
+  }, [operationalDay, ledgerVersion])
+
+  useEffect(() => {
+    const refreshOperationalSummary = () => setLedgerVersion(value => value + 1)
+    window.addEventListener('pos101-sale-created', refreshOperationalSummary)
+    window.addEventListener('pos101-sale-updated', refreshOperationalSummary)
+    window.addEventListener('pos101-expenses-updated', refreshOperationalSummary)
+    return () => {
+      window.removeEventListener('pos101-sale-created', refreshOperationalSummary)
+      window.removeEventListener('pos101-sale-updated', refreshOperationalSummary)
+      window.removeEventListener('pos101-expenses-updated', refreshOperationalSummary)
+    }
+  }, [])
 
   const handleStartOperationalDay = useCallback(async () => {
     setOperationalDayError('')
@@ -665,11 +669,11 @@ export default function App() {
 
       {currentView === 'reports' && session && <Reports session={session} operationalDay={operationalDay} onNavigate={setCurrentView} onDirectThermalPrint={printReportDirect} directThermalReady={directThermalReady} />}
       {currentView === 'expenses' && session && (
-        <Expenses session={session} onNavigate={setCurrentView} />
+        <Expenses session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />
       )}
       {currentView === 'purchases' && session && <Purchases session={session} onNavigate={setCurrentView} />}
       {currentView === 'expense-entry' && session && (
-        <Expenses session={session} onNavigate={setCurrentView} />
+        <Expenses session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />
       )}
       {currentView === 'reports-captain' && session && <Reports session={session} onNavigate={setCurrentView} />}
 

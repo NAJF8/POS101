@@ -5,6 +5,7 @@ import { logoDataUri } from '../assets/logo'
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { readLocalSales, numberValue, dateValue, filterReportSales } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
+import { filterExpensesByOperationalDay, filterSalesByOperationalDay } from '../services/operationalDayReport.js'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -162,16 +163,12 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   // direct thermal print. Keep filtering here so every output follows the
   // latest rendered filter state and never falls back to all sales.
   const filteredSales = useMemo(() => reportScope === 'operational' && operationalDay?.id
-    ? sales.filter(sale => sale.operationalDayId === operationalDay.id && !sale.voided)
+    ? filterSalesByOperationalDay(sales, operationalDay.id)
     : filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs, reportScope, operationalDay])
 
   const filteredExpenses = useMemo(() => {
-    return expenses.filter(e => {
-      if (reportScope === 'operational' && operationalDay?.id && e.operationalDayId) {
-        return e.operationalDayId === operationalDay.id
-      }
-      return e.date >= startMs && e.date <= endMs
-    })
+    if (reportScope === 'operational' && operationalDay?.id) return filterExpensesByOperationalDay(expenses, operationalDay.id)
+    return expenses.filter(e => e.date >= startMs && e.date <= endMs)
   }, [expenses, startMs, endMs, reportScope, operationalDay])
 
   const printReport = (format) => {

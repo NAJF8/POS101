@@ -69,6 +69,8 @@ export default function OperationalDay({ day, summary, loading, error, onStart, 
           <span>نقدي <b>{money(summary.cash)}</b></span>
           <span>إلكتروني <b>{money(summary.electronic)}</b></span>
           <span>الخصومات <b>{money(summary.discount)}</b></span>
+            <span>المصاريف <b>{money(summary.expenses)}</b></span>
+            <span>الصافي <b>{money(summary.netAfterDiscountAndExpenses)}</b></span>
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>

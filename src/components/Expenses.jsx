@@ -9,7 +9,7 @@ const normalize = rows => rows.map(row => row?.id ? row : { ...row, id: makeId()
 const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
 
-export function Expenses({ onNavigate, onBack, session }) {
+export function Expenses({ onNavigate, onBack, session, operationalDay = null }) {
   const [expenses, setExpenses] = useState(() => {
     const original = read(STORAGE_KEY, [])
     const rows = normalize(original)
@@ -29,7 +29,11 @@ export function Expenses({ onNavigate, onBack, session }) {
   const [notes, setNotes] = useState('')
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
-  const saveRows = rows => { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); setExpenses(rows) }
+  const saveRows = rows => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows))
+    setExpenses(rows)
+    window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
+  }
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
@@ -38,7 +42,13 @@ export function Expenses({ onNavigate, onBack, session }) {
       saveRows(expenses.map(row => row.id === editingId ? { ...row, amount: numericAmount, category, person, notes: notes.trim() } : row))
       resetForm(); alert('تم تعديل المصروف بنجاح'); return
     }
-    const row = { id: makeId(), amount: numericAmount, category, date: Date.now(), shift: session?.name || 'وردية غير محددة', shiftId: '', person, notes: notes.trim(), status: 'disabled' }
+    const row = {
+      id: makeId(), amount: numericAmount, category, date: Date.now(),
+      shift: session?.name || 'وردية غير محددة', shiftId: '', person, notes: notes.trim(), status: 'disabled',
+      ...(operationalDay?.status === 'open' && operationalDay.id
+        ? { operationalDayId: operationalDay.id, businessDate: operationalDay.businessDate }
+        : {}),
+    }
     saveRows([...expenses, row])
     resetForm()
   }
