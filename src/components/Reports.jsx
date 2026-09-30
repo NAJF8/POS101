@@ -62,8 +62,8 @@ const thermalComprehensiveStyles = `
   @page { margin: 0; size: 80mm auto; }
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
-  body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
+  body { direction: rtl; unicode-bidi: plaintext; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
+  .report-paper { display: block; direction: rtl; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
@@ -75,9 +75,9 @@ const thermalComprehensiveStyles = `
   .print-table th { font-weight: 800; }
   .print-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
   .print-table td:first-child { font-weight: 800; }
-  .print-table .number-cell { direction: rtl; text-align: center; white-space: normal; }
+  .print-table .number-cell { direction: ltr; text-align: left; unicode-bidi: isolate; white-space: nowrap; }
+  .report-summary td:first-child { direction: rtl; text-align: right; unicode-bidi: plaintext; }
   .report-summary { break-inside: avoid; page-break-inside: avoid; }
-  .report-summary tbody tr:nth-child(7) td, .report-summary tbody tr:nth-child(8) td { font-size: 12pt; font-weight: 900; border-top: .6mm solid #000; border-bottom: .6mm solid #000; }
   .summary-highlight td, tr.summary-highlight td { font-size: 12pt !important; font-weight: 900 !important; border-top: .6mm solid #000 !important; border-bottom: .6mm solid #000 !important; }
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
@@ -376,7 +376,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
       const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses)
-      const { grossSales, discounts, netIncomeAfterDiscount, expenses: expensesTotal } = summary
+      const { grossSales, discounts, expenses: expensesTotal, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount } = summary
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
       const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
@@ -402,8 +402,10 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
           <tbody>
             <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(grossSales)}</td></tr>
             <tr><td>إجمالي الخصومات</td><td className="number-cell">{format(discounts)}</td></tr>
-            <tr className="summary-highlight"><td>صافي الدخل بعد الخصم</td><td className="number-cell">{format(netIncomeAfterDiscount)}</td></tr>
             <tr><td>إجمالي المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
+            <tr><td>صافي البيع بعد الخصومات</td><td className="number-cell">{format(netAfterDiscount)}</td></tr>
+            <tr><td>صافي البيع بعد المصاريف</td><td className="number-cell">{format(netAfterExpenses)}</td></tr>
+            <tr className="summary-highlight"><td>صافي البيع بعد المصاريف والخصومات</td><td className="number-cell">{format(netAfterExpensesAndDiscount)}</td></tr>
             <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(totalServiceCharge)}</td></tr>
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
             <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
@@ -461,15 +463,6 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
           </>
         })()}
 
-        <section className="net-incoming-section" data-testid="comprehensive-net-incoming">
-          <h3>صافي الوارد</h3>
-          <table className="print-table report-summary">
-            <tbody>
-              <tr><td>صافي الوارد بدون المصاريف والخصم</td><td className="number-cell">{format(summary.netIncomingWithoutExpensesAndDiscount)}</td></tr>
-              <tr className="summary-highlight"><td>صافي الوارد بعد المصاريف والخصم</td><td className="number-cell">{format(summary.netIncomingAfterExpensesAndDiscount)}</td></tr>
-            </tbody>
-          </table>
-        </section>
       </>
     } else if (reportType === 'sales') {
       title = 'تقرير الطلبات / المبيعات'

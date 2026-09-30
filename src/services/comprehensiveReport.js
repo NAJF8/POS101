@@ -10,14 +10,16 @@ export const calculateComprehensiveSummary = (sales = [], expenses = []) => {
   const grossSales = sales.reduce((sum, sale) => sum + amount(sale.subtotal ?? sale.total), 0)
   const discounts = sales.reduce((sum, sale) => sum + amount(sale.discount), 0)
   const expensesTotal = expenses.reduce((sum, expense) => sum + amount(expense.amount), 0)
-  const netIncomeAfterDiscount = grossSales - discounts
+  const netAfterDiscount = grossSales - discounts
+  const netAfterExpenses = grossSales - expensesTotal
+  const netAfterExpensesAndDiscount = grossSales - expensesTotal - discounts
 
   return {
     grossSales,
     discounts,
-    netIncomeAfterDiscount,
     expenses: expensesTotal,
-    netIncomingWithoutExpensesAndDiscount: grossSales,
-    netIncomingAfterExpensesAndDiscount: netIncomeAfterDiscount - expensesTotal,
+    netAfterDiscount,
+    netAfterExpenses,
+    netAfterExpensesAndDiscount,
   }
 }
