@@ -373,7 +373,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
       const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses)
-      const { grossSales, discounts, expenses: expensesTotal, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount } = summary
+      const { grossSales, discounts, expenses: expensesTotal, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll } = summary
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
       const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
@@ -403,6 +403,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
             <tr><td>صافي البيع بعد الخصومات</td><td className="number-cell">{format(netAfterDiscount)}</td></tr>
             <tr><td>صافي البيع بعد المصاريف</td><td className="number-cell">{format(netAfterExpenses)}</td></tr>
             <tr className="summary-highlight"><td>صافي البيع بعد المصاريف والخصومات</td><td className="number-cell">{format(netAfterExpensesAndDiscount)}</td></tr>
+            <tr><td>صافي البيع بدون الإلكتروني والمصاريف والخصومات</td><td className="number-cell">{format(netCashAfterAll)}</td></tr>
             <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(totalServiceCharge)}</td></tr>
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
             <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
