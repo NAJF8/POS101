@@ -232,7 +232,7 @@ export function QuickCash({ total, onClose, onSuccess }) {
 }
 
 /* ── Discount Dialog ── */
-export function DiscountDialog({ subtotal, current, onClose, onApply }) {
+export function DiscountDialog({ subtotal, current, discountPresets = { baly: 26, toters: 25 }, onClose, onApply }) {
   const [kind, setKind] = React.useState(current?.kind || 'amount')
   const [input, setInput] = React.useState(current?.input ?? '')
   const isPreset = kind === 'baly' || kind === 'toters'
@@ -240,19 +240,19 @@ export function DiscountDialog({ subtotal, current, onClose, onApply }) {
   const inputIsNumber = input !== '' && Number.isFinite(raw)
   const inputTooLarge = kind === 'amount' ? raw > subtotal : raw > 100
   const invalid = !isPreset && (!inputIsNumber || raw < 0 || inputTooLarge)
-  const percentage = kind === 'baly' ? 26 : kind === 'toters' ? 25 : Math.min(100, Math.max(0, raw || 0))
+  const percentage = kind === 'baly' ? Number(discountPresets.baly) : kind === 'toters' ? Number(discountPresets.toters) : Math.min(100, Math.max(0, raw || 0))
   const value = Math.min(subtotal, Math.max(0, Math.round(kind === 'amount' ? (raw || 0) : subtotal * percentage / 100)))
   const chooseKind = nextKind => {
     setKind(nextKind)
-    if (nextKind === 'baly') setInput(26)
-    if (nextKind === 'toters') setInput(25)
+    if (nextKind === 'baly') setInput(discountPresets.baly)
+    if (nextKind === 'toters') setInput(discountPresets.toters)
     if (nextKind === 'amount' || nextKind === 'percent') setInput(current?.kind === nextKind ? current.input : '')
   }
   const cards = [
     { kind: 'amount', title: 'مبلغ ثابت', note: 'أدخل مبلغ الخصم بالدينار' },
     { kind: 'percent', title: 'نسبة مئوية', note: 'أدخل نسبة الخصم بنفسك' },
-    { kind: 'baly', title: 'بلي', note: 'خصم ثابت 26%' },
-    { kind: 'toters', title: 'توترز', note: 'خصم ثابت 25%' }
+    { kind: 'baly', title: 'بلي', note: `خصم ${discountPresets.baly}%` },
+    { kind: 'toters', title: 'توترز', note: `خصم ${discountPresets.toters}%` }
   ]
   return (
     <Dialog onClose={onClose} className="discount-dialog">
@@ -618,35 +618,31 @@ export function PrintMenu({ enabled, settings, thermalStatus, onClose, onChange,
   }
   return (
     <Dialog onClose={onClose} className="print-menu">
-      <h2>إعداد الطباعة</h2>
-      <p>تُحفظ هذه الإعدادات محلياً على جهاز الكاشير.</p>
-      <label className="printer-name-field">
-        اسم الطابعة الحرارية (80mm)
-        <input value={printerName} onChange={e => setPrinterName(e.target.value)} placeholder="مثال: POS-80" />
-      </label>
-      <label className="printer-name-field">عنوان الخدمة المحلية<input value={serviceUrl} onChange={e => setServiceUrl(e.target.value)} /></label>
-      <label className="printer-name-field">رمز الخدمة (اختياري في dry-run)<input type="password" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" /></label>
-      <small className="printer-note">الخدمة محلية فقط ولا تقرأ Firebase أو بيانات الإنتاج. لن يصبح المسار المباشر متاحاً إلا إذا أعادت الخدمة جاهزية مؤكدة وطابعة متحققة.</small>
-      <button type="button" onClick={() => { const next = { name: printerName.trim(), serviceUrl: serviceUrl.trim(), token, paper: '80mm' }; onSave(next); onCheck?.(next) }}>
-        فحص الخدمة والطابعة
-      </button>
-      <p className="printer-note" role="status">{thermalStatus?.ready ? 'جاهزة للطباعة الحرارية المباشرة.' : thermalStatus?.mode === 'dry-run' ? 'الخدمة تعمل dry-run فقط؛ الطباعة المباشرة معطلة.' : thermalStatus?.error || 'لم يتم التحقق من الخدمة بعد.'}</p>
-      <button className={enabled ? 'selected' : ''} onClick={() => onChange(true)}>
-        <b>تشغيل الطباعة</b>
-        <small>تفتح فاتورة واحدة تلقائياً بعد نجاح حفظ البيع</small>
-      </button>
-      <button className={!enabled ? 'selected' : ''} onClick={() => onChange(false)}>
-        <b>إيقاف الطباعة</b>
-        <small>يستمر البيع دون فتح نافذة الطباعة</small>
-      </button>
-      <button className={settings?.directThermal ? 'selected' : ''} disabled={!thermalStatus?.ready} onClick={() => onDirectChange?.(true)}>
-        <b>طباعة حرارية مباشرة</b>
-        <small>{thermalStatus?.ready ? 'إرسال ESC/POS إلى خدمة localhost' : 'تتطلب إعداد الخدمة والتحقق من الطابعة'}</small>
-      </button>
-      <button className={!settings?.directThermal ? 'selected' : ''} onClick={() => onDirectChange?.(false)}>
-        <b>إيقاف الطباعة الحرارية المباشرة</b>
-        <small>تبقى طباعة Chrome الحالية وA4 دون تغيير</small>
-      </button>
+      <div className="dialog-heading"><h2>إعداد الطباعة</h2><p>تُحفظ هذه الإعدادات محلياً على جهاز الكاشير.</p></div>
+      <section className="print-settings-section" aria-labelledby="auto-print-heading">
+        <h3 id="auto-print-heading">الطباعة التلقائية</h3>
+        <div className="print-choice-grid">
+          <button type="button" className={`print-choice ${enabled ? 'selected' : ''}`} aria-pressed={enabled} onClick={() => onChange(true)}><b>تشغيل الطباعة</b><small>تفتح فاتورة واحدة تلقائياً بعد نجاح حفظ البيع</small></button>
+          <button type="button" className={`print-choice ${!enabled ? 'selected' : ''}`} aria-pressed={!enabled} onClick={() => onChange(false)}><b>إيقاف الطباعة</b><small>يستمر البيع دون فتح نافذة الطباعة</small></button>
+        </div>
+        <p className={`print-setting-status ${enabled ? 'is-on' : 'is-off'}`} role="status">{enabled ? 'الطباعة التلقائية مفعلة' : 'الطباعة التلقائية متوقفة'}</p>
+      </section>
+      <section className="print-settings-section" aria-labelledby="direct-print-heading">
+        <h3 id="direct-print-heading">الطباعة الحرارية المباشرة</h3>
+        <div className="print-choice-grid">
+          <button type="button" className={`print-choice ${settings?.directThermal ? 'selected' : ''}`} disabled={!thermalStatus?.ready} aria-pressed={Boolean(settings?.directThermal)} onClick={() => onDirectChange?.(true)}><b>تشغيل الطباعة الحرارية المباشرة</b><small>{thermalStatus?.ready ? 'إرسال ESC/POS إلى خدمة localhost' : 'تتطلب إعداد الخدمة والتحقق من الطابعة'}</small></button>
+          <button type="button" className={`print-choice ${!settings?.directThermal ? 'selected' : ''}`} aria-pressed={!settings?.directThermal} onClick={() => onDirectChange?.(false)}><b>إيقاف الطباعة الحرارية المباشرة</b><small>تبقى طباعة Chrome الحالية متاحة</small></button>
+        </div>
+      </section>
+      <section className="print-settings-section" aria-labelledby="local-print-heading">
+        <h3 id="local-print-heading">إعداد الخدمة المحلية</h3>
+        <label className="printer-name-field">اسم الطابعة<input value={printerName} onChange={e => setPrinterName(e.target.value)} placeholder="مثال: POS-80" /></label>
+        <label className="printer-name-field">عنوان الخدمة<input value={serviceUrl} onChange={e => setServiceUrl(e.target.value)} /></label>
+        <label className="printer-name-field">رمز الخدمة<input type="password" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" /></label>
+        <small className="printer-note">الخدمة محلية فقط ولا تقرأ Firebase أو بيانات الإنتاج.</small>
+        <button type="button" className="secondary-action print-check-button" onClick={() => { const next = { name: printerName.trim(), serviceUrl: serviceUrl.trim(), token, paper: '80mm' }; onSave(next); onCheck?.(next) }}>فحص الخدمة والطابعة</button>
+        <p className="printer-note" role="status">{thermalStatus?.ready ? 'جاهزة للطباعة الحرارية المباشرة.' : thermalStatus?.mode === 'dry-run' ? 'الخدمة تعمل dry-run فقط؛ الطباعة المباشرة معطلة.' : thermalStatus?.error ? 'خدمة الطباعة المباشرة غير متصلة — طباعة Chrome ما زالت متاحة' : 'لم يتم التحقق من الخدمة بعد.'}</p>
+      </section>
       <button className="primary-action" type="button" onClick={save}>حفظ إعدادات الطابعة</button>
     </Dialog>
   )

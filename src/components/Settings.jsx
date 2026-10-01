@@ -107,12 +107,24 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
   </div>
 }
 
-export default function Settings({ products, categories, canWrite, onSave, onNavigate }) {
+export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets }) {
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
+  const [discountForm, setDiscountForm] = useState(() => ({ baly: String(discountPresets.baly), toters: String(discountPresets.toters) }))
   const sorted = useMemo(() => products.slice().sort((a, b) => Number(b.enabled !== false) - Number(a.enabled !== false) || String(a.name).localeCompare(String(b.name), 'ar')), [products])
   const save = async product => { await onSave(product); setNotice('تم حفظ المنتج وتحديث الكاشير عند اتصاله.'); window.setTimeout(() => setNotice(''), 4000) }
   const toggle = product => save({ ...product, enabled: product.enabled === false }).catch(error => setNotice(error?.message || 'تعذر حفظ حالة المنتج.'))
+  const saveDiscounts = event => {
+    event.preventDefault()
+    const next = { baly: Number(discountForm.baly), toters: Number(discountForm.toters) }
+    if (![next.baly, next.toters].every(value => Number.isFinite(value) && value >= 0 && value <= 100)) {
+      setNotice('يجب أن تكون خصومات بلي وتوترز بين 0 و100.')
+      return
+    }
+    onSaveDiscountPresets?.(next)
+    setNotice('تم حفظ خصومات بلي وتوترز على جهاز الكاشير.')
+    window.setTimeout(() => setNotice(''), 4000)
+  }
   return <section className="settings-page" dir="rtl">
     <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات فقط</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
     <section className="settings-card"><div className="settings-card-heading"><div><h2>إدارة المنتجات</h2><p>{formatNumber(products.length)} منتج — الإخفاء لا يحذف المنتج أو المبيعات السابقة.</p></div><button type="button" className="primary-action" disabled={!canWrite} onClick={() => setEditing({})}><Icon name="plus" size={18} /> إضافة منتج</button></div>
@@ -121,6 +133,14 @@ export default function Settings({ products, categories, canWrite, onSave, onNav
         <ProductImage product={product} className="settings-product-image" /><div className="settings-product-info"><h3>{product.parentProductId ? '↳ ' : ''}{names.arabic || product.name}</h3><p>{product.parentProductId ? `تابع لـ ${parent ? productNames(parent).arabic : 'منتج رئيسي'}` : (product.category || 'غير مصنف')} · <span dir="ltr">{formatMoney(product.price)}</span></p></div><span className={`product-status ${hidden ? 'hidden' : 'visible'}`}>{hidden ? 'مخفي' : 'ظاهر'}</span><div className="settings-product-actions"><button type="button" disabled={!canWrite} onClick={() => setEditing(product)}>تعديل</button><button type="button" disabled={!canWrite} onClick={() => toggle(product)}>{hidden ? 'إظهار' : 'إخفاء'}</button></div>
       </article> })}</div>
     </section>
+    <form className="settings-card cashier-discounts-card" onSubmit={saveDiscounts}>
+      <div className="settings-card-heading"><div><h2>خصومات بلي وتوترز</h2><p>تُحفظ محلياً على جهاز الكاشير ولا تغيّر المبيعات السابقة.</p></div></div>
+      <div className="discount-presets-grid">
+        <label>خصم بلي (%)<input type="number" min="0" max="100" step="1" value={discountForm.baly} onChange={e => setDiscountForm(v => ({ ...v, baly: e.target.value }))} /></label>
+        <label>خصم توترز (%)<input type="number" min="0" max="100" step="1" value={discountForm.toters} onChange={e => setDiscountForm(v => ({ ...v, toters: e.target.value }))} /></label>
+      </div>
+      <button className="primary-action" type="submit">حفظ الخصومات</button>
+    </form>
     {notice && <p className="settings-notice" role="status">{notice}</p>}
     {editing && <ProductForm product={editing.id ? editing : null} products={products} categories={categories} onClose={() => setEditing(null)} onSave={save} />}
   </section>

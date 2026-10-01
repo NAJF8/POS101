@@ -22,21 +22,26 @@ import { calculateOperationalDaySummary } from './services/operationalDayReport.
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 export const tablesEnabled = false
-const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
+const read = (key, fallback) => { try { const raw = localStorage.getItem(key); return raw === null ? fallback : JSON.parse(raw) } catch { return fallback } }
 const orderSubtotal = order => order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-const discountValue = (subtotal, discount) => {
+export const DEFAULT_DISCOUNT_PRESETS = { baly: 26, toters: 25 }
+const normalizeDiscountPresets = value => ({
+  baly: Math.min(100, Math.max(0, Number.isFinite(Number(value?.baly)) ? Number(value.baly) : DEFAULT_DISCOUNT_PRESETS.baly)),
+  toters: Math.min(100, Math.max(0, Number.isFinite(Number(value?.toters)) ? Number(value.toters) : DEFAULT_DISCOUNT_PRESETS.toters)),
+})
+const discountValue = (subtotal, discount, discountPresets = DEFAULT_DISCOUNT_PRESETS) => {
   if (!discount) return 0
   const raw = Number(discount.input)
   const input = Number.isFinite(raw) && raw > 0 ? raw : 0
-  const percentage = discount.kind === 'baly' ? 26
-    : discount.kind === 'toters' ? 25
+  const percentage = discount.kind === 'baly' ? discountPresets.baly
+    : discount.kind === 'toters' ? discountPresets.toters
       : discount.kind === 'percent' ? Math.min(100, input) : null
   const value = percentage === null ? input : Math.round(subtotal * percentage / 100)
   return Math.min(subtotal, Math.max(0, value))
 }
-const recalculateDiscount = order => {
+const recalculateDiscount = (order, discountPresets) => {
   if (!order.discount) return order
-  return { ...order, discount: { ...order.discount, value: discountValue(orderSubtotal(order), order.discount) } }
+  return { ...order, discount: { ...order.discount, value: discountValue(orderSubtotal(order), order.discount, discountPresets) } }
 }
 const shifts = [
   { shiftId: 'morning', name: 'كاشير صباحي' },
@@ -56,6 +61,7 @@ export default function App() {
   const [printMessage, setPrintMessage] = useState(null)
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
+  const [discountPresets, setDiscountPresets] = useState(() => normalizeDiscountPresets(read('pos101.discountPresets', DEFAULT_DISCOUNT_PRESETS)))
   const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
   const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
@@ -91,7 +97,7 @@ export default function App() {
 
   const activeOrder = orders[active] || orders[0]
   const subtotal = orderSubtotal(activeOrder)
-  const activeDiscount = discountValue(subtotal, activeOrder.discount)
+  const activeDiscount = discountValue(subtotal, activeOrder.discount, discountPresets)
   const total = Math.max(0, subtotal - activeDiscount)
 
   const openOrdersCount = getOpenOrders(orders).length
@@ -155,6 +161,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.nextNumber', nextNumber), [nextNumber])
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
+  useEffect(() => localStorage.setItem('pos101.discountPresets', JSON.stringify(discountPresets)), [discountPresets])
   useEffect(() => localStorage.setItem('pos101.printerSettings', JSON.stringify(printerSettings)), [printerSettings])
 
   useEffect(() => {
@@ -329,7 +336,7 @@ export default function App() {
   const [pendingPayment, setPendingPayment] = useState(null)
 
   // Order mutations
-  const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o)) : o)), [active])
+  const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o), discountPresets) : o)), [active, discountPresets])
   const addProduct = useCallback(p => {
     const item = { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }
     update(o => {
@@ -454,7 +461,7 @@ export default function App() {
     // 1. Optimistic Local Save & Cart Clear (POS continues selling)
     setNextNumber(n => n + 1)
     setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-    if (autoPrint || payment.forcePrint) void requestSalePrint(sale)
+    if (autoPrint) void requestSalePrint(sale)
     setPendingPayment(null)
     window.setTimeout(() => setModal(null), 350)
 
@@ -472,11 +479,11 @@ export default function App() {
       if (e.key === 'Escape') { setModal(null); return }
       if (!session) return
 
-      // F6: Direct Sell + Print
+      // F6: Direct Sell; it respects the cashier's automatic-print setting.
       if (e.key === 'F6') {
         e.preventDefault()
         if (activeOrder.items.length && modal !== 'seller-selection') {
-          initiateComplete({ method: 'cash', received: total, change: 0, forcePrint: true })
+          initiateComplete({ method: 'cash', received: total, change: 0 })
         }
       }
 
@@ -621,7 +628,7 @@ export default function App() {
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} />
       )}
 
       {currentView === 'orders' && (session || adminReady) && (
@@ -715,7 +722,7 @@ export default function App() {
       {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'seller-selection' && <SellerSelection onClose={() => setModal(null)} onSelect={finalizeSale} />}
-      {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} onClose={() => setModal(null)} onApply={applyDiscount} />}
+      {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} discountPresets={discountPresets} onClose={() => setModal(null)} onApply={applyDiscount} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}
       {modal === 'single-history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}
       {modal === 'return' && <ReturnDialog order={selected} onClose={() => setModal('single-history')} onConfirm={recordAdjustment} />}

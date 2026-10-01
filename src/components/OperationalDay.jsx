@@ -60,9 +60,9 @@ export default function OperationalDay({ day, summary, loading, error, onStart, 
     {endOpen && <div className="overlay">
       <div className="dialog operational-day-dialog">
         <h2>إنهاء اليوم التشغيلي</h2>
-        <p>تاريخ اليوم: <b>{day.businessDate}</b></p>
+        <p>تاريخ اليوم التشغيلي: <b>{day.businessDate}</b></p>
         <p>وقت البدء: <b>{startedLabel}</b></p>
-        <p>الوقت الحالي: <b>{formatDateTime(Date.now())}</b></p>
+        <p>وقت الإغلاق الحالي: <b>{formatDateTime(Date.now())}</b></p>
         <div className="operational-day-summary">
           <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>
           <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
