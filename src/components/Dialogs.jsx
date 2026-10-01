@@ -232,7 +232,13 @@ export function QuickCash({ total, onClose, onSuccess }) {
 }
 
 /* ── Discount Dialog ── */
-export function DiscountDialog({ subtotal, current, onClose, onApply }) {
+export function DiscountDialog({ subtotal, current, presets = { baly: 26, toters: 25 }, onClose, onApply }) {
+  const preset = (key, fallback) => {
+    const value = Number(presets?.[key])
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : fallback
+  }
+  const balyPreset = preset('baly', 26)
+  const totersPreset = preset('toters', 25)
   const [kind, setKind] = React.useState(current?.kind || 'amount')
   const [input, setInput] = React.useState(current?.input ?? '')
   const isPreset = kind === 'baly' || kind === 'toters'
@@ -240,19 +246,19 @@ export function DiscountDialog({ subtotal, current, onClose, onApply }) {
   const inputIsNumber = input !== '' && Number.isFinite(raw)
   const inputTooLarge = kind === 'amount' ? raw > subtotal : raw > 100
   const invalid = !isPreset && (!inputIsNumber || raw < 0 || inputTooLarge)
-  const percentage = kind === 'baly' ? 26 : kind === 'toters' ? 25 : Math.min(100, Math.max(0, raw || 0))
+  const percentage = kind === 'baly' ? balyPreset : kind === 'toters' ? totersPreset : Math.min(100, Math.max(0, raw || 0))
   const value = Math.min(subtotal, Math.max(0, Math.round(kind === 'amount' ? (raw || 0) : subtotal * percentage / 100)))
   const chooseKind = nextKind => {
     setKind(nextKind)
-    if (nextKind === 'baly') setInput(26)
-    if (nextKind === 'toters') setInput(25)
+    if (nextKind === 'baly') setInput(balyPreset)
+    if (nextKind === 'toters') setInput(totersPreset)
     if (nextKind === 'amount' || nextKind === 'percent') setInput(current?.kind === nextKind ? current.input : '')
   }
   const cards = [
     { kind: 'amount', title: 'مبلغ ثابت', note: 'أدخل مبلغ الخصم بالدينار' },
     { kind: 'percent', title: 'نسبة مئوية', note: 'أدخل نسبة الخصم بنفسك' },
-    { kind: 'baly', title: 'بلي', note: 'خصم ثابت 26%' },
-    { kind: 'toters', title: 'توترز', note: 'خصم ثابت 25%' }
+    { kind: 'baly', title: 'بلي', note: `خصم ثابت ${balyPreset}%` },
+    { kind: 'toters', title: 'توترز', note: `خصم ثابت ${totersPreset}%` }
   ]
   return (
     <Dialog onClose={onClose} className="discount-dialog">
