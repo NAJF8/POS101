@@ -24,13 +24,24 @@ const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], ta
 export const tablesEnabled = false
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 const orderSubtotal = order => order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+const defaultDiscountPresets = { baly: 26, toters: 25 }
+const normalizeDiscountPreset = (value, fallback) => {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(100, Math.max(0, number)) : fallback
+}
+const normalizeDiscountPresets = value => ({
+  baly: normalizeDiscountPreset(value?.baly, defaultDiscountPresets.baly),
+  toters: normalizeDiscountPreset(value?.toters, defaultDiscountPresets.toters),
+})
 const discountValue = (subtotal, discount) => {
   if (!discount) return 0
   const raw = Number(discount.input)
-  const input = Number.isFinite(raw) && raw > 0 ? raw : 0
-  const percentage = discount.kind === 'baly' ? 26
-    : discount.kind === 'toters' ? 25
-      : discount.kind === 'percent' ? Math.min(100, input) : null
+  const fallback = discount.kind === 'baly' ? defaultDiscountPresets.baly
+    : discount.kind === 'toters' ? defaultDiscountPresets.toters : 0
+  const input = Number.isFinite(raw) && raw >= 0 ? raw : fallback
+  const percentage = discount.kind === 'baly' || discount.kind === 'toters' || discount.kind === 'percent'
+    ? Math.min(100, input)
+    : null
   const value = percentage === null ? input : Math.round(subtotal * percentage / 100)
   return Math.min(subtotal, Math.max(0, value))
 }
@@ -57,6 +68,7 @@ export default function App() {
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
   const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
+  const [discountPresets, setDiscountPresets] = useState(() => normalizeDiscountPresets(read('pos101.discountPresets', defaultDiscountPresets)))
   const [thermalStatus, setThermalStatus] = useState(null)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const [syncBusy, setSyncBusy] = useState(false)
@@ -156,6 +168,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.printerSettings', JSON.stringify(printerSettings)), [printerSettings])
+  useEffect(() => localStorage.setItem('pos101.discountPresets', JSON.stringify(discountPresets)), [discountPresets])
 
   useEffect(() => {
     const stopAuth = subscribeCentralAuth(user => {
@@ -621,7 +634,7 @@ export default function App() {
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onDiscountPresetsChange={value => setDiscountPresets(normalizeDiscountPresets(value))} />
       )}
 
       {currentView === 'orders' && (session || adminReady) && (
@@ -715,7 +728,7 @@ export default function App() {
       {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'seller-selection' && <SellerSelection onClose={() => setModal(null)} onSelect={finalizeSale} />}
-      {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} onClose={() => setModal(null)} onApply={applyDiscount} />}
+      {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} presets={discountPresets} onClose={() => setModal(null)} onApply={applyDiscount} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}
       {modal === 'single-history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}
       {modal === 'return' && <ReturnDialog order={selected} onClose={() => setModal('single-history')} onConfirm={recordAdjustment} />}
