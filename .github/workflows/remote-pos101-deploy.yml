@@ -45,3 +45,5 @@ jobs:
           fi
           git commit -m "deploy: POS101 remote update"
           git push origin gh-pages
+
+# remote deploy trigger
