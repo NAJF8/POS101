@@ -637,19 +637,19 @@ export function PrintMenu({ enabled, settings, thermalStatus, onClose, onChange,
         فحص الخدمة والطابعة
       </button>
       <p className="printer-note" role="status">{thermalStatus?.ready ? 'جاهزة للطباعة الحرارية المباشرة.' : thermalStatus?.mode === 'dry-run' ? 'الخدمة تعمل dry-run فقط؛ الطباعة المباشرة معطلة.' : thermalStatus?.error || 'لم يتم التحقق من الخدمة بعد.'}</p>
-      <button className={enabled ? 'selected' : ''} onClick={() => onChange(true)}>
+      <button type="button" className={enabled ? 'selected' : ''} onClick={() => onChange(true)}>
         <b>تشغيل الطباعة</b>
         <small>تفتح فاتورة واحدة تلقائياً بعد نجاح حفظ البيع</small>
       </button>
-      <button className={!enabled ? 'selected' : ''} onClick={() => onChange(false)}>
+      <button type="button" className={!enabled ? 'selected' : ''} onClick={() => onChange(false)}>
         <b>إيقاف الطباعة</b>
         <small>يستمر البيع دون فتح نافذة الطباعة</small>
       </button>
-      <button className={settings?.directThermal ? 'selected' : ''} disabled={!thermalStatus?.ready} onClick={() => onDirectChange?.(true)}>
+      <button type="button" className={settings?.directThermal ? 'selected' : ''} disabled={!thermalStatus?.ready} onClick={() => onDirectChange?.(true)}>
         <b>طباعة حرارية مباشرة</b>
         <small>{thermalStatus?.ready ? 'إرسال ESC/POS إلى خدمة localhost' : 'تتطلب إعداد الخدمة والتحقق من الطابعة'}</small>
       </button>
-      <button className={!settings?.directThermal ? 'selected' : ''} onClick={() => onDirectChange?.(false)}>
+      <button type="button" className={!settings?.directThermal ? 'selected' : ''} onClick={() => onDirectChange?.(false)}>
         <b>إيقاف الطباعة الحرارية المباشرة</b>
         <small>تبقى طباعة Chrome الحالية وA4 دون تغيير</small>
       </button>
