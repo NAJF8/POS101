@@ -1,0 +1,47 @@
+name: Remote POS101 deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    if: contains(github.event.head_commit.message, '[remote-deploy]')
+    runs-on: ubuntu-latest
+    env:
+      VITE_POS101_API_KEY: AIzaSyDtzonzkDsEvF9KNXi70j6ZTXG5kLAM_0c
+      VITE_POS101_AUTH_DOMAIN: cmms-37512.firebaseapp.com
+      VITE_POS101_DATABASE_URL: https://cmms-37512-default-rtdb.asia-southeast1.firebasedatabase.app
+      VITE_POS101_PROJECT_ID: cmms-37512
+      VITE_POS101_STORAGE_BUCKET: cmms-37512.firebasestorage.app
+      VITE_POS101_MESSAGING_SENDER_ID: "451592788539"
+      VITE_POS101_APP_ID: "1:451592788539:web:d3dc3e68b1543996b39a1e"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy dist to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages:gh-pages
+          git worktree add /tmp/pos101-gh-pages gh-pages
+          find /tmp/pos101-gh-pages -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a dist/. /tmp/pos101-gh-pages/
+          cd /tmp/pos101-gh-pages
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No deployment changes."
+            exit 0
+          fi
+          git commit -m "deploy: POS101 remote update"
+          git push origin gh-pages
