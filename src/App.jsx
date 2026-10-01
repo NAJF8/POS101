@@ -634,7 +634,7 @@ export default function App() {
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onDiscountPresetsChange={value => setDiscountPresets(normalizeDiscountPresets(value))} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onDiscountPresetsChange={value => setDiscountPresets(normalizeDiscountPresets(value))} autoPrint={autoPrint} onAutoPrintChange={setAutoPrint} />
       )}
 
       {currentView === 'orders' && (session || adminReady) && (
