@@ -107,14 +107,40 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
   </div>
 }
 
-export default function Settings({ products, categories, canWrite, onSave, onNavigate }) {
+export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onDiscountPresetsChange }) {
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
+  const [discountDraft, setDiscountDraft] = useState(() => ({
+    baly: String(discountPresets?.baly ?? 26),
+    toters: String(discountPresets?.toters ?? 25),
+  }))
   const sorted = useMemo(() => products.slice().sort((a, b) => Number(b.enabled !== false) - Number(a.enabled !== false) || String(a.name).localeCompare(String(b.name), 'ar')), [products])
   const save = async product => { await onSave(product); setNotice('تم حفظ المنتج وتحديث الكاشير عند اتصاله.'); window.setTimeout(() => setNotice(''), 4000) }
   const toggle = product => save({ ...product, enabled: product.enabled === false }).catch(error => setNotice(error?.message || 'تعذر حفظ حالة المنتج.'))
+  const saveDiscountPresets = () => {
+    const baly = Number(discountDraft.baly)
+    const toters = Number(discountDraft.toters)
+    if (!Number.isFinite(baly) || baly < 0 || baly > 100 || !Number.isFinite(toters) || toters < 0 || toters > 100) {
+      setNotice('نسب الخصم يجب أن تكون بين 0 و100.')
+      return
+    }
+    onDiscountPresetsChange?.({ baly, toters })
+    setNotice('تم حفظ نسب خصم بلي وتوترز على جهاز الكاشير.')
+    window.setTimeout(() => setNotice(''), 4000)
+  }
   return <section className="settings-page" dir="rtl">
-    <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات فقط</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
+    <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات وخصومات الكاشير</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
+    <section className="settings-card">
+      <div className="settings-card-heading">
+        <div><h2>خصومات بلي وتوترز</h2><p>عدّل النسبة التي يطبقها الكاشير عند اختيار الخصم الجاهز.</p></div>
+        <button type="button" className="primary-action" disabled={!canWrite} onClick={saveDiscountPresets}>حفظ الخصومات</button>
+      </div>
+      <div className="product-form-grid">
+        <label>خصم بلي (%)<input dir="ltr" type="number" min="0" max="100" step="0.01" disabled={!canWrite} value={discountDraft.baly} onChange={e => setDiscountDraft(current => ({ ...current, baly: e.target.value }))} /></label>
+        <label>خصم توترز (%)<input dir="ltr" type="number" min="0" max="100" step="0.01" disabled={!canWrite} value={discountDraft.toters} onChange={e => setDiscountDraft(current => ({ ...current, toters: e.target.value }))} /></label>
+      </div>
+      <small className="product-form-hint">القيم الافتراضية الحالية: بلي 26%، توترز 25%. يمكن تغييرها من هنا بأي وقت.</small>
+    </section>
     <section className="settings-card"><div className="settings-card-heading"><div><h2>إدارة المنتجات</h2><p>{formatNumber(products.length)} منتج — الإخفاء لا يحذف المنتج أو المبيعات السابقة.</p></div><button type="button" className="primary-action" disabled={!canWrite} onClick={() => setEditing({})}><Icon name="plus" size={18} /> إضافة منتج</button></div>
       {!canWrite && <p className="settings-readonly" role="status">تسجيل دخول حساب POS مصرح به مطلوب لإضافة أو تعديل المنتجات.</p>}
       <div className="settings-product-list">{sorted.map(product => { const names = productNames(product); const hidden = product.enabled === false; const parent = products.find(item => String(item.id) === String(product.parentProductId)); return <article className={`settings-product-row ${hidden ? 'is-hidden' : ''}`} key={product.id}>
