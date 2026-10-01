@@ -107,7 +107,7 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
   </div>
 }
 
-export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onDiscountPresetsChange }) {
+export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onDiscountPresetsChange, autoPrint = true, onAutoPrintChange }) {
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
   const [discountDraft, setDiscountDraft] = useState(() => ({
@@ -130,6 +130,24 @@ export default function Settings({ products, categories, canWrite, onSave, onNav
   }
   return <section className="settings-page" dir="rtl">
     <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات وخصومات الكاشير</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
+    <section className="settings-card">
+      <div className="settings-card-heading">
+        <div>
+          <h2>الطباعة التلقائية</h2>
+          <p>تحكم بطباعة الفاتورة تلقائياً بعد إكمال البيع على جهاز الكاشير.</p>
+        </div>
+        <span className={`settings-lock ${autoPrint ? 'is-on' : 'is-off'}`}>{autoPrint ? 'الطباعة مفعلة' : 'الطباعة متوقفة'}</span>
+      </div>
+      <div className="settings-print-actions" role="group" aria-label="الطباعة التلقائية">
+        <button type="button" className={autoPrint ? 'primary-action selected' : 'secondary-action'} onClick={() => onAutoPrintChange?.(true)}>
+          تشغيل الطباعة
+        </button>
+        <button type="button" className={!autoPrint ? 'danger-button selected' : 'secondary-action'} onClick={() => onAutoPrintChange?.(false)}>
+          إيقاف الطباعة
+        </button>
+      </div>
+      <small className="product-form-hint">عند الإيقاف يستمر البيع والحفظ بشكل طبيعي بدون فتح نافذة الطباعة تلقائياً. إعادة الطباعة اليدوية تبقى متاحة.</small>
+    </section>
     <section className="settings-card">
       <div className="settings-card-heading">
         <div><h2>خصومات بلي وتوترز</h2><p>عدّل النسبة التي يطبقها الكاشير عند اختيار الخصم الجاهز.</p></div>
