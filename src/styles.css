@@ -923,6 +923,8 @@ input, textarea, select { cursor: text; }
 .history-table th:nth-child(6), .history-table td:nth-child(6) { width: 105px; }
 .history-table th:nth-child(7), .history-table td:nth-child(7) { width: 68px; }
 .number-cell, .date-cell, .money-cell { direction: ltr; text-align: center; font-variant-numeric: tabular-nums; }
+.history-business-date { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; line-height: 1.25; white-space: nowrap; }
+.history-business-date small { color: var(--muted); font-size: 11px; }
 .h-actions { display: flex; gap: 4px; justify-content: flex-start; direction: ltr; }
 .h-actions button {
   width: 28px; height: 28px; background: #f4f2ed; color: var(--coffee); padding: 5px; border-radius: 6px; display: flex; align-items: center; justify-content: center;

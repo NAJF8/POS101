@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build && node scripts/finalize-dist.cjs", "preview": "vite preview", "test:admin-central-sync": "node scripts/admin-central-sync-regression.mjs", "test:report-open-orders": "node scripts/report-open-orders-regression.mjs", "test:comprehensive-report": "node scripts/comprehensive-report-regression.mjs" },
+  "scripts": { "dev": "vite", "build": "vite build && node scripts/finalize-dist.cjs", "preview": "vite preview", "test:admin-central-sync": "node scripts/admin-central-sync-regression.mjs", "test:report-open-orders": "node scripts/report-open-orders-regression.mjs", "test:order-history-business-date": "node scripts/order-history-business-date-regression.mjs", "test:comprehensive-report": "node scripts/comprehensive-report-regression.mjs" },
   "dependencies": { "@vitejs/plugin-react": "latest", "vite": "latest", "react": "latest", "react-dom": "latest", "firebase": "^12.18.0" },
   "devDependencies": {}
 }

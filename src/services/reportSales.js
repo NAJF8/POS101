@@ -58,6 +58,25 @@ export const normalizeSale = sale => {
     order: { ...order, items: sale?.items || order.items || [] },
   }
 }
+
+const localDateFromTimestamp = timestamp => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (!Number.isFinite(date.getTime())) return ''
+  const pad = value => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+// Operational history uses the immutable business date when available. Legacy
+// sales without it remain filterable by their real local createdAt date.
+export const businessDateForSale = sale => {
+  const explicit = normalizeDigits(String(sale?.businessDate || '').trim())
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit
+  return localDateFromTimestamp(dateValue(firstValue(sale?.createdAt, sale?.created_at, sale?.timestamp, sale?.date)))
+}
+
+export const businessDateTimestamp = sale => dateValue(businessDateForSale(sale))
+
 export const readLocalSales = () => {
   try {
     const raw = JSON.parse(localStorage.getItem('pos101.sales') || '[]')
