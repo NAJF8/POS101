@@ -1,0 +1,1 @@
+Deploy operational-day consistency for reports, purchases, and admin views.
