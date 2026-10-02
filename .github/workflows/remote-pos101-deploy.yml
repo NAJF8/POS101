@@ -28,6 +28,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run test:report-open-orders
+      - run: npm run test:comprehensive-report
       - run: npm run build
       - name: Deploy dist to gh-pages
         run: |
@@ -45,4 +47,4 @@ jobs:
           fi
           git commit -m "deploy: POS101 remote update"
           git push origin gh-pages
-# remote deploy trigger 2
+# remote deploy trigger 3
