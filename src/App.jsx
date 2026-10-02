@@ -21,6 +21,18 @@ import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
+const ensureOrderSlots = (value, count = 10) => {
+  const list = Array.isArray(value) ? value.slice() : []
+  const usedIds = new Set(list.map(order => Number(order?.id)).filter(Number.isFinite))
+  let nextId = 1
+  while (list.length < count) {
+    while (usedIds.has(nextId)) nextId += 1
+    list.push(blankOrder(nextId))
+    usedIds.add(nextId)
+    nextId += 1
+  }
+  return list
+}
 export const tablesEnabled = false
 const read = (key, fallback) => { try { const raw = localStorage.getItem(key); return raw === null ? fallback : JSON.parse(raw) } catch { return fallback } }
 const orderSubtotal = order => order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -50,7 +62,7 @@ const shifts = [
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard')
-  const [orders, setOrders] = useState(() => read('pos101.orders', [1, 2, 3, 4].map(blankOrder)))
+  const [orders, setOrders] = useState(() => ensureOrderSlots(read('pos101.orders', []), 10))
   const [nextNumber, setNextNumber] = useState(() => read('pos101.nextNumber', 1015))
   const [active, setActive] = useState(0)
   const [category, setCategory] = useState('الكل')
@@ -399,6 +411,29 @@ export default function App() {
     }
   }, [directThermalReady, printerSettings])
 
+  const printOpenOrder = useCallback(() => {
+    if (!session || !activeOrder?.items?.length) return false
+    const now = Date.now()
+    const draftReceipt = {
+      saleId: `draft:${activeOrder.id}:${now}`,
+      id: `draft:${activeOrder.id}:${now}`,
+      createdAt: now,
+      subtotal,
+      discount: activeDiscount,
+      total,
+      seller: session.name || session.shiftName || '',
+      cashierNameSnapshot: session.name || session.shiftName || '',
+      items: activeOrder.items.map(item => ({ ...item })),
+      order: {
+        ...activeOrder,
+        items: activeOrder.items.map(item => ({ ...item })),
+      },
+      draftReceipt: true,
+    }
+    void requestSalePrint(draftReceipt, { reprint: true })
+    return true
+  }, [session, activeOrder, subtotal, activeDiscount, total, requestSalePrint])
+
   const initiateComplete = useCallback(payment => {
     if (!session || !activeOrder.items.length || saleInFlight.current) return false
     if (operationalDay?.status !== 'open') {
@@ -479,6 +514,14 @@ export default function App() {
       if (e.key === 'Escape') { setModal(null); return }
       if (!session) return
 
+      // F5: Print the current open order only. It does not sell, save, clear,
+      // renumber, or enqueue the order.
+      if (e.key === 'F5') {
+        e.preventDefault()
+        if (activeOrder.items.length) printOpenOrder()
+        return
+      }
+
       // F6: Direct Sell; it respects the cashier's automatic-print setting.
       if (e.key === 'F6') {
         e.preventDefault()
@@ -511,7 +554,7 @@ export default function App() {
       window.removeEventListener('print-historical-sale', printHistorical)
       window.removeEventListener('view-historical-sale', viewHistorical)
     }
-  }, [activeOrder.items.length, session, initiateComplete, total, requestSalePrint])
+  }, [activeOrder.items.length, session, initiateComplete, total, requestSalePrint, printOpenOrder])
 
   // Auto-print trigger
   useEffect(() => {
