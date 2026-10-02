@@ -131,14 +131,18 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   
   const [reportDate, setReportDate] = useState(() => operationalDay?.businessDate || getDefaultReportDate())
   const [reportScope, setReportScope] = useState(() => operationalDay?.id ? 'operational' : 'calendar')
+  const hasOpenOperationalDay = operationalDay?.status === 'open' && Boolean(operationalDay?.id && operationalDay?.businessDate)
+  const effectiveReportScope = hasOpenOperationalDay ? 'operational' : reportScope
+  const effectiveReportDate = hasOpenOperationalDay ? operationalDay.businessDate : reportDate
 
-  // When an open operational day is available, reports open on that business
-  // day by default—even if the device calendar has moved past midnight.
+  // While an operational day is open, every POS report is pinned to that
+  // business date. Crossing midnight must never move reports to the device
+  // calendar date; only ending the day and starting a new one can change it.
   useEffect(() => {
-    if (!operationalDay?.id) return
+    if (!hasOpenOperationalDay) return
     setReportScope('operational')
-    if (operationalDay.businessDate) setReportDate(operationalDay.businessDate)
-  }, [operationalDay?.id, operationalDay?.businessDate])
+    setReportDate(operationalDay.businessDate)
+  }, [hasOpenOperationalDay, operationalDay?.businessDate])
 
   // Keep reporting local-only until the ACC/Firebase source is explicitly
   // reconciled. A report must never silently mix another cashier's data with
@@ -165,19 +169,19 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     }))
   }, [])
 
-  const { startMs, endMs } = useMemo(() => getLocalDayBounds(reportDate), [reportDate])
+  const { startMs, endMs } = useMemo(() => getLocalDayBounds(effectiveReportDate), [effectiveReportDate])
 
   // One report dataset is shared by the visible report, browser print, and
   // direct thermal print. Keep filtering here so every output follows the
   // latest rendered filter state and never falls back to all sales.
-  const filteredSales = useMemo(() => reportScope === 'operational' && operationalDay?.id
+  const filteredSales = useMemo(() => effectiveReportScope === 'operational' && operationalDay?.id
     ? filterSalesByOperationalDay(sales, operationalDay.id)
-    : filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs, reportScope, operationalDay])
+    : filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs, effectiveReportScope, operationalDay])
 
   const filteredExpenses = useMemo(() => {
-    if (reportScope === 'operational' && operationalDay?.id) return filterExpensesByOperationalDay(expenses, operationalDay.id)
+    if (effectiveReportScope === 'operational' && operationalDay?.id) return filterExpensesByOperationalDay(expenses, operationalDay.id)
     return expenses.filter(e => e.date >= startMs && e.date <= endMs)
-  }, [expenses, startMs, endMs, reportScope, operationalDay])
+  }, [expenses, startMs, endMs, effectiveReportScope, operationalDay])
 
   const printReport = (format) => {
     const paper = document.querySelector('.report-paper')
@@ -224,17 +228,17 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
       : undefined
-    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate, dateFrom: reportDate, dateTo: reportDate, period: reportDate, sales: filteredSales, expenses: filteredExpenses, ...(summary ? { summary } : {}) })
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: effectiveReportDate, dateFrom: effectiveReportDate, dateTo: effectiveReportDate, period: effectiveReportDate, sales: filteredSales, expenses: filteredExpenses, ...(summary ? { summary } : {}) })
   }
 
   const renderReportCards = () => (
     <div className="reports-container" dir="rtl">
       <div className="reports-sidebar">
         <div className="date-filter">
-          <h3>اختيار التاريخ</h3>
-          <label>التاريخ<input aria-label="التاريخ" type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} /></label>
-          <label>نطاق التقرير<select aria-label="نطاق التقرير" value={reportScope} onChange={e => { const next = e.target.value; setReportScope(next); if (next === 'operational' && operationalDay?.businessDate) setReportDate(operationalDay.businessDate) }}><option value="calendar">التاريخ الميلادي</option><option value="operational" disabled={!operationalDay?.id}>اليوم التشغيلي الحالي</option></select></label>
-          {reportScope === 'operational' && operationalDay?.id && <small>يعرض كل مبيعات اليوم التشغيلي {operationalDay.businessDate} حتى الآن.</small>}
+          <h3>{hasOpenOperationalDay ? 'اليوم التشغيلي الحالي' : 'اختيار التاريخ'}</h3>
+          <label>التاريخ<input aria-label="التاريخ" type="date" value={effectiveReportDate} disabled={hasOpenOperationalDay} onChange={e => setReportDate(e.target.value)} /></label>
+          {!hasOpenOperationalDay && <label>نطاق التقرير<select aria-label="نطاق التقرير" value={reportScope} onChange={e => setReportScope(e.target.value)}><option value="calendar">التاريخ الميلادي</option></select></label>}
+          {hasOpenOperationalDay && <small>كل التقارير مثبتة على يوم العمل {operationalDay.businessDate} حتى تضغط إنهاء اليوم. بعد بدء يوم جديد تنتقل تلقائياً لليوم الجديد.</small>}
         </div>
       </div>
       
@@ -315,7 +319,9 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
             <div className="thermal-sale-card" key={sale.id || `${formatNumber(sale.orderNumber)}-${sale.createdAt}`}>
               <div className="thermal-card-head">
                 <b className="order-no">طلب #{formatNumber(sale.orderNumber || index + 1)}</b>
-                <span className="order-dt" dir="ltr">{formatDateTime(sale.createdAt)}</span>
+                <span className="order-dt" dir="ltr" title={`وقت البيع الفعلي: ${formatDateTime(sale.createdAt)}`}>
+                  {sale.businessDate || effectiveReportDate} {formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}
+                </span>
               </div>
               <div className="thermal-card-body">
                 <span>الكابتن: <b>{sale.seller || sale.cashierNameSnapshot || 'غير محدد'}</b></span>
@@ -610,7 +616,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
           <div className="report-paper-header">
             <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
             <h2>{title}</h2>
-            <p>{reportScope === 'operational' && operationalDay?.id ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${reportDate}`}</p>
+            <p>{hasOpenOperationalDay ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${effectiveReportDate}`}</p>
           </div>
           
           {content}
