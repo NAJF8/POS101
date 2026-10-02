@@ -28,7 +28,7 @@ export default function ProductGrid({
       <div className="catalog-toolbar">
         {orders && (
           <div className="quick-orders">
-            {orders.slice(0, 4).map((o, i) => (
+            {orders.slice(0, 10).map((o, i) => (
               <button 
                 onClick={() => session && setActiveOrderIndex(i)} 
                 key={o.id} 
