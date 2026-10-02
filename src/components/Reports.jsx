@@ -132,17 +132,17 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   const [reportDate, setReportDate] = useState(() => operationalDay?.businessDate || getDefaultReportDate())
   const [reportScope, setReportScope] = useState(() => operationalDay?.id ? 'operational' : 'calendar')
   const hasOpenOperationalDay = operationalDay?.status === 'open' && Boolean(operationalDay?.id && operationalDay?.businessDate)
-  const effectiveReportScope = hasOpenOperationalDay ? 'operational' : reportScope
-  const effectiveReportDate = hasOpenOperationalDay ? operationalDay.businessDate : reportDate
+  const isOperationalScope = reportScope === 'operational' && hasOpenOperationalDay
+  const effectiveReportScope = isOperationalScope ? 'operational' : 'calendar'
+  const effectiveReportDate = isOperationalScope ? operationalDay.businessDate : reportDate
 
-  // While an operational day is open, every POS report is pinned to that
-  // business date. Crossing midnight must never move reports to the device
-  // calendar date; only ending the day and starting a new one can change it.
+  // Default to the active business day whenever a new operational day opens,
+  // but still allow the user to switch back to historical/calendar reports.
   useEffect(() => {
     if (!hasOpenOperationalDay) return
     setReportScope('operational')
     setReportDate(operationalDay.businessDate)
-  }, [hasOpenOperationalDay, operationalDay?.businessDate])
+  }, [operationalDay?.id, operationalDay?.businessDate])
 
   // Keep reporting local-only until the ACC/Firebase source is explicitly
   // reconciled. A report must never silently mix another cashier's data with
@@ -235,10 +235,25 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     <div className="reports-container" dir="rtl">
       <div className="reports-sidebar">
         <div className="date-filter">
-          <h3>{hasOpenOperationalDay ? 'اليوم التشغيلي الحالي' : 'اختيار التاريخ'}</h3>
-          <label>التاريخ<input aria-label="التاريخ" type="date" value={effectiveReportDate} disabled={hasOpenOperationalDay} onChange={e => setReportDate(e.target.value)} /></label>
-          {!hasOpenOperationalDay && <label>نطاق التقرير<select aria-label="نطاق التقرير" value={reportScope} onChange={e => setReportScope(e.target.value)}><option value="calendar">التاريخ الميلادي</option></select></label>}
-          {hasOpenOperationalDay && <small>كل التقارير مثبتة على يوم العمل {operationalDay.businessDate} حتى تضغط إنهاء اليوم. بعد بدء يوم جديد تنتقل تلقائياً لليوم الجديد.</small>}
+          <h3>{isOperationalScope ? 'اليوم التشغيلي الحالي' : 'تقارير الأيام السابقة'}</h3>
+          <label>نطاق التقرير
+            <select
+              aria-label="نطاق التقرير"
+              value={reportScope}
+              onChange={e => {
+                const next = e.target.value
+                setReportScope(next)
+                if (next === 'operational' && operationalDay?.businessDate) setReportDate(operationalDay.businessDate)
+              }}
+            >
+              {hasOpenOperationalDay && <option value="operational">اليوم التشغيلي الحالي</option>}
+              <option value="calendar">يوم سابق / تاريخ محدد</option>
+            </select>
+          </label>
+          <label>التاريخ<input aria-label="التاريخ" type="date" value={effectiveReportDate} disabled={isOperationalScope} onChange={e => setReportDate(e.target.value)} /></label>
+          {isOperationalScope
+            ? <small>يعرض يوم العمل {operationalDay.businessDate} كاملاً حتى تضغط إنهاء اليوم. لا يتغير عند منتصف الليل.</small>
+            : <small>اختر أي يوم سابق لعرض تقاريره مثل النظام السابق.</small>}
         </div>
       </div>
       
@@ -320,7 +335,9 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
               <div className="thermal-card-head">
                 <b className="order-no">طلب #{formatNumber(sale.orderNumber || index + 1)}</b>
                 <span className="order-dt" dir="ltr" title={`وقت البيع الفعلي: ${formatDateTime(sale.createdAt)}`}>
-                  {sale.businessDate || effectiveReportDate} {formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  {isOperationalScope
+                    ? `${sale.businessDate || operationalDay?.businessDate || effectiveReportDate} ${formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}`
+                    : formatDateTime(sale.createdAt)}
                 </span>
               </div>
               <div className="thermal-card-body">
@@ -616,7 +633,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
           <div className="report-paper-header">
             <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
             <h2>{title}</h2>
-            <p>{hasOpenOperationalDay ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${effectiveReportDate}`}</p>
+            <p>{isOperationalScope ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${effectiveReportDate}`}</p>
           </div>
           
           {content}
