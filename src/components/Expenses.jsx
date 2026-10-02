@@ -42,12 +42,16 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       saveRows(expenses.map(row => row.id === editingId ? { ...row, amount: numericAmount, category, person, notes: notes.trim() } : row))
       resetForm(); alert('تم تعديل المصروف بنجاح'); return
     }
+    if (operationalDay?.status !== 'open' || !operationalDay?.id || !operationalDay?.businessDate) {
+      alert('يجب بدء يوم تشغيلي قبل تسجيل مصروف جديد حتى يُحسب المصروف ضمن نفس فترة العمل.')
+      return
+    }
+    const createdAt = Date.now()
     const row = {
-      id: makeId(), amount: numericAmount, category, date: Date.now(),
+      id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
       shift: session?.name || 'وردية غير محددة', shiftId: '', person, notes: notes.trim(), status: 'disabled',
-      ...(operationalDay?.status === 'open' && operationalDay.id
-        ? { operationalDayId: operationalDay.id, businessDate: operationalDay.businessDate }
-        : {}),
+      operationalDayId: operationalDay.id,
+      businessDate: operationalDay.businessDate,
     }
     saveRows([...expenses, row])
     resetForm()
@@ -60,15 +64,21 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
   return (
     <div className="expenses-container" dir="rtl">
       <div className="expenses-header"><h2>المصاريف</h2><button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button></div>
+      <div className="report-card" style={{ marginBottom: '1rem' }}>
+        <strong>اليوم التشغيلي للمصروف: {operationalDay?.status === 'open' && operationalDay?.businessDate ? operationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong>
+        <div style={{ marginTop: '0.35rem' }}>
+          <small>{operationalDay?.status === 'open' ? 'أي مصروف جديد يُربط بهذا اليوم حتى لو تجاوز الوقت منتصف الليل.' : 'ابدأ اليوم التشغيلي قبل تسجيل مصروف جديد.'}</small>
+        </div>
+      </div>
       <form onSubmit={submit} className="expense-form"><div className="expense-form-grid">
         <label>المبلغ (د.ع)<input autoFocus type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required /></label>
         <label>نوع المصروف<select value={category} onChange={e => setCategory(e.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select></label>
         <label className="expense-notes">صرفته على شنو؟ (الوصف)<input type="text" value={notes} onChange={e => setNotes(e.target.value)} required placeholder="مثال: شراء حليب أو مواد تنظيف..." /></label>
         <label>الموظف<select value={person} onChange={e => setPerson(e.target.value)}>{people.map(value => <option key={value}>{value}</option>)}</select></label>
-      </div><div className="expense-form-actions"><button className="primary-action" type="submit">{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
+      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && operationalDay?.status !== 'open'}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
-        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td>{formatDateTime(expense.date)}</td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className="sync-state disabled">محلي فقط</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
+        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className="sync-state disabled">محلي فقط</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
       </tbody></table></div>
       {deleting && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog expense-delete-dialog"><h2>تأكيد حذف المصروف</h2><p>سيتم حذف هذا السجل فقط:</p><dl><div><dt>المبلغ</dt><dd>{format(deleting.amount)}</dd></div><div><dt>النوع</dt><dd>{deleting.category}</dd></div><div><dt>الوصف</dt><dd>{deleting.notes || '—'}</dd></div><div><dt>التاريخ</dt><dd>{formatDateTime(deleting.date)}</dd></div></dl><div className="dialog-actions"><button className="secondary-action" onClick={() => setDeleting(null)}>إلغاء</button><button className="delete-expense" onClick={confirmDelete}>تأكيد الحذف</button></div></div></div>}
     </div>
