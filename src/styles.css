@@ -503,6 +503,15 @@ input, textarea, select { cursor: text; }
   display: flex;
   gap: 8px;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+.quick-orders > button {
+  flex: 0 0 auto;
 }
 .quick-orders > button:not(.quick-add) {
   display: flex;
