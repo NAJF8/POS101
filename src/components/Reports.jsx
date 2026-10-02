@@ -129,8 +129,16 @@ const thermalMaterialsStyles = `
 export default function Reports({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null }) {
   const [reportType, setReportType] = useState(null)
   
-  const [reportDate, setReportDate] = useState(getDefaultReportDate)
-  const [reportScope, setReportScope] = useState('calendar')
+  const [reportDate, setReportDate] = useState(() => operationalDay?.businessDate || getDefaultReportDate())
+  const [reportScope, setReportScope] = useState(() => operationalDay?.id ? 'operational' : 'calendar')
+
+  // When an open operational day is available, reports open on that business
+  // day by default—even if the device calendar has moved past midnight.
+  useEffect(() => {
+    if (!operationalDay?.id) return
+    setReportScope('operational')
+    if (operationalDay.businessDate) setReportDate(operationalDay.businessDate)
+  }, [operationalDay?.id, operationalDay?.businessDate])
 
   // Keep reporting local-only until the ACC/Firebase source is explicitly
   // reconciled. A report must never silently mix another cashier's data with
@@ -225,7 +233,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
         <div className="date-filter">
           <h3>اختيار التاريخ</h3>
           <label>التاريخ<input aria-label="التاريخ" type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} /></label>
-          <label>نطاق التقرير<select aria-label="نطاق التقرير" value={reportScope} onChange={e => setReportScope(e.target.value)}><option value="calendar">التاريخ الميلادي</option><option value="operational" disabled={!operationalDay?.id}>اليوم التشغيلي الحالي</option></select></label>
+          <label>نطاق التقرير<select aria-label="نطاق التقرير" value={reportScope} onChange={e => { const next = e.target.value; setReportScope(next); if (next === 'operational' && operationalDay?.businessDate) setReportDate(operationalDay.businessDate) }}><option value="calendar">التاريخ الميلادي</option><option value="operational" disabled={!operationalDay?.id}>اليوم التشغيلي الحالي</option></select></label>
           {reportScope === 'operational' && operationalDay?.id && <small>يعرض كل مبيعات اليوم التشغيلي {operationalDay.businessDate} حتى الآن.</small>}
         </div>
       </div>
