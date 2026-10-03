@@ -64,7 +64,7 @@ export const normalizeExpense = (expense, options = {}) => {
   return {
     ...raw,
     id: String(firstValue(raw.id, raw.expenseId) || ''),
-    amount: Number.isFinite(Number(raw.amount)) ? Number(raw.amount) : 0,
+    amount: Number.isFinite(Number(normalizeDigits(raw.amount))) ? Number(normalizeDigits(raw.amount)) : 0,
     description: firstValue(raw.description, raw.notes, '') || '',
     notes: firstValue(raw.notes, raw.description, '') || '',
     createdAt: timestamp,
@@ -73,6 +73,20 @@ export const normalizeExpense = (expense, options = {}) => {
     shift: firstValue(raw.shift, raw.shiftName, raw.shift_id, raw.shiftId, ''),
     shiftId: firstValue(raw.shiftId, raw.shift_id, ''),
   }
+}
+
+// Stable comparison key used only for the one-time local-cache migration.
+// It deliberately excludes the random local id so the same legacy row cannot
+// be uploaded twice when migration is retried on another device.
+export const expenseFingerprint = expense => {
+  const normalized = normalizeExpense(expense)
+  return [
+    normalized.amount,
+    normalized.description.trim(),
+    normalized.businessDate,
+    normalized.createdAt,
+    String(normalized.cashierId || ''),
+  ].join('|')
 }
 
 export const getExpensesForBusinessDate = (expenses = [], dateKey, options = {}) => {

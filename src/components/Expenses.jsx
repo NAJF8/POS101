@@ -1,25 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
+import { deleteCentralExpense, readLocalExpenses, saveCentralExpense, subscribeCentralExpenses } from '../services/posCentralSync.js'
 
-const STORAGE_KEY = 'pos101.expenses'
 const format = formatMoney
-const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
-const normalize = rows => rows.map(row => row?.id ? row : { ...row, id: makeId() })
 const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
 
 export function Expenses({ onNavigate, onBack, session, operationalDay = null }) {
-  const [expenses, setExpenses] = useState(() => {
-    const original = read(STORAGE_KEY, [])
-    const rows = normalize(original)
-    if (rows.some((row, index) => row.id !== original[index]?.id)) localStorage.setItem(STORAGE_KEY, JSON.stringify(rows))
-    return rows
-  })
+  const [expenses, setExpenses] = useState(() => readLocalExpenses())
   useEffect(() => {
-    const refresh = () => setExpenses(read(STORAGE_KEY, []))
-    window.addEventListener('pos101-sync-updated', refresh)
-    return () => window.removeEventListener('pos101-sync-updated', refresh)
+    const refresh = () => setExpenses(readLocalExpenses())
+    window.addEventListener('pos101-expenses-updated', refresh)
+    const stop = subscribeCentralExpenses(refresh)
+    return () => { window.removeEventListener('pos101-expenses-updated', refresh); stop?.() }
   }, [])
   const [editingId, setEditingId] = useState(null)
   const [deleting, setDeleting] = useState(null)
@@ -29,18 +23,16 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
   const [notes, setNotes] = useState('')
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
-  const saveRows = rows => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows))
-    setExpenses(rows)
-    window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
-  }
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
     if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !notes.trim()) return alert('يرجى إدخال مبلغ ووصف صحيحين')
     if (editingId) {
-      saveRows(expenses.map(row => row.id === editingId ? { ...row, amount: numericAmount, category, person, notes: notes.trim() } : row))
-      resetForm(); alert('تم تعديل المصروف بنجاح'); return
+      try {
+        await saveCentralExpense(expenses.find(row => row.id === editingId) ? { ...expenses.find(row => row.id === editingId), amount: numericAmount, category, person, notes: notes.trim(), description: notes.trim() } : null, { existing: true })
+        resetForm(); alert('تم تعديل المصروف بنجاح')
+      } catch (error) { alert(error?.message || 'تعذر مزامنة تعديل المصروف.') }
+      return
     }
     if (operationalDay?.status !== 'open' || !operationalDay?.id || !operationalDay?.businessDate) {
       alert('يجب بدء يوم تشغيلي قبل تسجيل مصروف جديد حتى يُحسب المصروف ضمن نفس فترة العمل.')
@@ -54,11 +46,16 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       operationalDayId: operationalDay.id,
       businessDate: operationalDay.businessDate,
     }
-    saveRows([...expenses, row])
-    resetForm()
+    try {
+      await saveCentralExpense(row)
+      resetForm()
+    } catch (error) { alert(error?.message || 'تعذر مزامنة المصروف.') }
   }
   const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || 'علي'); setNotes(expense.notes || ''); window.scrollTo({ top: 0, behavior: 'smooth' }) }
-  const confirmDelete = () => { if (!deleting) return; saveRows(expenses.filter(row => row.id !== deleting.id)); setDeleting(null) }
+  const confirmDelete = async () => {
+    if (!deleting) return
+    try { await deleteCentralExpense(deleting); setDeleting(null) } catch (error) { alert(error?.message || 'تعذر مزامنة حذف المصروف.') }
+  }
   const total = useMemo(() => expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0), [expenses])
   const goBack = onNavigate || onBack
 
@@ -79,7 +76,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && operationalDay?.status !== 'open'}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
-        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className="sync-state disabled">محلي فقط</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
+        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className="sync-state">Firebase مباشر</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
       </tbody></table></div>
       {deleting && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog expense-delete-dialog"><h2>تأكيد حذف المصروف</h2><p>سيتم حذف هذا السجل فقط:</p><dl><div><dt>المبلغ</dt><dd>{format(deleting.amount)}</dd></div><div><dt>النوع</dt><dd>{deleting.category}</dd></div><div><dt>الوصف</dt><dd>{deleting.notes || '—'}</dd></div><div><dt>التاريخ</dt><dd>{formatDateTime(deleting.date)}</dd></div></dl><div className="dialog-actions"><button className="secondary-action" onClick={() => setDeleting(null)}>إلغاء</button><button className="delete-expense" onClick={confirmDelete}>تأكيد الحذف</button></div></div></div>}
     </div>

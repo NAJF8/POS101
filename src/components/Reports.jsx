@@ -7,8 +7,8 @@ import { readLocalSales, numberValue, filterReportSales } from '../services/repo
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { filterExpensesByOperationalDay, filterSalesByOperationalDay } from '../services/operationalDayReport.js'
 import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
+import { readLocalExpenses } from '../services/posCentralSync.js'
 const format = formatMoney
-const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
 // intentionally narrower than the Windows driver's confirmed 72.1mm limit.
 const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
@@ -159,9 +159,9 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     }
   }, [])
   useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
-  const [expenses, setExpenses] = useState(() => read('pos101.expenses', []).map(normalizeExpense))
+  const [expenses, setExpenses] = useState(() => readLocalExpenses().map(normalizeExpense))
   useEffect(() => {
-    const refresh = () => setExpenses(read('pos101.expenses', []).map(normalizeExpense))
+    const refresh = () => setExpenses(readLocalExpenses().map(normalizeExpense))
     window.addEventListener('pos101-expenses-updated', refresh)
     return () => window.removeEventListener('pos101-expenses-updated', refresh)
   }, [])

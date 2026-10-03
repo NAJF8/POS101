@@ -35,5 +35,12 @@
         ".validate": "newData.hasChildren(['id', 'operationalDayId', 'businessDate', 'startedAt', 'startedBy', 'status']) && newData.child('id').val() === $dayId && newData.child('operationalDayId').val() === $dayId && newData.child('businessDate').isString() && newData.child('startedAt').isNumber() && (newData.child('status').val() === 'open' || newData.child('status').val() === 'closed')"
       }
     }
+    ,"pos101_expenses": {
+      ".read": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73')",
+      ".write": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73')",
+      "$expenseId": {
+        ".validate": "newData.hasChildren(['id', 'amount', 'businessDate', 'createdAt', 'updatedAt', 'createdBy', 'deviceId']) && newData.child('id').val() === $expenseId && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('businessDate').isString() && newData.child('businessDate').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.child('createdAt').isNumber() && newData.child('updatedAt').isNumber() && newData.child('createdBy').isString() && newData.child('deviceId').isString()"
+      }
+    }
   }
 }

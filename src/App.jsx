@@ -13,7 +13,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, runAdminCentralRefresh, runCashierCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -93,6 +93,7 @@ export default function App() {
   const [operationalDayError, setOperationalDayError] = useState('')
   const [ledgerVersion, setLedgerVersion] = useState(0)
   const operationalDayListener = useRef(null)
+  const expenseListener = useRef(null)
   const saleInFlight = useRef(false)
 
   const downloadSalesBackup = useCallback(() => {
@@ -182,6 +183,8 @@ export default function App() {
       centralListener.current = null
       operationalDayListener.current?.()
       operationalDayListener.current = null
+      expenseListener.current?.()
+      expenseListener.current = null
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
@@ -195,6 +198,17 @@ export default function App() {
       }
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
+        // Migrate the device cache before attaching the listener. Otherwise an
+        // initial empty RTDB snapshot could overwrite legacy local expenses.
+        void runExpenseCentralSync({ initial: true }).then(() => {
+          if (centralAuth()?.currentUser?.uid !== user.uid) return
+          expenseListener.current?.()
+          expenseListener.current = subscribeCentralExpenses(() => setLedgerVersion(value => value + 1))
+        }).catch(() => {
+          if (centralAuth()?.currentUser?.uid !== user.uid) return
+          expenseListener.current?.()
+          expenseListener.current = subscribeCentralExpenses(() => setLedgerVersion(value => value + 1))
+        })
       }
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         productListener.current = subscribeCentralProducts(setCentralProducts)
@@ -218,13 +232,14 @@ export default function App() {
       centralListener.current?.()
       productListener.current?.()
       operationalDayListener.current?.()
+      expenseListener.current?.()
       setAdminCentralSales([])
       setProductAuthUser(null)
     }
   }, [])
 
   const operationalDaySummary = useMemo(() => {
-    const expenses = read('pos101.expenses', [])
+    const expenses = readLocalExpenses()
     return calculateOperationalDaySummary(readLocalSales(), expenses, operationalDay?.id)
   }, [operationalDay, ledgerVersion])
 

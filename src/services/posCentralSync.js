@@ -18,6 +18,7 @@ import {
   runTransaction,
   set,
 } from 'firebase/database'
+import { expenseFingerprint, normalizeExpense } from './expenseReporting.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -61,7 +62,11 @@ const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const productsRef = () => ref(db, 'pos101_products')
 const operationalDaysRef = () => ref(db, 'pos101_operational_days')
+const expensesRef = () => ref(db, 'pos101_expenses')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
+const expenseIdOf = expense => String(expense?.id || expense?.expenseId || '').trim()
+const EXPENSES_KEY = 'pos101.expenses'
+const DEVICE_ID_KEY = 'pos101.deviceId'
 const readSales = () => {
   try {
     const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
@@ -70,6 +75,47 @@ const readSales = () => {
 }
 const writeSales = sales => localStorage.setItem(SALES_KEY, JSON.stringify(sales))
 const dispatchUpdated = () => window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
+const dispatchExpensesUpdated = () => window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
+
+const readCachedExpenses = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem(EXPENSES_KEY) || '[]')
+    return Array.isArray(value) ? value.map(normalizeExpense) : []
+  } catch { return [] }
+}
+const writeLocalExpenses = expenses => localStorage.setItem(EXPENSES_KEY, JSON.stringify(expenses))
+const getDeviceId = () => {
+  const existing = localStorage.getItem(DEVICE_ID_KEY)
+  if (existing) return existing
+  const value = `pos101-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+  localStorage.setItem(DEVICE_ID_KEY, value)
+  return value
+}
+const validExpenseId = id => Boolean(id && !/[.#$\[\]/]/.test(id))
+const expenseValues = snapshot => snapshot.exists()
+  ? Object.entries(snapshot.val() || {}).map(([id, value]) => normalizeExpense({ ...value, id: expenseIdOf(value) || id })).filter(expense => expenseIdOf(expense))
+  : []
+const centralExpensePayload = (expense, user, { preserveCreatedAt = false } = {}) => {
+  const normalized = normalizeExpense(expense)
+  const now = Date.now()
+  const createdAt = preserveCreatedAt && normalized.createdAt ? normalized.createdAt : (normalized.createdAt || now)
+  const id = expenseIdOf(normalized)
+  return {
+    ...normalized,
+    id,
+    amount: normalized.amount,
+    description: normalized.description,
+    notes: normalized.notes,
+    cashierId: normalized.cashierId || user?.uid || '',
+    cashierName: normalized.cashierName || normalized.shift || user?.displayName || user?.email || '',
+    businessDate: normalized.businessDate,
+    operationalDayId: normalized.operationalDayId || '',
+    createdAt,
+    updatedAt: now,
+    createdBy: normalized.createdBy || user?.uid || '',
+    deviceId: normalized.deviceId || getDeviceId(),
+  }
+}
 
 const normalizeRemoteSale = (value, key) => {
   const saleId = saleIdOf(value) || key
@@ -117,6 +163,19 @@ const requireOperationalDayRole = async () => {
   if (!user) throw Object.assign(new Error('تسجيل دخول POS مطلوب لإدارة اليوم التشغيلي.'), { code: 'AUTH_REQUIRED' })
   if (!isOperationalDayUser(user)) {
     throw Object.assign(new Error('هذا الحساب غير مخول لإدارة اليوم التشغيلي.'), { code: 'OPERATIONAL_DAY_PERMISSION_DENIED' })
+  }
+  return user
+}
+
+const requireExpenseRole = async (write = false) => {
+  if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  await authReady
+  const user = auth?.currentUser
+  if (!user || !isOperationalDayUser(user)) {
+    throw Object.assign(new Error('تسجيل دخول POS مطلوب لمزامنة المصاريف.'), { code: 'AUTH_REQUIRED' })
+  }
+  if (write && !isCentralCashierUser(user) && !isCentralAdminUser(user)) {
+    throw Object.assign(new Error('لا تملك صلاحية تعديل المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
   }
   return user
 }
@@ -312,6 +371,72 @@ export const subscribeCentralSalesReadOnly = callback => {
 
 export const readCentralSalesReadOnly = async () => {
   return (await readAndMergeAdminSales()).centralSales
+}
+
+export const readLocalExpenses = () => readCachedExpenses()
+
+const cacheCentralExpenses = expenses => {
+  writeLocalExpenses(expenses)
+  dispatchExpensesUpdated()
+  return expenses
+}
+
+export const subscribeCentralExpenses = callback => {
+  if (!configured || !db || !isOperationalDayUser(auth?.currentUser)) return () => {}
+  return onValue(expensesRef(), snapshot => {
+    const expenses = expenseValues(snapshot)
+    cacheCentralExpenses(expenses)
+    callback?.(expenses)
+  }, () => callback?.(readCachedExpenses()))
+}
+
+export const runExpenseCentralSync = async ({ initial = false } = {}) => {
+  const user = await requireExpenseRole(true)
+  const localExpenses = readCachedExpenses()
+  const snapshot = await get(expensesRef())
+  const centralExpenses = expenseValues(snapshot)
+  const fingerprints = new Set(centralExpenses.map(expenseFingerprint))
+  let uploaded = 0
+  let skipped = 0
+  for (const localExpense of localExpenses) {
+    const normalized = normalizeExpense(localExpense)
+    if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) { skipped += 1; continue }
+    if (fingerprints.has(expenseFingerprint(normalized))) { skipped += 1; continue }
+    const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
+    const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: true })
+    await set(ref(db, `pos101_expenses/${id}`), payload)
+    fingerprints.add(expenseFingerprint(payload))
+    centralExpenses.push(normalizeExpense(payload))
+    uploaded += 1
+  }
+  cacheCentralExpenses(centralExpenses)
+  return { uploaded, skipped, centralCount: centralExpenses.length, initial: Boolean(initial) }
+}
+
+export const saveCentralExpense = async (expense, { existing = false } = {}) => {
+  const user = await requireExpenseRole(true)
+  const normalized = normalizeExpense(expense)
+  const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
+  if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) {
+    throw Object.assign(new Error('المبلغ والتاريخ التشغيلي ووقت الإنشاء مطلوبة للمصروف.'), { code: 'EXPENSE_REQUIRED_FIELDS' })
+  }
+  const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: existing })
+  await set(ref(db, `pos101_expenses/${id}`), payload)
+  const readBack = await get(ref(db, `pos101_expenses/${id}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف.')
+  const saved = normalizeExpense({ ...readBack.val(), id })
+  cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), saved])
+  return saved
+}
+
+export const deleteCentralExpense = async expense => {
+  const user = await requireExpenseRole(true)
+  const id = expenseIdOf(expense)
+  if (!validExpenseId(id)) throw new Error('معرف المصروف غير صالح.')
+  // RTDB delete is represented by a null set, keeping the operation atomic.
+  await set(ref(db, `pos101_expenses/${id}`), null)
+  cacheCentralExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
+  return { id, deletedBy: user.uid }
 }
 
 // Product management is deliberately isolated from pos101_sales. Existing
