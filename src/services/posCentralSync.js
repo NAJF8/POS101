@@ -37,20 +37,41 @@ const config = {
 }
 
 const configured = Boolean(config.apiKey && config.authDomain && config.databaseURL && config.projectId)
+const authDebugEnabled = () => typeof localStorage !== 'undefined' && localStorage.getItem('pos101.debugAuth') === 'true'
+const authDebug = (event, details = {}) => {
+  if (authDebugEnabled()) console.info(`[${event}]`, details)
+}
 let app = null
 let auth = null
 let db = null
 let authReady = Promise.resolve()
 
 if (configured) {
+  authDebug('POS_AUTH_INIT')
   app = getApps().find(item => item.name === 'pos101-central') || initializeApp(config, 'pos101-central')
   auth = getAuth(app)
   db = getDatabase(app)
-  authReady = setPersistence(auth, browserLocalPersistence).catch(() => {})
   if (useEmulator) {
     connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true })
     connectDatabaseEmulator(db, emulatorHost, 9000)
   }
+  const authStateReady = new Promise(resolve => {
+    let stop = () => {}
+    stop = onAuthStateChanged(auth, user => {
+      stop()
+      authDebug(user ? 'POS_AUTH_RESTORED' : 'POS_AUTH_REQUIRED', {
+        currentUserExists: Boolean(user),
+        provider: user?.providerData?.[0]?.providerId || '',
+      })
+      resolve(user)
+    }, () => resolve(null))
+  })
+  // Persistence and Firebase's first auth-state callback are one shared gate
+  // for sales, expenses, products, and operational-day access.
+  authReady = Promise.all([
+    setPersistence(auth, browserLocalPersistence).catch(() => {}),
+    authStateReady,
+  ]).then(([, user]) => user)
 }
 
 const SALES_KEY = 'pos101.sales'
@@ -114,6 +135,7 @@ const centralExpensePayload = (expense, user, { preserveCreatedAt = false } = {}
     updatedAt: now,
     createdBy: normalized.createdBy || user?.uid || '',
     deviceId: normalized.deviceId || getDeviceId(),
+    syncStatus: 'synced',
   }
 }
 
@@ -148,19 +170,16 @@ const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(s
 
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
-  await authReady
-  if (!auth?.currentUser) throw Object.assign(new Error('تسجيل دخول Firebase مطلوب للمزامنة.'), { code: 'AUTH_REQUIRED' })
-  if (getCentralRole(auth.currentUser) !== expectedRole) {
+  const user = await ensurePosFirebaseSession()
+  if (getCentralRole(user) !== expectedRole) {
     throw Object.assign(new Error(expectedRole === 'cashier-sync' ? 'هذا الحساب لا يملك صلاحية رفع المبيعات.' : 'تسجيل دخول الإدارة مطلوب للقراءة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
   }
-  return auth.currentUser
+  return user
 }
 
 const requireOperationalDayRole = async () => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
-  await authReady
-  const user = auth?.currentUser
-  if (!user) throw Object.assign(new Error('تسجيل دخول POS مطلوب لإدارة اليوم التشغيلي.'), { code: 'AUTH_REQUIRED' })
+  const user = await ensurePosFirebaseSession('تسجيل دخول POS مطلوب لإدارة اليوم التشغيلي.')
   if (!isOperationalDayUser(user)) {
     throw Object.assign(new Error('هذا الحساب غير مخول لإدارة اليوم التشغيلي.'), { code: 'OPERATIONAL_DAY_PERMISSION_DENIED' })
   }
@@ -169,11 +188,8 @@ const requireOperationalDayRole = async () => {
 
 const requireExpenseRole = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
-  await authReady
-  const user = auth?.currentUser
-  if (!user || !isOperationalDayUser(user)) {
-    throw Object.assign(new Error('تسجيل دخول POS مطلوب لمزامنة المصاريف.'), { code: 'AUTH_REQUIRED' })
-  }
+  const user = await ensurePosFirebaseSession('تسجيل دخول POS مطلوب لمزامنة المصاريف.')
+  if (!isOperationalDayUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
   if (write && !isCentralCashierUser(user) && !isCentralAdminUser(user)) {
     throw Object.assign(new Error('لا تملك صلاحية تعديل المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
   }
@@ -183,6 +199,16 @@ const requireExpenseRole = async (write = false) => {
 export const isCentralConfigured = () => configured
 export const isCentralEmulator = () => useEmulator
 export const centralAuth = () => auth
+export const ensurePosFirebaseSession = async (message = 'تسجيل دخول Firebase مطلوب للمزامنة.') => {
+  if (!configured || !auth) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  await authReady
+  const user = auth.currentUser
+  if (!user) {
+    authDebug('POS_AUTH_REQUIRED')
+    throw Object.assign(new Error(message), { code: 'AUTH_REQUIRED' })
+  }
+  return user
+}
 export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, callback) : () => {}
 export const getCentralRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
 export const getCentralPermissions = user => {
@@ -385,6 +411,7 @@ export const subscribeCentralExpenses = callback => {
   if (!configured || !db || !isOperationalDayUser(auth?.currentUser)) return () => {}
   return onValue(expensesRef(), snapshot => {
     const expenses = expenseValues(snapshot)
+    authDebug('POS_EXPENSE_REMOTE_UPDATE', { count: expenses.length })
     cacheCentralExpenses(expenses)
     callback?.(expenses)
   }, () => callback?.(readCachedExpenses()))
@@ -393,6 +420,7 @@ export const subscribeCentralExpenses = callback => {
 export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   const user = await requireExpenseRole(true)
   const localExpenses = readCachedExpenses()
+  authDebug('POS_EXPENSE_MIGRATION_START', { localCount: localExpenses.length, initial: Boolean(initial) })
   const snapshot = await get(expensesRef())
   const centralExpenses = expenseValues(snapshot)
   const fingerprints = new Set(centralExpenses.map(expenseFingerprint))
@@ -410,6 +438,7 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
     uploaded += 1
   }
   cacheCentralExpenses(centralExpenses)
+  authDebug('POS_EXPENSE_MIGRATION_DONE', { uploaded, skipped, centralCount: centralExpenses.length, initial: Boolean(initial) })
   return { uploaded, skipped, centralCount: centralExpenses.length, initial: Boolean(initial) }
 }
 
@@ -426,7 +455,17 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف.')
   const saved = normalizeExpense({ ...readBack.val(), id })
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), saved])
+  authDebug('POS_EXPENSE_WRITE_SUCCESS', { existing: Boolean(existing) })
   return saved
+}
+
+export const saveLocalExpensePending = expense => {
+  const normalized = normalizeExpense(expense)
+  const id = expenseIdOf(normalized) || `expense-${crypto.randomUUID()}`
+  const pending = { ...normalized, id, syncStatus: 'pending' }
+  cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), pending])
+  authDebug('POS_EXPENSE_WRITE_PENDING')
+  return pending
 }
 
 export const deleteCentralExpense = async expense => {
