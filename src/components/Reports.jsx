@@ -5,7 +5,7 @@ import { logoDataUri } from '../assets/logo'
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { readLocalSales, numberValue, filterReportSales } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
-import { filterExpensesByOperationalDay, filterSalesByOperationalDay } from '../services/operationalDayReport.js'
+import { filterSalesByOperationalDay } from '../services/operationalDayReport.js'
 import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 const format = formatMoney
@@ -161,9 +161,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
   const [expenseOperationalDayDates, setExpenseOperationalDayDates] = useState({})
   const normalizeReportExpenses = (rows, operationalDayDates = expenseOperationalDayDates) => (Array.isArray(rows) ? rows : []).map(expense => {
-    const operationalDayId = String(expense?.operationalDayId || expense?.operational_day_id || expense?.shiftId || expense?.shift_id || '').trim()
-    const mappedBusinessDate = operationalDayDates?.[operationalDayId]
-    return normalizeExpense(mappedBusinessDate ? { ...expense, businessDate: mappedBusinessDate } : expense, { operationalDayDates })
+    return normalizeExpense(expense, { operationalDayDates })
   })
   const [expenses, setExpenses] = useState(() => readLocalExpenses().map(normalizeExpense))
   useEffect(() => {
@@ -204,9 +202,8 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     : filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs, effectiveReportScope, operationalDay])
 
   const filteredExpenses = useMemo(() => {
-    if (effectiveReportScope === 'operational' && operationalDay?.id) return filterExpensesByOperationalDay(expenses, operationalDay.id)
     return getExpensesForBusinessDate(expenses, effectiveReportDate, { operationalDayDates: expenseOperationalDayDates })
-  }, [expenses, effectiveReportDate, effectiveReportScope, operationalDay, expenseOperationalDayDates, startMs, endMs])
+  }, [expenses, effectiveReportDate, expenseOperationalDayDates])
 
   const printReport = (format) => {
     const paper = document.querySelector('.report-paper')

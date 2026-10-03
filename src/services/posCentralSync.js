@@ -18,7 +18,7 @@ import {
   runTransaction,
   set,
 } from 'firebase/database'
-import { areExpenseDuplicates, mergeExpensesConservatively, normalizeExpense } from './expenseReporting.js'
+import { areExpenseDuplicates, mergeExpensesConservatively, normalizeDateKey, normalizeExpense } from './expenseReporting.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -512,7 +512,11 @@ export const readCentralExpensesForReports = async () => {
   const normalizeForReport = value => {
     const operationalDayId = String(value?.operationalDayId || value?.operational_day_id || value?.shiftId || value?.shift_id || '').trim()
     const mappedBusinessDate = operationalDayDates[operationalDayId]
-    return normalizeExpense(mappedBusinessDate ? { ...value, businessDate: mappedBusinessDate } : value, { operationalDayDates })
+    const explicitBusinessDate = normalizeDateKey(value?.businessDate || value?.business_date || value?.shiftBusinessDate)
+    const valueWithFallbackDate = explicitBusinessDate
+      ? { ...value, businessDate: explicitBusinessDate }
+      : (mappedBusinessDate ? { ...value, businessDate: mappedBusinessDate } : value)
+    return normalizeExpense(valueWithFallbackDate, { operationalDayDates })
   }
   const centralExpenses = expensesSnapshot.exists()
     ? Object.entries(expensesSnapshot.val() || {})
