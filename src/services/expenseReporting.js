@@ -89,7 +89,10 @@ export const expenseFingerprint = expense => {
   ].join('|')
 }
 
-const expensePerson = expense => String(firstValue(expense?.cashierId, expense?.person, expense?.cashierName, expense?.cashierNameSnapshot, '') || '').trim()
+const expensePerson = expense => {
+  const value = String(firstValue(expense?.cashierId, expense?.person, expense?.cashierName, expense?.cashierNameSnapshot, '') || '').trim()
+  return ['غير محدد', '—', '-'].includes(value) ? '' : value
+}
 
 export const areExpenseDuplicates = (left, right, toleranceMs = 2 * 60 * 1000) => {
   const a = normalizeExpense(left)
@@ -100,7 +103,7 @@ export const areExpenseDuplicates = (left, right, toleranceMs = 2 * 60 * 1000) =
   if (!a.createdAt || !b.createdAt || Math.abs(a.createdAt - b.createdAt) > toleranceMs) return false
   const personA = expensePerson(a)
   const personB = expensePerson(b)
-  return Boolean(personA && personB && personA === personB)
+  return (!personA && !personB) || (Boolean(personA && personB) && personA === personB)
 }
 
 export const mergeExpensesConservatively = (localExpenses = [], remoteExpenses = []) => {

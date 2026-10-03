@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
 import { deleteCentralExpense, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
-import { recoverExpensesFromKnownBackups } from '../services/fullRecoveryController.js'
+import { createExpenseRecoveryBackup, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -26,6 +26,10 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [recovering, setRecovering] = useState(false)
+  const [recoveryScan, setRecoveryScan] = useState(null)
+  const [selectedRecoveryIds, setSelectedRecoveryIds] = useState([])
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualText, setManualText] = useState('')
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
   const syncNow = async () => {
@@ -82,6 +86,54 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       setRecovering(false)
     }
   }
+  const scanOldExpenses = () => {
+    try {
+      const result = scanAllExpenseBackups()
+      setRecoveryScan(result)
+      setSelectedRecoveryIds(result.candidates.map(row => row.id))
+      setSyncMessage(`تم فحص ${result.scannedKeys} مفتاحًا محليًا واكتشاف ${result.newCount} سجل قابل للاسترجاع.`)
+    } catch (error) { setSyncMessage(error?.message || 'تعذر فحص النسخ القديمة.') }
+  }
+  const recoverSelected = async () => {
+    const selected = (recoveryScan?.candidates || []).filter(row => selectedRecoveryIds.includes(row.id))
+    if (!selected.length) return setSyncMessage('اختر سجلًا واحدًا على الأقل من Preview.')
+    setRecovering(true)
+    try {
+      createExpenseRecoveryBackup(selected)
+      selected.forEach(row => saveLocalExpensePending(row))
+      setExpenses(readLocalExpenses())
+      let uploaded = 0; let pending = selected.length
+      try {
+        const result = await runExpenseCentralSync({ initial: true })
+        uploaded = result?.uploaded || 0
+        pending = readLocalExpenses().filter(row => row.syncStatus === 'pending').length
+      } catch (error) {
+        if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) throw error
+      }
+      setSyncMessage(`تمت معالجة الاسترجاع: مستعاد ${selected.length}، مرفوع ${uploaded}، Pending ${pending}، متكرر متخطى ${recoveryScan.duplicateCount}.`)
+      setRecoveryScan(null); setSelectedRecoveryIds([])
+    } catch (error) { setSyncMessage(error?.message || 'تعذر استرجاع المحدد.') }
+    finally { setRecovering(false) }
+  }
+  const manualPreview = useMemo(() => parseManualExpenseBulk(manualText), [manualText])
+  const saveManualBulk = async () => {
+    const valid = manualPreview.filter(row => row.valid).map(row => row.expense)
+    if (!valid.length) return setSyncMessage('لا توجد أسطر صحيحة للحفظ.')
+    setRecovering(true)
+    try {
+      createExpenseRecoveryBackup(valid)
+      valid.forEach(row => saveLocalExpensePending(row))
+      setExpenses(readLocalExpenses())
+      let uploaded = 0
+      try { uploaded = (await runExpenseCentralSync({ initial: true }))?.uploaded || 0 } catch (error) {
+        if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) throw error
+      }
+      const pending = readLocalExpenses().filter(row => row.syncStatus === 'pending').length
+      setSyncMessage(`تم حفظ ${valid.length} مصروف يدوي، مرفوع ${uploaded}، Pending ${pending}.`)
+      setManualText(''); setManualOpen(false)
+    } catch (error) { setSyncMessage(error?.message || 'تعذر حفظ الاسترجاع اليدوي.') }
+    finally { setRecovering(false) }
+  }
 
   const submit = async e => {
     e.preventDefault()
@@ -131,6 +183,14 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
     try { await deleteCentralExpense(deleting); setDeleting(null) } catch (error) { alert(error?.message || 'تعذر مزامنة حذف المصروف.') }
   }
   const total = useMemo(() => expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0), [expenses])
+  const allExpenseDiagnostic = useMemo(() => {
+    const grouped = expenses.reduce((result, row) => {
+      const key = row.businessDate || 'غير محدد'
+      result[key] = (result[key] || 0) + Number(row.amount || 0)
+      return result
+    }, {})
+    return { pending: expenses.filter(row => row.syncStatus === 'pending').length, grouped }
+  }, [expenses])
   const goBack = onNavigate || onBack
 
   return (
@@ -139,7 +199,8 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
         <h2>المصاريف</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="outline-btn" type="button" onClick={syncNow} disabled={syncing || recovering}>{syncing ? 'جاري المزامنة...' : 'مزامنة الآن'}</button>
-          <button className="outline-btn" type="button" onClick={recoverOldExpenses} disabled={syncing || recovering}>{recovering ? 'جاري الاسترجاع...' : 'استرجاع المصاريف القديمة'}</button>
+          <button className="outline-btn" type="button" onClick={scanOldExpenses} disabled={syncing || recovering}>فحص كل النسخ القديمة</button>
+          <button className="outline-btn" type="button" onClick={() => setManualOpen(true)} disabled={syncing || recovering}>استرجاع يدوي جماعي</button>
           <button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
         </div>
       </div>
@@ -157,10 +218,18 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
         <label>الموظف<select value={person} onChange={e => setPerson(e.target.value)}>{people.map(value => <option key={value}>{value}</option>)}</select></label>
       </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
+      <section className="report-card expense-diagnostic" aria-label="كل المصاريف"><h3>كل المصاريف</h3><p>تشخيص قراءة فقط: Firebase + المحلي + Pending بعد الدمج المحافظ.</p><div className="recovery-stats"><span>العدد: <b>{expenses.length}</b></span><span>الإجمالي: <b>{format(total)}</b></span><span>Pending: <b>{allExpenseDiagnostic.pending}</b></span></div><div className="diagnostic-groups">{Object.entries(allExpenseDiagnostic.grouped).sort(([a], [b]) => a.localeCompare(b)).map(([date, amount]) => <span key={date}>{date}: <b>{format(amount)}</b></span>)}</div></section>
+      {recoveryScan && <section className="report-card expense-recovery-center" aria-label="مركز استرجاع المصاريف">
+        <h3>مركز استرجاع المصاريف</h3>
+        <div className="recovery-stats"><span>المفاتيح المفحوصة: <b>{recoveryScan.scannedKeys}</b></span><span>الحالي: <b>{recoveryScan.currentCount}</b></span><span>المكتشف: <b>{recoveryScan.candidatesCount}</b></span><span>الجديد: <b>{recoveryScan.newCount}</b></span><span>المتكرر: <b>{recoveryScan.duplicateCount}</b></span><span>بدون تاريخ: <b>{recoveryScan.withoutDateCount}</b></span><span>الإجمالي: <b>{format(recoveryScan.recoverableTotal)}</b></span></div>
+        <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th><input type="checkbox" checked={selectedRecoveryIds.length === recoveryScan.candidates.length && recoveryScan.candidates.length > 0} onChange={e => setSelectedRecoveryIds(e.target.checked ? recoveryScan.candidates.map(row => row.id) : [])} /></th><th>التاريخ</th><th>المبلغ</th><th>النوع</th><th>الموظف</th><th>الوصف</th><th>مصدر السجل</th><th>الحالة</th></tr></thead><tbody>{recoveryScan.candidates.length === 0 ? <tr><td colSpan="8" className="empty-cell">لم يتم العثور على سجل جديد قابل للاسترجاع</td></tr> : recoveryScan.candidates.map(row => <tr key={row.id}><td><input type="checkbox" checked={selectedRecoveryIds.includes(row.id)} onChange={e => setSelectedRecoveryIds(ids => e.target.checked ? [...ids, row.id] : ids.filter(id => id !== row.id))} /></td><td>{row.businessDate || 'غير محدد'}</td><td>{format(row.amount)}</td><td>{row.category}</td><td>{row.person}</td><td>{row.description || row.notes || '—'}</td><td dir="ltr">{row.recoverySource}</td><td>{row.recoveryStatus}</td></tr>)}</tbody></table></div>
+        <button className="primary-action" type="button" onClick={recoverSelected} disabled={recovering || !selectedRecoveryIds.length}>استرجاع المحدد إلى النظام</button>
+      </section>}
       <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
         {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'Firebase مباشر'}</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
       </tbody></table></div>
       {deleting && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog expense-delete-dialog"><h2>تأكيد حذف المصروف</h2><p>سيتم حذف هذا السجل فقط:</p><dl><div><dt>المبلغ</dt><dd>{format(deleting.amount)}</dd></div><div><dt>النوع</dt><dd>{deleting.category}</dd></div><div><dt>الوصف</dt><dd>{deleting.notes || '—'}</dd></div><div><dt>التاريخ</dt><dd>{formatDateTime(deleting.date)}</dd></div></dl><div className="dialog-actions"><button className="secondary-action" onClick={() => setDeleting(null)}>إلغاء</button><button className="delete-expense" onClick={confirmDelete}>تأكيد الحذف</button></div></div></div>}
+      {manualOpen && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog manual-recovery-dialog" dir="rtl"><h2>استرجاع يدوي جماعي</h2><p>ألصق: YYYY-MM-DD | المبلغ | النوع | الموظف | الوصف</p><textarea rows="8" value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'2026-10-02 | 5000 | مشتريات | علي | شراء حليب'} />{manualText && <div className="manual-preview"><b>Preview: {manualPreview.filter(row => row.valid).length} صحيح، {manualPreview.filter(row => !row.valid).length} غير صالح</b>{manualPreview.map(row => <div key={row.line} className={row.valid ? 'valid-row' : 'invalid-row'}>السطر {row.line}: {row.valid ? `${row.expense.businessDate} · ${format(row.expense.amount)} · ${row.expense.category}` : row.errors.join('، ')}</div>)}</div>}<div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setManualOpen(false)}>إلغاء</button><button className="primary-action" type="button" onClick={saveManualBulk} disabled={recovering || !manualPreview.some(row => row.valid)}>استرجاع وحفظ الكل</button></div></div></div>}
     </div>
   )
 }
