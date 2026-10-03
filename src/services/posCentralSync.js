@@ -88,6 +88,7 @@ const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const expenseIdOf = expense => String(expense?.id || expense?.expenseId || '').trim()
 const EXPENSES_KEY = 'pos101.expenses'
 const DEVICE_ID_KEY = 'pos101.deviceId'
+const OPERATIONAL_DAY_KEY = 'pos101.operationalDay'
 const readSales = () => {
   try {
     const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
@@ -244,6 +245,17 @@ export const signInAdminWithGoogle = async () => {
 export const signOutCentral = () => auth ? signOut(auth) : Promise.resolve()
 
 const operationalDayIdOf = day => String(day?.id || day?.operationalDayId || '').trim()
+export const readCachedOperationalDay = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem(OPERATIONAL_DAY_KEY) || 'null')
+    return value?.status === 'open' && value?.id && value?.businessDate ? value : null
+  } catch { return null }
+}
+const cacheOperationalDay = day => {
+  if (day?.status === 'open' && day?.id && day?.businessDate) localStorage.setItem(OPERATIONAL_DAY_KEY, JSON.stringify(day))
+  else localStorage.removeItem(OPERATIONAL_DAY_KEY)
+  return day
+}
 const localBusinessDate = timestamp => {
   const date = new Date(timestamp)
   const pad = value => String(value).padStart(2, '0')
@@ -258,15 +270,19 @@ const latestOpenOperationalDay = days => days
 
 export const subscribeOperationalDay = callback => {
   if (!configured || !db || !auth?.currentUser || !isOperationalDayUser(auth.currentUser)) {
-    callback(null)
+    callback(readCachedOperationalDay())
     return () => {}
   }
-  return onValue(operationalDaysRef(), snapshot => callback(latestOpenOperationalDay(operationalDayValues(snapshot))), () => callback(null))
+  return onValue(operationalDaysRef(), snapshot => {
+    const day = latestOpenOperationalDay(operationalDayValues(snapshot))
+    cacheOperationalDay(day)
+    callback(day)
+  }, () => callback(readCachedOperationalDay()))
 }
 
 export const readOpenOperationalDay = async () => {
   await requireOperationalDayRole()
-  return latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef())))
+  return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef()))))
 }
 
 export const startOperationalDay = async ({ startedBy = {} } = {}) => {
@@ -290,7 +306,7 @@ export const startOperationalDay = async ({ startedBy = {} } = {}) => {
       },
     }
   })
-  return latestOpenOperationalDay(operationalDayValues(transaction.snapshot))
+  return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(transaction.snapshot)))
 }
 
 export const endOperationalDay = async (day, { endedBy = {} } = {}) => {
@@ -302,7 +318,10 @@ export const endOperationalDay = async (day, { endedBy = {} } = {}) => {
     if (!current || current.status !== 'open') return current
     return { ...current, status: 'closed', endedAt: Date.now(), endedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' } }
   })
-  return transaction.snapshot.exists() ? { ...transaction.snapshot.val(), id } : null
+  const result = transaction.snapshot.exists() ? { ...transaction.snapshot.val(), id } : null
+  if (!result || result.status !== 'open') cacheOperationalDay(null)
+  else cacheOperationalDay(result)
+  return result
 }
 
 export const inspectLocalSales = () => {
