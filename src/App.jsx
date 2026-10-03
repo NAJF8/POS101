@@ -13,7 +13,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -88,7 +88,7 @@ export default function App() {
   const centralListener = useRef(null)
   const productListener = useRef(null)
   const [centralProducts, setCentralProducts] = useState([])
-  const [operationalDay, setOperationalDay] = useState(null)
+  const [operationalDay, setOperationalDay] = useState(() => readCachedOperationalDay())
   const [operationalDayLoading, setOperationalDayLoading] = useState(false)
   const [operationalDayError, setOperationalDayError] = useState('')
   const [ledgerVersion, setLedgerVersion] = useState(0)
