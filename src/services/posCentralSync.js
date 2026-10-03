@@ -499,7 +499,7 @@ export const readLocalExpenses = () => readCachedExpenses()
 // rows can be assigned to the business date of their original operational day.
 // This is read-only with respect to Firebase; the local cache is only merged,
 // never replaced, so pending/legacy rows remain protected.
-export const readCentralExpensesForReports = async () => {
+export const readCentralExpensesForReports = async ({ includeAllLocal = false } = {}) => {
   await requireExpenseRole(false)
   const [expensesSnapshot, daysSnapshot] = await Promise.all([
     get(expensesRef()),
@@ -523,11 +523,22 @@ export const readCentralExpensesForReports = async () => {
       .map(([id, value]) => normalizeForReport({ ...value, id: expenseIdOf(value) || id }))
       .filter(expense => expenseIdOf(expense))
     : []
-  const localExpenses = readCachedExpenses().map(normalizeForReport)
-  const merged = mergeExpensesConservatively(localExpenses, centralExpenses)
-  writeLocalExpenses(merged)
+  const localCacheExpenses = readCachedExpenses().map(normalizeForReport)
+  const pendingLocalExpenses = localCacheExpenses.filter(expense => expense.syncStatus === 'pending')
+  const reportLocalExpenses = includeAllLocal ? localCacheExpenses : pendingLocalExpenses
+  const merged = mergeExpensesConservatively(reportLocalExpenses, centralExpenses)
+  const protectedLocalCache = mergeExpensesConservatively(localCacheExpenses, centralExpenses)
+  writeLocalExpenses(protectedLocalCache)
   dispatchExpensesUpdated()
-  return { expenses: merged, centralCount: centralExpenses.length, operationalDayDates }
+  return {
+    expenses: merged,
+    centralExpenses,
+    centralCount: centralExpenses.length,
+    localCount: localCacheExpenses.length,
+    pendingCount: pendingLocalExpenses.length,
+    mergedCount: merged.length,
+    operationalDayDates,
+  }
 }
 
 const mergeCentralExpensesWithPendingLocal = centralExpenses => {
@@ -551,13 +562,29 @@ const cacheCentralExpenses = expenses => {
 }
 
 export const subscribeCentralExpenses = callback => {
-  if (!configured || !db || !isOperationalDayUser(auth?.currentUser)) return () => {}
-  return onValue(expensesRef(), snapshot => {
-    const expenses = expenseValues(snapshot)
-    authDebug('POS_EXPENSE_REMOTE_UPDATE', { count: expenses.length })
-    const merged = cacheCentralExpenses(expenses)
-    callback?.(merged)
-  }, () => callback?.(readCachedExpenses()))
+  let active = true
+  let stop = () => {}
+  const attach = async () => {
+    if (!configured || !db) return
+    await authReady
+    const user = auth?.currentUser
+    if (!active || !user || !await isAuthorizedPosSyncUser(user)) return
+    stop = onValue(expensesRef(), snapshot => {
+      const expenses = expenseValues(snapshot)
+      const localExpenses = readCachedExpenses()
+      authDebug('POS_EXPENSE_REMOTE_UPDATE', { count: expenses.length })
+      const merged = cacheCentralExpenses(expenses)
+      callback?.(merged, {
+        centralCount: expenses.length,
+        centralExpenses: expenses,
+        localCount: localExpenses.length,
+        pendingCount: localExpenses.filter(expense => expense.syncStatus === 'pending').length,
+        mergedCount: merged.length,
+      })
+    }, () => callback?.(readCachedExpenses(), { centralCount: null }))
+  }
+  void attach()
+  return () => { active = false; stop() }
 }
 
 export const runExpenseCentralSync = async ({ initial = false } = {}) => {
