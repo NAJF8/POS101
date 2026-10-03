@@ -1217,6 +1217,17 @@ input, textarea, select { cursor: text; }
   width: 100%;
 }
 
+.full-recovery-action { grid-column: 1 / -1; width: min(100%, 720px); margin: 0 auto 4px; min-height: 58px; border: 2px solid #a66b1f; border-radius: 14px; background: #fff4dc; color: #6a3e0b; font-size: 1.15rem; font-weight: 900; cursor: pointer; box-shadow: 0 5px 15px rgba(166,107,31,.16); }
+.full-recovery-action:disabled { opacity: .7; cursor: wait; }
+.settings-recovery-action { display: block; margin: 0 auto 16px; }
+.full-recovery-dialog { max-width: 620px; }
+.full-recovery-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 18px 0; }
+.full-recovery-grid > div { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: #fafbf8; }
+.full-recovery-grid h3 { margin: 0 0 8px; }
+.full-recovery-grid p, .full-recovery-health, .full-recovery-backup { margin: 4px 0; }
+.full-recovery-health { display: flex; gap: 14px; flex-wrap: wrap; }
+@media (max-width: 600px) { .full-recovery-grid { grid-template-columns: 1fr; } .full-recovery-action { font-size: 1rem; } }
+
 @media (max-width: 1024px) {
   .dashboard-grid { grid-template-columns: repeat(3, 1fr); }
 }

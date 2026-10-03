@@ -107,7 +107,7 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
   </div>
 }
 
-export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets }) {
+export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets, onFullRecovery, fullRecoveryBusy }) {
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
   const [discountForm, setDiscountForm] = useState(() => ({ baly: String(discountPresets.baly), toters: String(discountPresets.toters) }))
@@ -126,6 +126,7 @@ export default function Settings({ products, categories, canWrite, onSave, onNav
     window.setTimeout(() => setNotice(''), 4000)
   }
   return <section className="settings-page" dir="rtl">
+    <button className="full-recovery-action settings-recovery-action" type="button" onClick={onFullRecovery} disabled={fullRecoveryBusy}>{fullRecoveryBusy ? 'جارٍ إصلاح ومزامنة النظام...' : 'إصلاح ومزامنة النظام'}</button>
     <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات فقط</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
     <section className="settings-card"><div className="settings-card-heading"><div><h2>إدارة المنتجات</h2><p>{formatNumber(products.length)} منتج — الإخفاء لا يحذف المنتج أو المبيعات السابقة.</p></div><button type="button" className="primary-action" disabled={!canWrite} onClick={() => setEditing({})}><Icon name="plus" size={18} /> إضافة منتج</button></div>
       {!canWrite && <p className="settings-readonly" role="status">تسجيل دخول حساب POS مصرح به مطلوب لإضافة أو تعديل المنتجات.</p>}

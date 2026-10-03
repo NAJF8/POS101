@@ -19,6 +19,8 @@ import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
 import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
+import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
+import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -80,6 +82,8 @@ export default function App() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
+  const [fullRecoveryBusy, setFullRecoveryBusy] = useState(false)
+  const [fullRecoveryResult, setFullRecoveryResult] = useState(null)
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
@@ -176,6 +180,11 @@ export default function App() {
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.discountPresets', JSON.stringify(discountPresets)), [discountPresets])
   useEffect(() => localStorage.setItem('pos101.printerSettings', JSON.stringify(printerSettings)), [printerSettings])
+  useEffect(() => {
+    if (operationalDay?.status === 'open' && operationalDay.id && operationalDay.businessDate) {
+      localStorage.setItem('pos101.operationalDay', JSON.stringify(operationalDay))
+    }
+  }, [operationalDay])
 
   useEffect(() => {
     const stopAuth = subscribeCentralAuth(user => {
@@ -188,7 +197,6 @@ export default function App() {
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
-      setOperationalDay(null)
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setProductAuthUser(isCentralProductManager(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
@@ -340,6 +348,12 @@ export default function App() {
     onError: onCentralSyncError,
   }), [onCentralSyncStart, onCentralSyncSuccess, onCentralSyncError])
 
+  const handleFullRecovery = useMemo(() => createFullRecoveryClickHandler({
+    onStart: () => { setFullRecoveryBusy(true); setFullRecoveryResult(null) },
+    onSuccess: result => { setFullRecoveryBusy(false); setOperationalDay(result.operationalDay || readLocalOperationalDay()); setFullRecoveryResult(result) },
+    onError: result => { setFullRecoveryBusy(false); setFullRecoveryResult(result) },
+  }), [])
+
   useEffect(() => {
     const retry = () => {
       if (isCentralCashierUser(centralAuth()?.currentUser) && getCentralSyncState().initialSyncCompleted) {
@@ -473,14 +487,13 @@ export default function App() {
   const finalizeSale = useCallback(async (sellerName) => {
     if (!session || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
 
-    let currentOperationalDay = operationalDay
+    let currentOperationalDay = operationalDay || readLocalOperationalDay()
     try {
       currentOperationalDay = await readOpenOperationalDay()
     } catch {
-      currentOperationalDay = null
+      currentOperationalDay = operationalDay || readLocalOperationalDay()
     }
     if (!currentOperationalDay || currentOperationalDay.status !== 'open') {
-      setOperationalDay(null)
       setOperationalDayError('يجب بدء اليوم التشغيلي أولاً')
       setModal('operational-day-required')
       return false
@@ -691,11 +704,11 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady) && (
-        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} />
+        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
       )}
 
       {currentView === 'orders' && (session || adminReady) && (
@@ -829,6 +842,7 @@ export default function App() {
           <button type="button" aria-label="إغلاق حالة تسجيل دخول المزامنة" onClick={() => setSyncAuthStatus(null)}>×</button>
         </div>
       )}
+      {fullRecoveryResult && <FullRecoveryDialog result={fullRecoveryResult} onClose={() => setFullRecoveryResult(null)} />}
     </main>
   )
 }

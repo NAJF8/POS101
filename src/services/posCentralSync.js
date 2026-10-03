@@ -18,7 +18,7 @@ import {
   runTransaction,
   set,
 } from 'firebase/database'
-import { expenseFingerprint, normalizeExpense } from './expenseReporting.js'
+import { areExpenseDuplicates, mergeExpensesConservatively, normalizeExpense } from './expenseReporting.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -87,8 +87,8 @@ const expensesRef = () => ref(db, 'pos101_expenses')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const expenseIdOf = expense => String(expense?.id || expense?.expenseId || '').trim()
 const EXPENSES_KEY = 'pos101.expenses'
-const DEVICE_ID_KEY = 'pos101.deviceId'
 const OPERATIONAL_DAY_KEY = 'pos101.operationalDay'
+const DEVICE_ID_KEY = 'pos101.deviceId'
 const readSales = () => {
   try {
     const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
@@ -280,9 +280,34 @@ export const subscribeOperationalDay = callback => {
   }, () => callback(readCachedOperationalDay()))
 }
 
+export const readLocalOperationalDay = readCachedOperationalDay
+
 export const readOpenOperationalDay = async () => {
   await requireOperationalDayRole()
   return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef()))))
+}
+
+export const runFullRecoverySync = async () => {
+  const user = await requireRole('cashier-sync')
+  const localDay = readCachedOperationalDay()
+  const remoteDay = latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef())))
+  const reconciledDay = remoteDay || localDay
+  if (reconciledDay) cacheOperationalDay(reconciledDay)
+  const sales = await runCashierCentralSync({ initial: true })
+  const expenses = await runExpenseCentralSync({ initial: true })
+  const localExpenses = readCachedExpenses()
+  const localSales = readSales()
+  return {
+    user: { uid: user.uid, email: user.email || '' },
+    operationalDay: reconciledDay,
+    sales: { localCount: localSales.length, centralCount: sales.centralCount, uploaded: sales.uploaded, pending: localSales.filter(sale => !isSaleEligibleForCentralUpload(sale)).length, duplicatesSkipped: sales.updated },
+    expenses: { localCount: localExpenses.length, centralCount: expenses.centralCount, uploaded: expenses.uploaded, pending: localExpenses.filter(expense => expense.syncStatus === 'pending').length, duplicatesSkipped: expenses.skipped },
+    realtime: {
+      salesConnected: Boolean(configured && db && isCentralCashierUser(auth?.currentUser)),
+      expensesConnected: Boolean(configured && db && isOperationalDayUser(auth?.currentUser)),
+      operationalDayConnected: Boolean(configured && db && isOperationalDayUser(auth?.currentUser)),
+    },
+  }
 }
 
 export const startOperationalDay = async ({ startedBy = {} } = {}) => {
@@ -434,7 +459,7 @@ const mergeCentralExpensesWithPendingLocal = centralExpenses => {
 }
 
 const cacheCentralExpenses = expenses => {
-  const merged = mergeCentralExpensesWithPendingLocal(expenses)
+  const merged = mergeExpensesConservatively(readCachedExpenses(), expenses)
   writeLocalExpenses(merged)
   dispatchExpensesUpdated()
   return merged
@@ -445,8 +470,8 @@ export const subscribeCentralExpenses = callback => {
   return onValue(expensesRef(), snapshot => {
     const expenses = expenseValues(snapshot)
     authDebug('POS_EXPENSE_REMOTE_UPDATE', { count: expenses.length })
-    cacheCentralExpenses(expenses)
-    callback?.(expenses)
+    const merged = cacheCentralExpenses(expenses)
+    callback?.(merged)
   }, () => callback?.(readCachedExpenses()))
 }
 
@@ -456,7 +481,6 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   authDebug('POS_EXPENSE_MIGRATION_START', { localCount: localExpenses.length, initial: Boolean(initial) })
   const snapshot = await get(expensesRef())
   const centralExpenses = expenseValues(snapshot)
-  const fingerprints = new Set(centralExpenses.map(expenseFingerprint))
   let uploaded = 0
   let skipped = 0
   const retainedPending = []
@@ -467,11 +491,10 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
       retainedPending.push({ ...normalized, id: expenseIdOf(normalized) || `expense-${crypto.randomUUID()}`, syncStatus: 'pending' })
       continue
     }
-    if (fingerprints.has(expenseFingerprint(normalized))) { skipped += 1; continue }
+    if (centralExpenses.some(remote => areExpenseDuplicates(normalized, remote))) { skipped += 1; continue }
     const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
     const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: true })
     await set(ref(db, `pos101_expenses/${id}`), payload)
-    fingerprints.add(expenseFingerprint(payload))
     centralExpenses.push(normalizeExpense(payload))
     uploaded += 1
   }

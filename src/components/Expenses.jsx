@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
-import { deleteCentralExpense, readLocalExpenses, runExpenseCentralSync, saveCentralExpense, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { deleteCentralExpense, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -8,6 +8,7 @@ const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظ
 const people = ['علي', 'روان', 'محمد', 'ميس']
 
 export function Expenses({ onNavigate, onBack, session, operationalDay = null }) {
+  const effectiveOperationalDay = operationalDay?.status === 'open' ? operationalDay : readLocalOperationalDay()
   const [expenses, setExpenses] = useState(() => readLocalExpenses())
   useEffect(() => {
     const refresh = () => setExpenses(readLocalExpenses())
@@ -64,7 +65,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       }
       return
     }
-    if (operationalDay?.status !== 'open' || !operationalDay?.id || !operationalDay?.businessDate) {
+    if (effectiveOperationalDay?.status !== 'open' || !effectiveOperationalDay?.id || !effectiveOperationalDay?.businessDate) {
       alert('يجب بدء يوم تشغيلي قبل تسجيل مصروف جديد حتى يُحسب المصروف ضمن نفس فترة العمل.')
       return
     }
@@ -73,14 +74,14 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
       shift: session?.name || 'وردية غير محددة', shiftId: session?.shiftId || session?.cashierId || '', cashierId: session?.cashierId || session?.shiftId || '', person,
       notes: notes.trim(), description: notes.trim(), status: 'disabled',
-      operationalDayId: operationalDay.id,
-      businessDate: operationalDay.businessDate,
+      operationalDayId: effectiveOperationalDay.id,
+      businessDate: effectiveOperationalDay.businessDate,
     }
     try {
       await saveCentralExpense(row)
       resetForm()
     } catch (error) {
-      if (error?.code === 'AUTH_REQUIRED') {
+      if (['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) {
         saveLocalExpensePending(row)
         resetForm()
         alert('تم حفظ المصروف محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
@@ -106,9 +107,9 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       </div>
       {syncMessage && <div className="report-card" style={{ marginBottom: '1rem' }}><strong>{syncMessage}</strong></div>}
       <div className="report-card" style={{ marginBottom: '1rem' }}>
-        <strong>اليوم التشغيلي للمصروف: {operationalDay?.status === 'open' && operationalDay?.businessDate ? operationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong>
+        <strong>اليوم التشغيلي للمصروف: {effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.businessDate ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong>
         <div style={{ marginTop: '0.35rem' }}>
-          <small>{operationalDay?.status === 'open' ? 'أي مصروف جديد يُربط بهذا اليوم حتى لو تجاوز الوقت منتصف الليل.' : 'ابدأ اليوم التشغيلي قبل تسجيل مصروف جديد.'}</small>
+          <small>{effectiveOperationalDay?.status === 'open' ? 'أي مصروف جديد يُربط بهذا اليوم حتى لو تجاوز الوقت منتصف الليل.' : 'ابدأ اليوم التشغيلي قبل تسجيل مصروف جديد.'}</small>
         </div>
       </div>
       <form onSubmit={submit} className="expense-form"><div className="expense-form-grid">
@@ -116,7 +117,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
         <label>نوع المصروف<select value={category} onChange={e => setCategory(e.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select></label>
         <label className="expense-notes">صرفته على شنو؟ (الوصف)<input type="text" value={notes} onChange={e => setNotes(e.target.value)} required placeholder="مثال: شراء حليب أو مواد تنظيف..." /></label>
         <label>الموظف<select value={person} onChange={e => setPerson(e.target.value)}>{people.map(value => <option key={value}>{value}</option>)}</select></label>
-      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && operationalDay?.status !== 'open'}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
+      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
         {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'Firebase مباشر'}</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}

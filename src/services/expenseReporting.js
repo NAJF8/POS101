@@ -89,6 +89,32 @@ export const expenseFingerprint = expense => {
   ].join('|')
 }
 
+const expensePerson = expense => String(firstValue(expense?.cashierId, expense?.person, expense?.cashierName, expense?.cashierNameSnapshot, '') || '').trim()
+
+export const areExpenseDuplicates = (left, right, toleranceMs = 2 * 60 * 1000) => {
+  const a = normalizeExpense(left)
+  const b = normalizeExpense(right)
+  if (a.id && b.id && a.id === b.id) return true
+  if (a.amount <= 0 || b.amount <= 0 || a.amount !== b.amount) return false
+  if (a.description.trim() !== b.description.trim() || a.businessDate !== b.businessDate) return false
+  if (!a.createdAt || !b.createdAt || Math.abs(a.createdAt - b.createdAt) > toleranceMs) return false
+  const personA = expensePerson(a)
+  const personB = expensePerson(b)
+  return Boolean(personA && personB && personA === personB)
+}
+
+export const mergeExpensesConservatively = (localExpenses = [], remoteExpenses = []) => {
+  const local = Array.isArray(localExpenses) ? localExpenses.map(normalizeExpense) : []
+  const remote = Array.isArray(remoteExpenses) ? remoteExpenses.map(normalizeExpense) : []
+  const merged = [...remote]
+  for (const localRow of local) {
+    const index = merged.findIndex(remoteRow => areExpenseDuplicates(localRow, remoteRow))
+    if (index >= 0) merged[index] = { ...localRow, ...merged[index], syncStatus: 'synced' }
+    else merged.push(localRow)
+  }
+  return merged
+}
+
 export const getExpensesForBusinessDate = (expenses = [], dateKey, options = {}) => {
   const selectedDateKey = normalizeDateKey(dateKey)
   if (!selectedDateKey) return []
