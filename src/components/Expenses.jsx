@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
 import { deleteCentralExpense, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { recoverExpensesFromKnownBackups } from '../services/fullRecoveryController.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -24,6 +25,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
   const [notes, setNotes] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+  const [recovering, setRecovering] = useState(false)
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
   const syncNow = async () => {
@@ -46,6 +48,41 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       setSyncing(false)
     }
   }
+  const recoverOldExpenses = async () => {
+    if (recovering || syncing) return
+    setRecovering(true)
+    setSyncMessage('')
+    try {
+      const recovery = recoverExpensesFromKnownBackups()
+      const localAfterRecovery = readLocalExpenses()
+      setExpenses(localAfterRecovery)
+
+      let syncResult = null
+      if (recovery.recoveredCount > 0) {
+        try {
+          syncResult = await runExpenseCentralSync({ initial: true })
+        } catch (error) {
+          if (error?.code !== 'AUTH_REQUIRED') throw error
+          await signInCentralWithGoogle()
+          syncResult = await runExpenseCentralSync({ initial: true })
+        }
+      }
+
+      const sourceCount = recovery.sources?.length || 0
+      const uploaded = syncResult?.uploaded || 0
+      const centralCount = syncResult?.centralCount || 0
+      if (recovery.recoveredCount > 0) {
+        setSyncMessage(`تم الاسترجاع: ${recovery.recoveredCount} مصروف من ${sourceCount} نسخة احتياطية، وتم رفع ${uploaded}، والإجمالي المركزي ${centralCount}.`)
+      } else {
+        setSyncMessage(`تم فحص ${recovery.scannedBackups || 0} نسخة احتياطية محلية ولم يتم العثور على مصاريف إضافية قابلة للاسترجاع.`)
+      }
+    } catch (error) {
+      setSyncMessage(error?.message || 'تعذر استرجاع المصاريف القديمة.')
+    } finally {
+      setRecovering(false)
+    }
+  }
+
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
@@ -101,7 +138,8 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       <div className="expenses-header">
         <h2>المصاريف</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="outline-btn" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'جاري المزامنة...' : 'مزامنة الآن'}</button>
+          <button className="outline-btn" type="button" onClick={syncNow} disabled={syncing || recovering}>{syncing ? 'جاري المزامنة...' : 'مزامنة الآن'}</button>
+          <button className="outline-btn" type="button" onClick={recoverOldExpenses} disabled={syncing || recovering}>{recovering ? 'جاري الاسترجاع...' : 'استرجاع المصاريف القديمة'}</button>
           <button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
         </div>
       </div>
