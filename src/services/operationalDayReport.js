@@ -1,3 +1,5 @@
+import { filterExpensesByOperationalDay as filterNormalizedExpenses } from './expenseReporting.js'
+
 const amount = value => {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : 0
@@ -7,7 +9,7 @@ export const filterSalesByOperationalDay = (sales = [], operationalDayId) =>
   (Array.isArray(sales) ? sales : []).filter(sale => sale?.operationalDayId === operationalDayId && !sale?.voided)
 
 export const filterExpensesByOperationalDay = (expenses = [], operationalDayId) =>
-  (Array.isArray(expenses) ? expenses : []).filter(expense => expense?.operationalDayId === operationalDayId)
+  filterNormalizedExpenses(expenses, operationalDayId)
 
 export const calculateOperationalDaySummary = (sales = [], expenses = [], operationalDayId) => {
   const daySales = filterSalesByOperationalDay(sales, operationalDayId)

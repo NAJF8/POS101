@@ -1,3 +1,5 @@
+import { sumExpenses } from './expenseReporting.js'
+
 const amount = value => {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : 0
@@ -13,7 +15,7 @@ export const calculateComprehensiveSummary = (sales = [], expenses = []) => {
     const method = sale.paymentMethod || sale.payment?.method
     return sum + (method === 'electronic' ? amount(sale.total) : 0)
   }, 0)
-  const expensesTotal = expenses.reduce((sum, expense) => sum + amount(expense.amount), 0)
+  const expensesTotal = sumExpenses(expenses)
   const netAfterDiscount = grossSales - discounts
   const netAfterExpenses = grossSales - expensesTotal
   const netAfterExpensesAndDiscount = grossSales - expensesTotal - discounts

@@ -3,9 +3,10 @@ import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
-import { readLocalSales, numberValue, dateValue, filterReportSales } from '../services/reportSales'
+import { readLocalSales, numberValue, filterReportSales } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { filterExpensesByOperationalDay, filterSalesByOperationalDay } from '../services/operationalDayReport.js'
+import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 const format = formatMoney
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback } }
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
@@ -158,15 +159,11 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     }
   }, [])
   useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
-  const expenses = useMemo(() => {
-    const rows = read('pos101.expenses', [])
-    return rows.map(row => ({
-      ...row,
-      date: dateValue(row.date ?? row.createdAt ?? row.created_at),
-      amount: Number(row.amount || 0),
-      shift: row.shift_id || row.shift,
-      notes: row.description || row.notes,
-    }))
+  const [expenses, setExpenses] = useState(() => read('pos101.expenses', []).map(normalizeExpense))
+  useEffect(() => {
+    const refresh = () => setExpenses(read('pos101.expenses', []).map(normalizeExpense))
+    window.addEventListener('pos101-expenses-updated', refresh)
+    return () => window.removeEventListener('pos101-expenses-updated', refresh)
   }, [])
 
   const { startMs, endMs } = useMemo(() => getLocalDayBounds(effectiveReportDate), [effectiveReportDate])
@@ -180,8 +177,8 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
 
   const filteredExpenses = useMemo(() => {
     if (effectiveReportScope === 'operational' && operationalDay?.id) return filterExpensesByOperationalDay(expenses, operationalDay.id)
-    return expenses.filter(e => e.date >= startMs && e.date <= endMs)
-  }, [expenses, startMs, endMs, effectiveReportScope, operationalDay])
+    return getExpensesForBusinessDate(expenses, effectiveReportDate)
+  }, [expenses, effectiveReportDate, effectiveReportScope, operationalDay, startMs, endMs])
 
   const printReport = (format) => {
     const paper = document.querySelector('.report-paper')
@@ -519,7 +516,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
       const stats = aggregateSales(sList)
       
       const eList = filteredExpenses.filter(e => e.shift === targetShift)
-      const expensesTotal = eList.reduce((sum, e) => sum + Number(e.amount), 0)
+      const expensesTotal = sumExpenses(eList)
       
       content = <><table className="print-table"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{formatNumber(stats.count)}</td></tr><tr><td>المتوسط لكل طلب</td><td>{format(stats.avg)}</td></tr></tbody></table>{thermalSalesDetails(sList)}</>
     } else if (reportType === 'materials') {
@@ -579,7 +576,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
             {filteredExpenses.length === 0 && <tr><td colSpan="3">لا توجد مصاريف مسجلة</td></tr>}
             <tr style={{ fontWeight: 'bold' }}>
               <td colSpan="2">إجمالي المصاريف</td>
-              <td>{format(filteredExpenses.reduce((sum, e) => sum + Number(e.amount), 0))}</td>
+              <td>{format(sumExpenses(filteredExpenses))}</td>
             </tr>
           </tbody>
         </table>
