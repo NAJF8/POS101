@@ -607,8 +607,13 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
     const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
     const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: true })
     try {
-      await set(ref(db, `pos101_expenses/${id}`), payload)
-      centralExpenses.push(normalizeExpense(payload))
+      const expenseRef = ref(db, `pos101_expenses/${id}`)
+      await set(expenseRef, payload)
+      const readBack = await get(expenseRef)
+      if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف بعد الرفع.')
+      const saved = normalizeExpense({ ...readBack.val(), id })
+      centralExpenses.push(saved)
+      cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), { ...saved, syncStatus: 'synced' }])
       uploaded += 1
     } catch (error) {
       retainedPending.push({ ...normalized, id, syncStatus: 'pending' })

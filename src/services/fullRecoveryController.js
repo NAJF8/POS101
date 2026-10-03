@@ -1,5 +1,5 @@
 import { centralAuth, isAuthorizedPosSyncUser, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending, signInCentralWithGoogle } from './posCentralSync.js'
-import { areExpenseDuplicates, getLocalDateKey, normalizeDateKey, normalizeExpense, resolveExpenseBusinessDate } from './expenseReporting.js'
+import { areExpenseDuplicates, getLocalDateKey, normalizeDateKey, normalizeExpense, normalizeTimestamp, resolveExpenseBusinessDate } from './expenseReporting.js'
 
 const readJson = (key, fallback) => {
   try { const value = JSON.parse(localStorage.getItem(key) || 'null'); return value === null ? fallback : value } catch { return fallback }
@@ -49,13 +49,28 @@ const readOperationalDayDates = () => {
   return Object.fromEntries(entries.map(([id, row]) => [String(id || row?.operationalDayId || ''), normalizeDateKey(row?.businessDate)]).filter(([id, date]) => id && date))
 }
 
+const validRecoveryId = value => {
+  const id = String(value || '').trim()
+  return Boolean(id) && !/[.#$\[\]/]/.test(id)
+}
+
+const safeRecoveryCreatedAt = businessDate => {
+  const timestamp = Date.parse(`${businessDate}T12:00:00+03:00`)
+  return Number.isFinite(timestamp) ? timestamp : Date.now()
+}
+
 const normalizeRecoveredExpense = (raw, operationalDayDates) => {
   const businessDate = resolveExpenseBusinessDate(raw, { operationalDayDates }) || getLocalDateKey(raw?.date || raw?.createdAt)
   const amount = Number(normalizeNumericText(raw?.amount))
+  const explicitCreatedAt = normalizeTimestamp(raw?.createdAt || raw?.created_at || raw?.timestamp || raw?.date)
+  const createdAt = explicitCreatedAt || (businessDate ? safeRecoveryCreatedAt(businessDate) : 0)
   return {
-    ...normalizeExpense({ ...raw, amount, businessDate }),
+    ...normalizeExpense({ ...raw, amount, businessDate, createdAt, date: raw?.date || createdAt }),
     amount,
     businessDate,
+    createdAt,
+    timestamp: createdAt,
+    id: validRecoveryId(raw?.id || raw?.expenseId) ? String(raw.id || raw.expenseId) : `recovered-expense-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
     category: String(raw?.category || raw?.type || 'أخرى').trim() || 'أخرى',
     person: String(raw?.person || raw?.employee || raw?.cashierName || '').trim() || 'غير محدد',
     notes: String(raw?.notes || raw?.description || '').trim(),
@@ -78,26 +93,50 @@ export const scanAllExpenseBackups = () => {
     if (value !== null && key !== 'pos101.expenses') collectExpenseCandidates(value, key, candidates)
   }
   const recovered = []
-  let duplicateCount = 0
   for (const candidate of candidates) {
     const row = normalizeRecoveredExpense(candidate.raw, operationalDayDates)
-    if (!row.amount) continue
-    const duplicate = [...existing, ...recovered].some(item => areExpenseDuplicates(item, row))
-    if (duplicate) { duplicateCount += 1; continue }
-    recovered.push({ ...row, id: row.id || `recovered-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${recovered.length}`}`, recoverySource: candidate.path, recoveryStatus: row.businessDate ? 'جديد' : 'غير محدد' })
+    const valid = row.amount > 0 && Boolean(normalizeDateKey(row.businessDate))
+    recovered.push({ ...row, recoverySource: candidate.path, source: candidate.path, recoveryStatus: valid ? 'جديد' : 'غير محدد', candidateStatus: valid ? 'VALID' : 'INVALID', candidateReason: valid ? 'businessDate و amount صالحان' : 'المبلغ أو businessDate غير صالح' })
   }
+  const invalidCount = recovered.filter(row => row.candidateStatus === 'INVALID').length
   return {
     scannedKeys: keys.length,
     currentCount: existing.length,
     candidatesCount: candidates.length,
-    newCount: recovered.length,
-    duplicateCount,
+    newCount: recovered.filter(row => row.candidateStatus === 'VALID').length,
+    duplicateCount: 0,
+    invalidCount,
     withoutDateCount: recovered.filter(row => !row.businessDate).length,
     recoverableTotal: recovered.reduce((sum, row) => sum + Number(row.amount || 0), 0),
     candidates: recovered,
     sources: [...new Set(recovered.map(row => String(row.recoverySource).split('.')[0]))],
   }
 }
+
+const normalizedRecoveryText = value => String(value || '').trim().toLocaleLowerCase()
+const recoveryPerson = row => normalizedRecoveryText(row?.person || row?.cashier || row?.cashierName || row?.cashierNameSnapshot || row?.cashierId)
+
+const isStrongRecoveryDuplicate = (candidate, remote, toleranceMs = 2 * 60 * 1000) => {
+  const left = normalizeExpense(candidate)
+  const right = normalizeExpense(remote)
+  const leftPerson = recoveryPerson(left)
+  const rightPerson = recoveryPerson(right)
+  return left.amount > 0 && left.amount === right.amount
+    && normalizeDateKey(left.businessDate) === normalizeDateKey(right.businessDate)
+    && normalizedRecoveryText(left.description || left.notes) === normalizedRecoveryText(right.description || right.notes)
+    && Boolean(leftPerson && rightPerson && leftPerson === rightPerson)
+    && Boolean(left.createdAt && right.createdAt && Math.abs(left.createdAt - right.createdAt) <= toleranceMs)
+}
+
+export const classifyRecoveryCandidates = (candidates = [], centralExpenses = []) => (Array.isArray(candidates) ? candidates : []).map(candidate => {
+  const row = normalizeRecoveredExpense(candidate, {})
+  const idDuplicate = centralExpenses.find(remote => validRecoveryId(row.id) && String(remote?.id || remote?.expenseId || '') === row.id)
+  if (row.amount <= 0 || !normalizeDateKey(row.businessDate)) return { ...row, candidateStatus: 'INVALID', decision: 'INVALID', reason: 'المبلغ أو businessDate غير صالح' }
+  if (idDuplicate) return { ...row, candidateStatus: 'VALID', decision: 'DUPLICATE', reason: 'نفس id موجود فعليًا في Firebase' }
+  const strongDuplicate = centralExpenses.find(remote => isStrongRecoveryDuplicate(row, remote))
+  if (strongDuplicate) return { ...row, candidateStatus: 'VALID', decision: 'DUPLICATE', reason: 'تطابق قوي: businessDate والمبلغ والوصف والشخص وcreatedAt ضمن tolerance' }
+  return { ...row, candidateStatus: 'VALID', decision: 'UNIQUE', reason: 'لا يوجد id أو تطابق قوي في Firebase' }
+})
 
 export const createExpenseRecoveryBackup = selectedExpenses => {
   const timestamp = new Date().toISOString()
@@ -173,15 +212,15 @@ export const createMasterExpenseRecoveryHandler = ({
       const user = getCurrentUser() || await signIn()
       if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'CENTRAL_ROLE_BLOCKED' })
 
-      onStatus?.('جاري إنشاء نسخة احتياطية...')
-      backup = createMasterExpenseRecoveryBackup(user)
-
       onStatus?.('جاري فحص المصاريف المحلية...')
       const scan = scanAllExpenseBackups()
-      scan.candidates.forEach(row => saveLocalExpensePending(row))
-
+      onStatus?.('جاري إنشاء نسخة احتياطية...')
+      backup = createMasterExpenseRecoveryBackup(user)
       onStatus?.('جاري قراءة Firebase...')
       const before = await readCentral({ includeAllLocal: true })
+
+      const diagnostics = classifyRecoveryCandidates(scan.candidates, before.centralExpenses || [])
+      diagnostics.filter(row => row.decision === 'UNIQUE').forEach(row => saveLocalExpensePending(row))
 
       onStatus?.('جاري دمج البيانات...')
       onStatus?.('جاري رفع السجلات الناقصة...')
@@ -190,22 +229,37 @@ export const createMasterExpenseRecoveryHandler = ({
       onStatus?.('جاري التحقق النهائي...')
       const after = await readCentral({ includeAllLocal: true })
       const pendingRetained = after.expenses.filter(row => row.syncStatus === 'pending').length
+      const uniqueCandidates = diagnostics.filter(row => row.decision === 'UNIQUE')
+      const duplicateCandidates = diagnostics.filter(row => row.decision === 'DUPLICATE')
+      const invalidCandidates = diagnostics.filter(row => row.decision === 'INVALID')
+      const invariantOk = after.centralCount >= before.centralCount + upload.uploaded
+      const uploadFailureMessage = uniqueCandidates.length > 0 && upload.uploaded === 0
+        ? `تم العثور على ${uniqueCandidates.length} سجل قديم لكن تعذر رفعها: ${upload.retainedPending ? `${upload.retainedPending} Pending` : 'تعذر التحقق من الرفع'}.`
+        : null
       const totalAmount = after.expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0)
       const result = {
         backup,
         localBefore: backup.snapshot.expenses.length,
-        backupCandidatesFound: scan.newCount,
+        candidatesFound: diagnostics.length,
+        backupCandidatesFound: diagnostics.length,
         firebaseBefore: before.centralCount,
         uploaded: upload.uploaded,
-        duplicatesSkipped: scan.duplicateCount + upload.skipped,
+        uniqueCandidates: uniqueCandidates.length,
+        duplicatesSkipped: duplicateCandidates.length + upload.skipped,
+        duplicateCandidates: duplicateCandidates.length,
+        invalidCandidates: invalidCandidates.length,
+        candidateDiagnostics: diagnostics,
         pendingRetained,
         firebaseAfter: after.centralCount,
+        invariantOk,
         finalMergedCount: after.mergedCount,
         totalAmount,
         businessDateCount: new Set(after.expenses.map(row => row.businessDate).filter(Boolean)).size,
-        message: upload.uploaded > 0
+        message: uploadFailureMessage || (!invariantOk
+          ? `تعذر إثبات إضافة كل السجلات: Firebase قبل ${before.centralCount} وبعد ${after.centralCount}.`
+          : upload.uploaded > 0
           ? `تم رفع ${upload.uploaded} سجل قديم إلى Firebase.`
-          : 'لم يتم العثور على سجلات قديمة إضافية على هذا الجهاز.',
+          : `لم يتم العثور على سجلات قديمة فريدة قابلة للرفع (${duplicateCandidates.length} مكرر، ${invalidCandidates.length} غير صالح).`),
       }
       return result
     } finally {
