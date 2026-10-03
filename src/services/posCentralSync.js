@@ -494,6 +494,38 @@ export const readCentralSalesReadOnly = async () => {
 
 export const readLocalExpenses = () => readCachedExpenses()
 
+// Historical reports need the central ledger even when this browser has no
+// local expense cache. Read expenses and operational days together so legacy
+// rows can be assigned to the business date of their original operational day.
+// This is read-only with respect to Firebase; the local cache is only merged,
+// never replaced, so pending/legacy rows remain protected.
+export const readCentralExpensesForReports = async () => {
+  await requireExpenseRole(false)
+  const [expensesSnapshot, daysSnapshot] = await Promise.all([
+    get(expensesRef()),
+    get(operationalDaysRef()),
+  ])
+  const days = operationalDayValues(daysSnapshot)
+  const operationalDayDates = Object.fromEntries(days
+    .map(day => [operationalDayIdOf(day), String(day?.businessDate || '').trim()])
+    .filter(([id, businessDate]) => id && businessDate))
+  const normalizeForReport = value => {
+    const operationalDayId = String(value?.operationalDayId || value?.operational_day_id || value?.shiftId || value?.shift_id || '').trim()
+    const mappedBusinessDate = operationalDayDates[operationalDayId]
+    return normalizeExpense(mappedBusinessDate ? { ...value, businessDate: mappedBusinessDate } : value, { operationalDayDates })
+  }
+  const centralExpenses = expensesSnapshot.exists()
+    ? Object.entries(expensesSnapshot.val() || {})
+      .map(([id, value]) => normalizeForReport({ ...value, id: expenseIdOf(value) || id }))
+      .filter(expense => expenseIdOf(expense))
+    : []
+  const localExpenses = readCachedExpenses().map(normalizeForReport)
+  const merged = mergeExpensesConservatively(localExpenses, centralExpenses)
+  writeLocalExpenses(merged)
+  dispatchExpensesUpdated()
+  return { expenses: merged, centralCount: centralExpenses.length, operationalDayDates }
+}
+
 const mergeCentralExpensesWithPendingLocal = centralExpenses => {
   const remoteIds = new Set(centralExpenses.map(expenseIdOf))
   const remoteFingerprints = new Set(centralExpenses.map(expenseFingerprint))
