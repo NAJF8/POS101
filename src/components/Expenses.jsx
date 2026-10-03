@@ -49,7 +49,8 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
     const createdAt = Date.now()
     const row = {
       id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
-      shift: session?.name || 'وردية غير محددة', shiftId: '', person, notes: notes.trim(), status: 'disabled',
+      shift: session?.name || 'وردية غير محددة', shiftId: session?.shiftId || session?.cashierId || '', cashierId: session?.cashierId || session?.shiftId || '', person,
+      notes: notes.trim(), description: notes.trim(), status: 'disabled',
       operationalDayId: operationalDay.id,
       businessDate: operationalDay.businessDate,
     }
