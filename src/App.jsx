@@ -313,7 +313,7 @@ export default function App() {
       return
     }
     setSyncLabel('تمت المزامنة')
-    setSyncAuthStatus({ ok: true, uid: user?.uid, email: user?.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount })
+    setSyncAuthStatus({ ok: true, uid: user?.uid, email: user?.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount, expenseUploaded: result.expenseUploaded, expenseCentralCount: result.expenseCentralCount })
   }, [])
 
   const onCentralSyncError = useCallback(error => {
@@ -325,7 +325,16 @@ export default function App() {
     getCurrentUser: () => centralAuth()?.currentUser,
     signIn: signInCentralWithGoogle,
     runAdminRefresh: runAdminCentralRefresh,
-    runCashierSync: () => runCashierCentralSync({ initial: !getCentralSyncState().initialSyncCompleted }),
+    runCashierSync: async () => {
+      const salesResult = await runCashierCentralSync({ initial: !getCentralSyncState().initialSyncCompleted })
+      const expenseResult = await runExpenseCentralSync({ initial: true })
+      return {
+        ...salesResult,
+        expenseUploaded: expenseResult.uploaded,
+        expenseSkipped: expenseResult.skipped,
+        expenseCentralCount: expenseResult.centralCount,
+      }
+    },
     onStart: onCentralSyncStart,
     onSuccess: onCentralSyncSuccess,
     onError: onCentralSyncError,
@@ -813,7 +822,7 @@ export default function App() {
       {syncAuthStatus && (
         <div className={`print-status ${syncAuthStatus.ok ? '' : 'error'}`} role="status">
           {syncAuthStatus.ok ? (
-            <span>{syncAuthStatus.message || 'تمت المزامنة'}{!syncAuthStatus.readOnly && Number.isFinite(syncAuthStatus.uploaded) ? ` — ${syncAuthStatus.uploaded} مبيعات جديدة` : ''}</span>
+            <span>{syncAuthStatus.message || 'تمت المزامنة'}{!syncAuthStatus.readOnly && Number.isFinite(syncAuthStatus.uploaded) ? ` — ${syncAuthStatus.uploaded} مبيعات جديدة` : ''}{!syncAuthStatus.readOnly && Number.isFinite(syncAuthStatus.expenseUploaded) ? ` — ${syncAuthStatus.expenseUploaded} مصاريف جديدة` : ''}</span>
           ) : (
             <span>{syncAuthStatus.message}</span>
           )}
