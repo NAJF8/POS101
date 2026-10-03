@@ -7,7 +7,7 @@ import { readLocalSales, numberValue, filterReportSales } from '../services/repo
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { filterExpensesByOperationalDay, filterSalesByOperationalDay } from '../services/operationalDayReport.js'
 import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
-import { readLocalExpenses } from '../services/posCentralSync.js'
+import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 const format = formatMoney
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
 // intentionally narrower than the Windows driver's confirmed 72.1mm limit.
@@ -159,11 +159,39 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     }
   }, [])
   useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
+  const [expenseOperationalDayDates, setExpenseOperationalDayDates] = useState({})
+  const normalizeReportExpenses = (rows, operationalDayDates = expenseOperationalDayDates) => (Array.isArray(rows) ? rows : []).map(expense => {
+    const operationalDayId = String(expense?.operationalDayId || expense?.operational_day_id || expense?.shiftId || expense?.shift_id || '').trim()
+    const mappedBusinessDate = operationalDayDates?.[operationalDayId]
+    return normalizeExpense(mappedBusinessDate ? { ...expense, businessDate: mappedBusinessDate } : expense, { operationalDayDates })
+  })
   const [expenses, setExpenses] = useState(() => readLocalExpenses().map(normalizeExpense))
   useEffect(() => {
-    const refresh = () => setExpenses(readLocalExpenses().map(normalizeExpense))
-    window.addEventListener('pos101-expenses-updated', refresh)
-    return () => window.removeEventListener('pos101-expenses-updated', refresh)
+    let active = true
+    const refreshLocal = () => {
+      if (!active) return
+      setExpenses(current => {
+        const latest = readLocalExpenses()
+        return normalizeReportExpenses(latest, expenseOperationalDayDates)
+      })
+    }
+    const refreshCentral = async () => {
+      try {
+        const result = await readCentralExpensesForReports()
+        if (!active) return
+        const operationalDayDates = result?.operationalDayDates || {}
+        setExpenseOperationalDayDates(operationalDayDates)
+        setExpenses(normalizeReportExpenses(result?.expenses || [], operationalDayDates))
+      } catch {
+        refreshLocal()
+      }
+    }
+    window.addEventListener('pos101-expenses-updated', refreshLocal)
+    void refreshCentral()
+    return () => {
+      active = false
+      window.removeEventListener('pos101-expenses-updated', refreshLocal)
+    }
   }, [])
 
   const { startMs, endMs } = useMemo(() => getLocalDayBounds(effectiveReportDate), [effectiveReportDate])
@@ -177,8 +205,8 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
 
   const filteredExpenses = useMemo(() => {
     if (effectiveReportScope === 'operational' && operationalDay?.id) return filterExpensesByOperationalDay(expenses, operationalDay.id)
-    return getExpensesForBusinessDate(expenses, effectiveReportDate)
-  }, [expenses, effectiveReportDate, effectiveReportScope, operationalDay, startMs, endMs])
+    return getExpensesForBusinessDate(expenses, effectiveReportDate, { operationalDayDates: expenseOperationalDayDates })
+  }, [expenses, effectiveReportDate, effectiveReportScope, operationalDay, expenseOperationalDayDates, startMs, endMs])
 
   const printReport = (format) => {
     const paper = document.querySelector('.report-paper')
