@@ -401,10 +401,24 @@ export const readCentralSalesReadOnly = async () => {
 
 export const readLocalExpenses = () => readCachedExpenses()
 
+const mergeCentralExpensesWithPendingLocal = centralExpenses => {
+  const remoteIds = new Set(centralExpenses.map(expenseIdOf))
+  const remoteFingerprints = new Set(centralExpenses.map(expenseFingerprint))
+  const pendingLocal = readCachedExpenses().filter(expense => {
+    if (expense.syncStatus !== 'pending') return false
+    const id = expenseIdOf(expense)
+    if (id && remoteIds.has(id)) return false
+    if (remoteFingerprints.has(expenseFingerprint(expense))) return false
+    return true
+  })
+  return [...centralExpenses, ...pendingLocal]
+}
+
 const cacheCentralExpenses = expenses => {
-  writeLocalExpenses(expenses)
+  const merged = mergeCentralExpensesWithPendingLocal(expenses)
+  writeLocalExpenses(merged)
   dispatchExpensesUpdated()
-  return expenses
+  return merged
 }
 
 export const subscribeCentralExpenses = callback => {
@@ -426,9 +440,14 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   const fingerprints = new Set(centralExpenses.map(expenseFingerprint))
   let uploaded = 0
   let skipped = 0
+  const retainedPending = []
   for (const localExpense of localExpenses) {
     const normalized = normalizeExpense(localExpense)
-    if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) { skipped += 1; continue }
+    if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) {
+      skipped += 1
+      retainedPending.push({ ...normalized, id: expenseIdOf(normalized) || `expense-${crypto.randomUUID()}`, syncStatus: 'pending' })
+      continue
+    }
     if (fingerprints.has(expenseFingerprint(normalized))) { skipped += 1; continue }
     const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
     const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: true })
@@ -437,9 +456,9 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
     centralExpenses.push(normalizeExpense(payload))
     uploaded += 1
   }
-  cacheCentralExpenses(centralExpenses)
-  authDebug('POS_EXPENSE_MIGRATION_DONE', { uploaded, skipped, centralCount: centralExpenses.length, initial: Boolean(initial) })
-  return { uploaded, skipped, centralCount: centralExpenses.length, initial: Boolean(initial) }
+  const merged = cacheCentralExpenses([...centralExpenses, ...retainedPending])
+  authDebug('POS_EXPENSE_MIGRATION_DONE', { uploaded, skipped, centralCount: centralExpenses.length, retainedPending: retainedPending.length, initial: Boolean(initial) })
+  return { uploaded, skipped, centralCount: centralExpenses.length, retainedPending: retainedPending.length, mergedCount: merged.length, initial: Boolean(initial) }
 }
 
 export const saveCentralExpense = async (expense, { existing = false } = {}) => {
