@@ -79,6 +79,10 @@ const CASHIER_LOGIN_HINT_EMAIL = '101cofeehouse@gmail.com'
 export const CENTRAL_SYNC_UID = '4Tx0bMygd8gVuDDDOblnt3HOvo72'
 export const ADMIN_UID = 'rtDA9erW11geHfLpa3ZW3LacZR73'
 export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
+const AUTHORIZED_UIDS_PATH = 'pos101_authorized_uids'
+const SYNC_ROLES = new Set(['super_admin', 'admin', 'manager', 'cashier', 'cashier-sync', 'employee', 'admin-viewer'])
+const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager', 'admin-viewer'])
+const authorizationCache = new Map()
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const productsRef = () => ref(db, 'pos101_products')
@@ -172,7 +176,7 @@ const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(s
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession()
-  if (getCentralRole(user) !== expectedRole) {
+  if (!await isAuthorizedPosSyncUser(user)) {
     throw Object.assign(new Error(expectedRole === 'cashier-sync' ? 'هذا الحساب لا يملك صلاحية رفع المبيعات.' : 'تسجيل دخول الإدارة مطلوب للقراءة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
   }
   return user
@@ -181,7 +185,7 @@ const requireRole = async expectedRole => {
 const requireOperationalDayRole = async () => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession('تسجيل دخول POS مطلوب لإدارة اليوم التشغيلي.')
-  if (!isOperationalDayUser(user)) {
+  if (!await isAuthorizedPosSyncUser(user)) {
     throw Object.assign(new Error('هذا الحساب غير مخول لإدارة اليوم التشغيلي.'), { code: 'OPERATIONAL_DAY_PERMISSION_DENIED' })
   }
   return user
@@ -190,10 +194,7 @@ const requireOperationalDayRole = async () => {
 const requireExpenseRole = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession('تسجيل دخول POS مطلوب لمزامنة المصاريف.')
-  if (!isOperationalDayUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
-  if (write && !isCentralCashierUser(user) && !isCentralAdminUser(user)) {
-    throw Object.assign(new Error('لا تملك صلاحية تعديل المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
-  }
+  if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
   return user
 }
 
@@ -210,19 +211,67 @@ export const ensurePosFirebaseSession = async (message = 'تسجيل دخول Fi
   }
   return user
 }
-export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, callback) : () => {}
-export const getCentralRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
+export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, user => {
+  if (!user) {
+    authorizationCache.clear()
+    callback(null)
+    return
+  }
+  void hydrateCentralAuthorization(user).finally(() => callback(user))
+}) : () => {}
+const normalizedAuthorization = record => record && typeof record === 'object' ? record : null
+const roleFromAuthorization = record => {
+  const role = String(record?.role || '').trim().toLowerCase()
+  if (ADMIN_ROLES.has(role)) return 'admin-viewer'
+  if (SYNC_ROLES.has(role) || record?.read === true || record?.write === true || record?.sync === true) return 'cashier-sync'
+  return 'blocked'
+}
+const isActiveAuthorizedRecord = record => {
+  const role = String(record?.role || '').trim().toLowerCase()
+  return Boolean(record && record.active !== false && record.authorized !== false && (SYNC_ROLES.has(role) || record.read === true || record.write === true || record.sync === true))
+}
+const legacyRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
+
+export const isAuthorizedPosSyncUser = async user => {
+  if (!user?.uid) return false
+  const legacy = legacyRole(user)
+  if (legacy !== 'blocked') {
+    authorizationCache.set(user.uid, { role: legacy === 'admin-viewer' ? 'admin-viewer' : 'cashier-sync', active: true, authorized: true })
+    return true
+  }
+  if (!db) return isActiveAuthorizedRecord(user.pos101Authorization || user.authorization)
+  if (authorizationCache.has(user.uid)) return isActiveAuthorizedRecord(authorizationCache.get(user.uid))
+  try {
+    const snapshot = await get(ref(db, `${AUTHORIZED_UIDS_PATH}/${user.uid}`))
+    const record = snapshot.exists() ? normalizedAuthorization(snapshot.val()) : null
+    if (record) authorizationCache.set(user.uid, record)
+    return isActiveAuthorizedRecord(record)
+  } catch {
+    return false
+  }
+}
+
+export const hydrateCentralAuthorization = async user => {
+  const allowed = await isAuthorizedPosSyncUser(user)
+  if (allowed && user?.uid && !authorizationCache.has(user.uid) && (user.pos101Authorization || user.authorization)) {
+    authorizationCache.set(user.uid, user.pos101Authorization || user.authorization)
+  }
+  return allowed
+}
+
+export const getCentralRole = user => {
+  const record = user?.pos101Authorization || user?.authorization || (user?.uid ? authorizationCache.get(user.uid) : null)
+  return roleFromAuthorization(record) !== 'blocked' ? roleFromAuthorization(record) : legacyRole(user)
+}
 export const getCentralPermissions = user => {
   const role = getCentralRole(user)
-  return role === 'cashier-sync'
+  return role === 'cashier-sync' || role === 'admin-viewer'
     ? { centralRead: true, centralWrite: true, uploadLocalSales: true, autoUpload: true, realtimeRead: true, downloadMerge: true }
-    : role === 'admin-viewer'
-      ? { centralRead: true, centralWrite: false, uploadLocalSales: false, autoUpload: false, realtimeRead: true, downloadMerge: true }
-      : { centralRead: false, centralWrite: false, uploadLocalSales: false, autoUpload: false, realtimeRead: false, downloadMerge: false }
+    : { centralRead: false, centralWrite: false, uploadLocalSales: false, autoUpload: false, realtimeRead: false, downloadMerge: false }
 }
 export const isCentralCashierUser = user => getCentralRole(user) === 'cashier-sync'
 export const isCentralAdminUser = user => getCentralRole(user) === 'admin-viewer'
-export const isOperationalDayUser = user => isCentralCashierUser(user) || isCentralAdminUser(user)
+export const isOperationalDayUser = user => getCentralRole(user) !== 'blocked'
 export const signInCentralWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
   await authReady
@@ -236,7 +285,7 @@ export const signInAdminWithGoogle = async () => {
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ prompt: 'select_account' })
   const result = await signInWithPopup(auth, provider)
-  if (!isCentralAdminUser(result.user)) {
+  if (!await isAuthorizedPosSyncUser(result.user) || !isCentralAdminUser(result.user)) {
     await signOut(auth)
     throw Object.assign(new Error('الحساب الإداري المحدد غير مطابق. اختر حساب الإدارة الصحيح.'), { code: 'UNAUTHORIZED_ADMIN_ACCOUNT' })
   }
@@ -422,11 +471,11 @@ const readAndMergeAdminSales = async () => {
 export const runAdminCentralRefresh = readAndMergeAdminSales
 
 export const subscribeCentralSales = callback => {
-  if (!configured || !db || !isCentralCashierUser(auth?.currentUser)) return () => {}
+  if (!configured || !db || !isOperationalDayUser(auth?.currentUser)) return () => {}
   return onValue(salesRef(), snapshot => {
     const centralSales = centralValues(snapshot)
     const merged = mergeCentralSalesLocally(centralSales)
-    callback({ centralCount: centralSales.length, mergedCount: merged.length })
+    callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
   }, () => {})
 }
 

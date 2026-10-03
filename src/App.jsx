@@ -221,17 +221,12 @@ export default function App() {
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         productListener.current = subscribeCentralProducts(setCentralProducts)
       }
-      if (isCentralAdminUser(user)) {
-        centralListener.current = subscribeCentralSalesReadOnly(({ mergedSales }) => {
-          setAdminCentralSales(mergedSales)
-        })
-        return
-      }
-      if (!isCentralCashierUser(user)) return
-      centralListener.current = subscribeCentralSales(({ centralCount }) => {
+       if (!isCentralAdminUser(user) && !isCentralCashierUser(user)) return
+       centralListener.current = subscribeCentralSales(({ centralCount, mergedSales }) => {
+         if (mergedSales) setAdminCentralSales(mergedSales)
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
-      if (getCentralSyncState().initialSyncCompleted) {
+       if (isCentralCashierUser(user) && getCentralSyncState().initialSyncCompleted) {
         void runCashierCentralSync().catch(() => {})
       }
     })
@@ -314,12 +309,6 @@ export default function App() {
   const onCentralSyncSuccess = useCallback(({ role, result }) => {
     const user = centralAuth()?.currentUser
     const providerId = user?.providerData?.[0]?.providerId || 'google.com'
-    if (role === 'admin-viewer') {
-      setAdminCentralSales(result.mergedSales)
-      setSyncLabel('تم تحديث المبيعات')
-      setSyncAuthStatus({ ok: true, role, uid: user?.uid, email: user?.email, providerId, uploaded: 0, centralCount: result.centralCount, mergedCount: result.mergedCount, readOnly: true, message: 'تم تحديث المبيعات' })
-      return
-    }
     setSyncLabel('تمت المزامنة')
     setSyncAuthStatus({ ok: true, uid: user?.uid, email: user?.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount, expenseUploaded: result.expenseUploaded, expenseCentralCount: result.expenseCentralCount })
   }, [])

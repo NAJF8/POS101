@@ -4,7 +4,8 @@
     ".write": false,
     "pos101_authorized_uids": {
       ".read": false,
-      ".write": false
+      ".write": false,
+      "$uid": { ".read": "auth != null && auth.uid === $uid" }
     },
     "pos101_sales": {
       ".read": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('read').val() === true",

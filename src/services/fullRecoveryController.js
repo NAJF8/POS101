@@ -1,4 +1,4 @@
-import { centralAuth, getCentralRole, runFullRecoverySync, signInCentralWithGoogle } from './posCentralSync.js'
+import { centralAuth, isAuthorizedPosSyncUser, runFullRecoverySync, signInCentralWithGoogle } from './posCentralSync.js'
 
 const readJson = (key, fallback) => {
   try { const value = JSON.parse(localStorage.getItem(key) || 'null'); return value === null ? fallback : value } catch { return fallback }
@@ -24,11 +24,12 @@ export const createFullRecoveryClickHandler = ({ getCurrentUser = () => centralA
   return async function handleFullRecoveryClick() {
     if (busy) return { skipped: true }
     busy = true
-    const backup = createFullRecoveryBackup()
-    onStart?.(backup)
+    let backup = null
     try {
       const user = getCurrentUser() || await signIn()
-      if (getCentralRole(user) !== 'cashier-sync') throw Object.assign(new Error('هذا الحساب غير مخول لإصلاح ومزامنة بيانات POS.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+      if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لإصلاح ومزامنة بيانات POS.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+      backup = createFullRecoveryBackup()
+      onStart?.(backup)
       const result = await runRecovery()
       const complete = { backup, ...result }
       onSuccess?.(complete)

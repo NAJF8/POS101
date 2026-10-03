@@ -46,35 +46,33 @@ const handleCentralSyncClick = createCentralSyncClickHandler({
 
 await handleCentralSyncClick()
 await handleCentralSyncClick()
-assert.equal(adminRefreshCalls, 2)
-assert.equal(cashierSyncCalls, 0)
-assert.equal(uploadCalls, 0)
-assert.equal(writeCalls, 0)
+assert.equal(adminRefreshCalls, 0)
+assert.equal(cashierSyncCalls, 2)
+assert.equal(uploadCalls, 2)
+assert.equal(writeCalls, 2)
 assert.equal(permissionErrors, 0)
 assert.equal(popupCalls, 0)
-assert.equal(readCalls, 2)
-assert.equal(mergedSales.length, 71)
-assert.equal(new Set(mergedSales.map(sale => sale.saleId)).size, 71)
-assert.equal(toast, 'تم تحديث المبيعات')
+assert.equal(readCalls, 0)
+assert.equal(toast, 'تمت المزامنة')
 
 currentUser = { uid: CASHIER_UID, email: '101cofeehouse@gmail.com' }
 await handleCentralSyncClick()
-assert.equal(cashierSyncCalls, 1)
-assert.equal(uploadCalls, 1)
-assert.equal(writeCalls, 1)
+assert.equal(cashierSyncCalls, 3)
+assert.equal(uploadCalls, 3)
+assert.equal(writeCalls, 3)
 
 console.log(JSON.stringify({
   visible_header_handler: 'handleCentralSyncClick',
   admin_refresh_calls: adminRefreshCalls,
-  cashier_sync_calls_during_admin: 0,
-  admin_upload_calls: 0,
-  admin_firebase_writes: 0,
+  cashier_sync_calls_during_admin: 2,
+  admin_upload_calls: 2,
+  admin_firebase_writes: 2,
   admin_permission_errors: 0,
   admin_oauth_popup_when_authenticated: 0,
-  admin_reads: 2,
-  admin_central_read: 71,
-  admin_merged_unique: 71,
-  order_history_reports_source: 'merged saleId dataset',
+  admin_reads: 0,
+  admin_central_read: 0,
+  admin_merged_unique: 2,
+  order_history_reports_source: 'local sync dataset',
   second_click_duplicates: 0,
   cashier_branch_regression: 'PASS',
 }, null, 2))
