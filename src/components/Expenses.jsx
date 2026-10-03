@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
-import { deleteCentralExpense, readLocalExpenses, saveCentralExpense, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { deleteCentralExpense, readLocalExpenses, runExpenseCentralSync, saveCentralExpense, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -21,8 +21,30 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
   const [category, setCategory] = useState('مشتريات')
   const [person, setPerson] = useState('علي')
   const [notes, setNotes] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
 
   const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson('علي'); setNotes('') }
+  const syncNow = async () => {
+    if (syncing) return
+    setSyncing(true)
+    setSyncMessage('')
+    try {
+      let result
+      try {
+        result = await runExpenseCentralSync({ initial: true })
+      } catch (error) {
+        if (error?.code !== 'AUTH_REQUIRED') throw error
+        await signInCentralWithGoogle()
+        result = await runExpenseCentralSync({ initial: true })
+      }
+      setSyncMessage(`تمت المزامنة: رفع ${result?.uploaded || 0}، تخطي ${result?.skipped || 0}، الإجمالي المركزي ${result?.centralCount || 0}`)
+    } catch (error) {
+      setSyncMessage(error?.message || 'تعذر تنفيذ المزامنة.')
+    } finally {
+      setSyncing(false)
+    }
+  }
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
@@ -75,7 +97,14 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
 
   return (
     <div className="expenses-container" dir="rtl">
-      <div className="expenses-header"><h2>المصاريف</h2><button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button></div>
+      <div className="expenses-header">
+        <h2>المصاريف</h2>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="outline-btn" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'جاري المزامنة...' : 'مزامنة الآن'}</button>
+          <button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
+        </div>
+      </div>
+      {syncMessage && <div className="report-card" style={{ marginBottom: '1rem' }}><strong>{syncMessage}</strong></div>}
       <div className="report-card" style={{ marginBottom: '1rem' }}>
         <strong>اليوم التشغيلي للمصروف: {operationalDay?.status === 'open' && operationalDay?.businessDate ? operationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong>
         <div style={{ marginTop: '0.35rem' }}>
