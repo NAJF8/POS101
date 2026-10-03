@@ -232,7 +232,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
     <div className="reports-container" dir="rtl">
       <div className="reports-sidebar">
         <div className="date-filter">
-          <h3>{isOperationalScope ? 'اليوم التشغيلي الحالي' : 'تقارير الأيام السابقة'}</h3>
+          <h3>التقارير</h3>
           <label>نطاق التقرير
             <select
               aria-label="نطاق التقرير"
@@ -248,9 +248,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
             </select>
           </label>
           <label>التاريخ<input aria-label="التاريخ" type="date" value={effectiveReportDate} disabled={isOperationalScope} onChange={e => setReportDate(e.target.value)} /></label>
-          {isOperationalScope
-            ? <small>يعرض يوم العمل {operationalDay.businessDate} كاملاً حتى تضغط إنهاء اليوم. لا يتغير عند منتصف الليل.</small>
-            : <small>اختر أي يوم سابق لعرض تقاريره مثل النظام السابق.</small>}
+          {isOperationalScope && <small>يعرض يوم العمل {operationalDay.businessDate} كاملاً حتى تضغط إنهاء اليوم. لا يتغير عند منتصف الليل.</small>}
         </div>
       </div>
       
