@@ -1,4 +1,4 @@
-import { centralAuth, isAuthorizedPosSyncUser, readLocalExpenses, runFullRecoverySync, saveLocalExpensePending, signInCentralWithGoogle } from './posCentralSync.js'
+import { centralAuth, isAuthorizedPosSyncUser, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending, signInCentralWithGoogle } from './posCentralSync.js'
 import { areExpenseDuplicates, getLocalDateKey, normalizeDateKey, normalizeExpense, resolveExpenseBusinessDate } from './expenseReporting.js'
 
 const readJson = (key, fallback) => {
@@ -131,6 +131,87 @@ export const recoverExpensesFromKnownBackups = () => {
   const scan = scanAllExpenseBackups()
   scan.candidates.forEach(row => saveLocalExpensePending(row))
   return { ...scan, recoveredCount: scan.newCount, localCountBefore: scan.currentCount, localCountAfter: readLocalExpenses().length }
+}
+
+export const createMasterExpenseRecoveryBackup = user => {
+  const timestamp = new Date().toISOString()
+  const key = `pos101.masterExpenseRecoveryBackup.${timestamp}`
+  const expenses = readLocalExpenses()
+  const recoveryKeys = []
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const storageKey = localStorage.key(index)
+    if (storageKey && /expense|expenses|recovery|backup|pos101/i.test(storageKey)) recoveryKeys.push(storageKey)
+  }
+  const snapshot = {
+    timestamp,
+    expenses,
+    pendingExpenses: expenses.filter(row => row.syncStatus === 'pending'),
+    operationalDay: readJson('pos101.operationalDay', null),
+    operationalDays: readJson('pos101_operational_days', null),
+    deviceId: localStorage.getItem('pos101.deviceId') || '',
+    user: { uid: user?.uid || '', email: user?.email || '' },
+    expenseRecoveryBackupKeys: recoveryKeys,
+  }
+  localStorage.setItem(key, JSON.stringify(snapshot))
+  return { key, timestamp, snapshot }
+}
+
+export const createMasterExpenseRecoveryHandler = ({
+  getCurrentUser = () => centralAuth()?.currentUser,
+  signIn = signInCentralWithGoogle,
+  readCentral = readCentralExpensesForReports,
+  syncCentral = runExpenseCentralSync,
+  onStatus,
+} = {}) => {
+  let busy = false
+  return async () => {
+    if (busy) return { skipped: true }
+    busy = true
+    let backup = null
+    try {
+      onStatus?.('جاري التحقق من الصلاحيات...')
+      const user = getCurrentUser() || await signIn()
+      if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+
+      onStatus?.('جاري إنشاء نسخة احتياطية...')
+      backup = createMasterExpenseRecoveryBackup(user)
+
+      onStatus?.('جاري فحص المصاريف المحلية...')
+      const scan = scanAllExpenseBackups()
+      scan.candidates.forEach(row => saveLocalExpensePending(row))
+
+      onStatus?.('جاري قراءة Firebase...')
+      const before = await readCentral({ includeAllLocal: true })
+
+      onStatus?.('جاري دمج البيانات...')
+      onStatus?.('جاري رفع السجلات الناقصة...')
+      const upload = await syncCentral({ initial: true })
+
+      onStatus?.('جاري التحقق النهائي...')
+      const after = await readCentral({ includeAllLocal: true })
+      const pendingRetained = after.expenses.filter(row => row.syncStatus === 'pending').length
+      const totalAmount = after.expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+      const result = {
+        backup,
+        localBefore: backup.snapshot.expenses.length,
+        backupCandidatesFound: scan.newCount,
+        firebaseBefore: before.centralCount,
+        uploaded: upload.uploaded,
+        duplicatesSkipped: scan.duplicateCount + upload.skipped,
+        pendingRetained,
+        firebaseAfter: after.centralCount,
+        finalMergedCount: after.mergedCount,
+        totalAmount,
+        businessDateCount: new Set(after.expenses.map(row => row.businessDate).filter(Boolean)).size,
+        message: upload.uploaded > 0
+          ? `تم رفع ${upload.uploaded} سجل قديم إلى Firebase.`
+          : 'لم يتم العثور على سجلات قديمة إضافية على هذا الجهاز.',
+      }
+      return result
+    } finally {
+      busy = false
+    }
+  }
 }
 
 export const createFullRecoveryClickHandler = ({ getCurrentUser = () => centralAuth()?.currentUser, signIn = signInCentralWithGoogle, runRecovery = runFullRecoverySync, onStart, onSuccess, onError } = {}) => {

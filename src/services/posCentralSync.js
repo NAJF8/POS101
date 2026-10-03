@@ -606,9 +606,14 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
     if (centralExpenses.some(remote => areExpenseDuplicates(normalized, remote))) { skipped += 1; continue }
     const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
     const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: true })
-    await set(ref(db, `pos101_expenses/${id}`), payload)
-    centralExpenses.push(normalizeExpense(payload))
-    uploaded += 1
+    try {
+      await set(ref(db, `pos101_expenses/${id}`), payload)
+      centralExpenses.push(normalizeExpense(payload))
+      uploaded += 1
+    } catch (error) {
+      retainedPending.push({ ...normalized, id, syncStatus: 'pending' })
+      authDebug('POS_EXPENSE_UPLOAD_PENDING', { code: error?.code || 'UNKNOWN' })
+    }
   }
   const merged = cacheCentralExpenses([...centralExpenses, ...retainedPending])
   authDebug('POS_EXPENSE_MIGRATION_DONE', { uploaded, skipped, centralCount: centralExpenses.length, retainedPending: retainedPending.length, initial: Boolean(initial) })

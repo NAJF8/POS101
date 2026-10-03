@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
 import { deleteCentralExpense, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
-import { createExpenseRecoveryBackup, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
+import { createExpenseRecoveryBackup, createMasterExpenseRecoveryHandler, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -43,6 +43,27 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
   const [selectedRecoveryIds, setSelectedRecoveryIds] = useState([])
   const [manualOpen, setManualOpen] = useState(false)
   const [manualText, setManualText] = useState('')
+  const [masterRecoveryBusy, setMasterRecoveryBusy] = useState(false)
+  const [masterRecoveryStatus, setMasterRecoveryStatus] = useState('')
+  const [masterRecoveryResult, setMasterRecoveryResult] = useState(null)
+  const masterRecoveryHandler = useMemo(() => createMasterExpenseRecoveryHandler({ onStatus: setMasterRecoveryStatus }), [])
+
+  const runMasterRecovery = async () => {
+    if (masterRecoveryBusy) return
+    setMasterRecoveryBusy(true)
+    setMasterRecoveryResult(null)
+    try {
+      const result = await masterRecoveryHandler()
+      if (result?.skipped) return
+      setMasterRecoveryResult(result)
+      const latest = readLocalExpenses()
+      setExpenses(latest)
+      setLocalCount(latest.length)
+      setMasterRecoveryStatus('')
+    } catch (error) {
+      setMasterRecoveryStatus(error?.message || 'تعذر إكمال مزامنة واسترجاع المصاريف.')
+    } finally { setMasterRecoveryBusy(false) }
+  }
 
   const refreshCentralExpenses = async () => {
     if (centralRefreshing) return
@@ -226,14 +247,12 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       <div className="expenses-header">
         <h2>المصاريف</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="outline-btn" type="button" onClick={refreshCentralExpenses} disabled={syncing || recovering || centralRefreshing}>{centralRefreshing ? 'جاري قراءة Firebase...' : 'تحديث المصاريف من Firebase'}</button>
-          <button className="outline-btn" type="button" onClick={syncNow} disabled={syncing || recovering || centralRefreshing}>{syncing ? 'جاري المزامنة...' : 'مزامنة الآن'}</button>
-          <button className="outline-btn" type="button" onClick={scanOldExpenses} disabled={syncing || recovering}>فحص كل النسخ القديمة</button>
-          <button className="outline-btn" type="button" onClick={() => setManualOpen(true)} disabled={syncing || recovering}>استرجاع يدوي جماعي</button>
+          <button className="primary-action" type="button" onClick={runMasterRecovery} disabled={syncing || recovering || masterRecoveryBusy}>{masterRecoveryBusy ? 'جاري مزامنة واسترجاع المصاريف...' : 'مزامنة واسترجاع كل المصاريف'}</button>
           <button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
         </div>
       </div>
       {syncMessage && <div className="report-card" style={{ marginBottom: '1rem' }}><strong>{syncMessage}</strong></div>}
+      {masterRecoveryStatus && <div className="report-card" style={{ marginBottom: '1rem' }} role="status"><strong>{masterRecoveryStatus}</strong></div>}
       <div className="report-card" style={{ marginBottom: '1rem' }}>
         <strong>اليوم التشغيلي للمصروف: {effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.businessDate ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong>
         <div style={{ marginTop: '0.35rem' }}>
@@ -248,17 +267,11 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null })
       </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <section className="report-card expense-diagnostic" aria-label="كل المصاريف"><h3>كل المصاريف</h3><p>المصدر المركزي للتقارير هو Firebase RTDB؛ المحلي وPending يُدمجان محافظًا ولا يستبدلان المركزي.</p><div className="recovery-stats"><span>Firebase: <b>{centralCount === null ? 'غير متاح' : centralCount}</b> سجل</span><span>Local: <b>{localCount}</b></span><span>Pending: <b>{allExpenseDiagnostic.pending}</b></span><span>Merged: <b>{expenses.length}</b></span><span>الإجمالي: <b>{format(total)}</b></span></div><div className="diagnostic-groups">{Object.entries(allExpenseDiagnostic.grouped).sort(([a], [b]) => b.localeCompare(a)).map(([date, amount]) => <span key={date}>{date}: <b>{format(amount)}</b></span>)}</div>{centralCount !== null && !centralExpenses.some(expense => expense.businessDate === '2026-09-27') && <small>لا يوجد سجل مركزي بتاريخ 2026-09-27؛ السجل موجود محليًا على جهاز آخر أو غير موجود في Firebase.</small>}</section>
-      {recoveryScan && <section className="report-card expense-recovery-center" aria-label="مركز استرجاع المصاريف">
-        <h3>مركز استرجاع المصاريف</h3>
-        <div className="recovery-stats"><span>المفاتيح المفحوصة: <b>{recoveryScan.scannedKeys}</b></span><span>الحالي: <b>{recoveryScan.currentCount}</b></span><span>المكتشف: <b>{recoveryScan.candidatesCount}</b></span><span>الجديد: <b>{recoveryScan.newCount}</b></span><span>المتكرر: <b>{recoveryScan.duplicateCount}</b></span><span>بدون تاريخ: <b>{recoveryScan.withoutDateCount}</b></span><span>الإجمالي: <b>{format(recoveryScan.recoverableTotal)}</b></span></div>
-        <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th><input type="checkbox" checked={selectedRecoveryIds.length === recoveryScan.candidates.length && recoveryScan.candidates.length > 0} onChange={e => setSelectedRecoveryIds(e.target.checked ? recoveryScan.candidates.map(row => row.id) : [])} /></th><th>التاريخ</th><th>المبلغ</th><th>النوع</th><th>الموظف</th><th>الوصف</th><th>مصدر السجل</th><th>الحالة</th></tr></thead><tbody>{recoveryScan.candidates.length === 0 ? <tr><td colSpan="8" className="empty-cell">لم يتم العثور على سجل جديد قابل للاسترجاع</td></tr> : recoveryScan.candidates.map(row => <tr key={row.id}><td><input type="checkbox" checked={selectedRecoveryIds.includes(row.id)} onChange={e => setSelectedRecoveryIds(ids => e.target.checked ? [...ids, row.id] : ids.filter(id => id !== row.id))} /></td><td>{row.businessDate || 'غير محدد'}</td><td>{format(row.amount)}</td><td>{row.category}</td><td>{row.person}</td><td>{row.description || row.notes || '—'}</td><td dir="ltr">{row.recoverySource}</td><td>{row.recoveryStatus}</td></tr>)}</tbody></table></div>
-        <button className="primary-action" type="button" onClick={recoverSelected} disabled={recovering || !selectedRecoveryIds.length}>استرجاع المحدد إلى النظام</button>
-      </section>}
       <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
         {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'Firebase مباشر'}</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
       </tbody></table></div>
       {deleting && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog expense-delete-dialog"><h2>تأكيد حذف المصروف</h2><p>سيتم حذف هذا السجل فقط:</p><dl><div><dt>المبلغ</dt><dd>{format(deleting.amount)}</dd></div><div><dt>النوع</dt><dd>{deleting.category}</dd></div><div><dt>الوصف</dt><dd>{deleting.notes || '—'}</dd></div><div><dt>التاريخ</dt><dd>{formatDateTime(deleting.date)}</dd></div></dl><div className="dialog-actions"><button className="secondary-action" onClick={() => setDeleting(null)}>إلغاء</button><button className="delete-expense" onClick={confirmDelete}>تأكيد الحذف</button></div></div></div>}
-      {manualOpen && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog manual-recovery-dialog" dir="rtl"><h2>استرجاع يدوي جماعي</h2><p>ألصق: YYYY-MM-DD | المبلغ | النوع | الموظف | الوصف</p><textarea rows="8" value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'2026-10-02 | 5000 | مشتريات | علي | شراء حليب'} />{manualText && <div className="manual-preview"><b>Preview: {manualPreview.filter(row => row.valid).length} صحيح، {manualPreview.filter(row => !row.valid).length} غير صالح</b>{manualPreview.map(row => <div key={row.line} className={row.valid ? 'valid-row' : 'invalid-row'}>السطر {row.line}: {row.valid ? `${row.expense.businessDate} · ${format(row.expense.amount)} · ${row.expense.category}` : row.errors.join('، ')}</div>)}</div>}<div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setManualOpen(false)}>إلغاء</button><button className="primary-action" type="button" onClick={saveManualBulk} disabled={recovering || !manualPreview.some(row => row.valid)}>استرجاع وحفظ الكل</button></div></div></div>}
+      {masterRecoveryResult && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog master-recovery-dialog" dir="rtl"><h2>اكتملت مزامنة المصاريف</h2><p>{masterRecoveryResult.message}</p><dl><div><dt>Local قبل</dt><dd>{masterRecoveryResult.localBefore}</dd></div><div><dt>مرشحات النسخ</dt><dd>{masterRecoveryResult.backupCandidatesFound}</dd></div><div><dt>Firebase قبل</dt><dd>{masterRecoveryResult.firebaseBefore}</dd></div><div><dt>المرفوع</dt><dd>{masterRecoveryResult.uploaded}</dd></div><div><dt>المتكرر المتخطى</dt><dd>{masterRecoveryResult.duplicatesSkipped}</dd></div><div><dt>Pending محفوظ</dt><dd>{masterRecoveryResult.pendingRetained}</dd></div><div><dt>Firebase بعد</dt><dd>{masterRecoveryResult.firebaseAfter}</dd></div><div><dt>الدمج النهائي</dt><dd>{masterRecoveryResult.finalMergedCount}</dd></div><div><dt>الإجمالي</dt><dd>{format(masterRecoveryResult.totalAmount)}</dd></div><div><dt>أيام businessDate</dt><dd>{masterRecoveryResult.businessDateCount}</dd></div></dl><div className="dialog-actions"><button className="primary-action" type="button" onClick={() => setMasterRecoveryResult(null)}>إغلاق</button></div></div></div>}
     </div>
   )
 }
