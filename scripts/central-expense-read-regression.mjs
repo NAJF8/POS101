@@ -16,7 +16,8 @@ assert.equal(mergedRemoteEmpty.find(row => row.id === 'pending-1').syncStatus, '
 
 const reports = fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8')
 assert.match(reports, /readCentralExpensesForReports\(\)/)
-assert.match(reports, /getExpensesForBusinessDate\(expenses, effectiveReportDate/)
+assert.match(reports, /filterRowsByBusinessDate\(/)
+assert.match(reports, /periodFrom, periodTo/)
 const expenses = fs.readFileSync(new URL('../src/components/Expenses.jsx', import.meta.url), 'utf8')
 assert.match(expenses, /readCentralExpensesForReports\(/)
 assert.match(expenses, /مزامنة واسترجاع كل المصاريف/)

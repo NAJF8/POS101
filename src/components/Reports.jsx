@@ -3,10 +3,9 @@ import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
-import { readLocalSales, numberValue, filterReportSales } from '../services/reportSales'
+import { readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
-import { filterSalesByOperationalDay } from '../services/operationalDayReport.js'
-import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
+import { normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
@@ -29,18 +28,6 @@ const toDateInputValue = value => {
 const getDefaultReportDate = () => toDateInputValue(new Date())
 const getBaghdadDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 const shiftDate = (dateText, days) => { const date = new Date(`${dateText}T12:00:00+03:00`); date.setDate(date.getDate() + days); return getBaghdadDate(date) }
-
-const getLocalDayBounds = dateText => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateText || ''))
-  if (!match) return { startMs: Number.NaN, endMs: Number.NaN }
-  const [, year, month, day] = match
-  const start = new Date(0)
-  start.setHours(0, 0, 0, 0)
-  start.setFullYear(Number(year), Number(month) - 1, Number(day))
-  const end = new Date(start)
-  end.setHours(23, 59, 59, 999)
-  return { startMs: start.getTime(), endMs: end.getTime() }
-}
 
 const a4PrintStyles = `
   @page { size: A4 portrait; margin: 12mm; }
@@ -145,25 +132,16 @@ class ReportsErrorBoundary extends React.Component {
 
 function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [] }) {
   const [reportType, setReportType] = useState(null)
-  const [periodFrom, setPeriodFrom] = useState(() => shiftDate(getDefaultReportDate(), -6))
-  const [periodTo, setPeriodTo] = useState(() => getDefaultReportDate())
-  const [periodPreset, setPeriodPreset] = useState('last7')
-  const [periodMode, setPeriodMode] = useState('detailed')
+  const defaultBusinessDate = operationalDay?.businessDate || getDefaultReportDate()
+  const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
+  const [periodTo, setPeriodTo] = useState(() => defaultBusinessDate)
   const [periodError, setPeriodError] = useState('')
-  
-  const [reportDate, setReportDate] = useState(() => operationalDay?.businessDate || getDefaultReportDate())
-  const [reportScope, setReportScope] = useState(() => operationalDay?.id ? 'operational' : 'calendar')
-  const hasOpenOperationalDay = operationalDay?.status === 'open' && Boolean(operationalDay?.id && operationalDay?.businessDate)
-  const isOperationalScope = reportScope === 'operational' && hasOpenOperationalDay
-  const effectiveReportScope = isOperationalScope ? 'operational' : 'calendar'
-  const effectiveReportDate = isOperationalScope ? operationalDay.businessDate : reportDate
 
-  // Default to the active business day whenever a new operational day opens,
-  // but still allow the user to switch back to historical/calendar reports.
+  // Reports always open on the active business date and use one shared range.
   useEffect(() => {
-    if (!hasOpenOperationalDay) return
-    setReportScope('operational')
-    setReportDate(operationalDay.businessDate)
+    if (!operationalDay?.businessDate) return
+    setPeriodFrom(operationalDay.businessDate)
+    setPeriodTo(operationalDay.businessDate)
   }, [operationalDay?.id, operationalDay?.businessDate])
 
   // Keep reporting local-only until the ACC/Firebase source is explicitly
@@ -223,18 +201,14 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     }
   }, [])
 
-  const { startMs, endMs } = useMemo(() => getLocalDayBounds(effectiveReportDate), [effectiveReportDate])
-
-  // One report dataset is shared by the visible report, browser print, and
-  // direct thermal print. Keep filtering here so every output follows the
-  // latest rendered filter state and never falls back to all sales.
-  const filteredSales = useMemo(() => effectiveReportScope === 'operational' && operationalDay?.id
-    ? filterSalesByOperationalDay(sales, operationalDay.id)
-    : filterReportSales(sales, { startMs, endMs }), [sales, startMs, endMs, effectiveReportScope, operationalDay])
-
-  const filteredExpenses = useMemo(() => {
-    return getExpensesForBusinessDate(expenses, effectiveReportDate, { operationalDayDates: expenseOperationalDayDates })
-  }, [expenses, effectiveReportDate, expenseOperationalDayDates])
+  // One range is shared by every report card, the browser print, and direct
+  // thermal payloads. No report can silently fall back to the current day.
+  const filteredSales = useMemo(() => filterRowsByBusinessDate(sales, periodFrom, periodTo), [sales, periodFrom, periodTo])
+  const filteredExpenses = useMemo(() => filterRowsByBusinessDate(
+    (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })),
+    periodFrom,
+    periodTo,
+  ), [expenses, periodFrom, periodTo, expenseOperationalDayDates])
 
   const periodDataset = useMemo(() => {
     if (reportType !== 'period') return EMPTY_PERIOD_DATASET
@@ -322,88 +296,56 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
       : undefined
-    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: effectiveReportDate, dateFrom: effectiveReportDate, dateTo: effectiveReportDate, period: effectiveReportDate, sales: filteredSales, expenses: filteredExpenses, ...(summary ? { summary } : {}) })
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: filteredExpenses, ...(summary ? { summary } : {}) })
   }
 
   const renderReportCards = () => (
     <div className="reports-container" dir="rtl">
-      <div className="reports-sidebar">
-        <div className="date-filter">
-          <h3>التقارير</h3>
-          <label>نطاق التقرير
-            <select
-              aria-label="نطاق التقرير"
-              value={reportScope}
-              onChange={e => {
-                const next = e.target.value
-                setReportScope(next)
-                if (next === 'operational' && operationalDay?.businessDate) setReportDate(operationalDay.businessDate)
-              }}
-            >
-              {hasOpenOperationalDay && <option value="operational">اليوم التشغيلي الحالي</option>}
-              <option value="calendar">يوم سابق / تاريخ محدد</option>
-            </select>
-          </label>
-          <label>التاريخ<input aria-label="التاريخ" type="date" value={effectiveReportDate} disabled={isOperationalScope} onChange={e => setReportDate(e.target.value)} /></label>
-          {isOperationalScope && <small>يعرض يوم العمل {operationalDay.businessDate} كاملاً حتى تضغط إنهاء اليوم. لا يتغير عند منتصف الليل.</small>}
-          <hr />
-          <h4>تقرير فترة مخصصة</h4>
-          <label>من تاريخ<input aria-label="من تاريخ" type="date" value={periodFrom} onChange={e => { setPeriodFrom(e.target.value); setPeriodPreset('custom') }} /></label>
-          <label>إلى تاريخ<input aria-label="إلى تاريخ" type="date" value={periodTo} onChange={e => { setPeriodTo(e.target.value); setPeriodPreset('custom') }} /></label>
-          <label>اختصار الفترة<select aria-label="اختصار الفترة" value={periodPreset} onChange={e => { const next = e.target.value; const today = getDefaultReportDate(); setPeriodPreset(next); if (next === 'today') { setPeriodFrom(today); setPeriodTo(today) } else if (next === 'yesterday') { const yesterday = shiftDate(today, -1); setPeriodFrom(yesterday); setPeriodTo(yesterday) } else if (next === 'last7') { setPeriodFrom(shiftDate(today, -6)); setPeriodTo(today) } else if (next === 'week') { const day = new Date(`${today}T12:00:00+03:00`).getDay(); const start = shiftDate(today, -(day === 0 ? 6 : day - 1)); setPeriodFrom(start); setPeriodTo(today) } else if (next === 'month') { setPeriodFrom(`${today.slice(0, 7)}-01`); setPeriodTo(today) } else if (next === 'previous-month') { const first = new Date(`${today.slice(0, 7)}-01T12:00:00+03:00`); first.setMonth(first.getMonth() - 1); const firstKey = getBaghdadDate(first); setPeriodFrom(`${firstKey.slice(0, 7)}-01`); setPeriodTo(shiftDate(`${today.slice(0, 7)}-01`, -1)) } }}><option value="today">اليوم</option><option value="yesterday">أمس</option><option value="last7">آخر 7 أيام</option><option value="week">هذا الأسبوع</option><option value="month">هذا الشهر</option><option value="previous-month">الشهر السابق</option><option value="custom">فترة مخصصة</option></select></label>
-          <label>نمط الطباعة<select aria-label="نمط الطباعة" value={periodMode} onChange={e => setPeriodMode(e.target.value)}><option value="summary">تقرير مختصر</option><option value="detailed">تقرير تفصيلي</option></select></label>
-          {periodError && <p className="form-error" role="alert">{periodError}</p>}
-          <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
-        </div>
-      </div>
-      
       <div className="reports-main">
         {expenseReadError && <div className="settings-notice" role="alert">{expenseReadError}</div>}
-        <div className="reports-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-          <h2>التقارير</h2>
+        <div className="reports-header">
+          <div><h2>التقارير</h2><p>اختر فترة واحدة لتطبيقها على جميع التقارير.</p></div>
           <button className="outline-btn" onClick={() => onNavigate('dashboard')}>العودة للرئيسية</button>
         </div>
+        <div className="reports-range-toolbar" aria-label="فلتر فترة التقارير">
+          <label>من تاريخ<input aria-label="من تاريخ" type="date" value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} /></label>
+          <label>إلى تاريخ<input aria-label="إلى تاريخ" type="date" value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></label>
+          <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
+          <button className="outline-btn" type="button" onClick={openPeriodReport}>طباعة الفترة</button>
+        </div>
+        <div className="reports-shortcuts" aria-label="اختصارات الفترة">
+          <button type="button" onClick={() => { const today = defaultBusinessDate; setPeriodFrom(today); setPeriodTo(today) }}>اليوم</button>
+          <button type="button" onClick={() => { const yesterday = shiftDate(defaultBusinessDate, -1); setPeriodFrom(yesterday); setPeriodTo(yesterday) }}>أمس</button>
+          <button type="button" onClick={() => { setPeriodFrom(shiftDate(defaultBusinessDate, -6)); setPeriodTo(defaultBusinessDate) }}>آخر 7 أيام</button>
+          <button type="button" onClick={() => { setPeriodFrom(`${defaultBusinessDate.slice(0, 7)}-01`); setPeriodTo(defaultBusinessDate) }}>هذا الشهر</button>
+        </div>
+        {periodError && <p className="form-error" role="alert">{periodError}</p>}
         
         <div className="reports-grid">
           <button className="report-card-btn" onClick={() => setReportType('comprehensive')}>
             <Icon name="file-text" size={40} />
             <b>تقرير شامل (صباحي ومسائي)</b>
-            <small>جميع المبيعات والمصاريف في اليوم المحدد</small>
+            <small>كل البيانات ضمن الفترة المختارة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('sales')}>
             <Icon name="receipt" size={40} />
             <b>تقرير الطلبات / المبيعات</b>
-            <small>كل عمليات البيع في اليوم المحدد</small>
-          </button>
-          <button className="report-card-btn" onClick={() => setReportType('morning')}>
-            <Icon name="sun" size={40} />
-            <b>تقرير صباحي</b>
-            <small>مبيعات الوردية الصباحية</small>
-          </button>
-          <button className="report-card-btn" onClick={() => setReportType('evening')}>
-            <Icon name="moon" size={40} />
-            <b>تقرير مسائي</b>
-            <small>مبيعات الوردية المسائية</small>
+            <small>كل المبيعات ضمن الفترة المختارة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('materials')}>
             <Icon name="box" size={40} />
             <b>تقرير المواد</b>
-            <small>المواد المباعة وكمياتها</small>
+            <small>المواد المباعة ضمن الفترة المختارة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('expenses')}>
             <Icon name="wallet" size={40} />
             <b>تقرير المصاريف</b>
-            <small>جميع المصاريف المسجلة من الكاشير</small>
+            <small>المصاريف ضمن الفترة المختارة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('captain')}>
             <Icon name="user" size={40} />
             <b>تقرير مبيعات الكابتن</b>
-            <small>مبيعات كل كابتن (علي - روان - محمد - ميس)</small>
-          </button>
-          <button className="report-card-btn period-report-card" onClick={openPeriodReport}>
-            <Icon name="file-text" size={40} />
-            <b>تقرير الفترة</b>
-            <small>مبيعات ومصاريف وحركات من تاريخ إلى تاريخ</small>
+            <small>مبيعات الكباتن ضمن الفترة المختارة</small>
           </button>
         </div>
       </div>
@@ -441,9 +383,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
               <div className="thermal-card-head">
                 <b className="order-no">طلب #{formatNumber(sale.orderNumber || index + 1)}</b>
                 <span className="order-dt" dir="ltr" title={`وقت البيع الفعلي: ${formatDateTime(sale.createdAt)}`}>
-                  {isOperationalScope
-                    ? `${sale.businessDate || operationalDay?.businessDate || effectiveReportDate} ${formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}`
-                    : formatDateTime(sale.createdAt)}
+                  {`${businessDateOf(sale)} ${formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}`}
                 </span>
               </div>
               <div className="thermal-card-body">
@@ -513,10 +453,10 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       content = <>
         {!periodDataset.valid || (!periodDataset.sales.length && !periodDataset.expenses.length && !periodDataset.transactions.length) ? <p className="settings-notice">{periodDataset.valid ? 'لا توجد بيانات ضمن الفترة المختارة.' : 'من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'}</p> : <>
           <table className="print-table report-summary"><tbody>{kpis.map(([label, value]) => <tr key={label}><td>{label}</td><td className="number-cell">{label === 'عدد الطلبات' ? formatNumber(value) : format(value)}</td></tr>)}</tbody></table>
-          {periodMode === 'detailed' && <>
+          <>
             <h3>التفصيل اليومي</h3><table className="print-table"><thead><tr><th>businessDate</th><th>المبيعات</th><th>نقدي</th><th>إلكتروني</th><th>المصاريف</th><th>السحوبات</th><th>الإيداعات</th><th>الصافي</th><th>الطلبات</th></tr></thead><tbody>{periodDataset.daily.map(row => <tr key={row.businessDate}><td>{row.businessDate}</td><td>{format(row.sales)}</td><td>{format(row.cash)}</td><td>{format(row.electronic)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td><td>{format(row.deposits)}</td><td>{format(row.net)}</td><td>{formatNumber(row.orders)}</td></tr>)}</tbody></table>
             <h3>تفصيل الموظفين والكاشير</h3><table className="print-table"><thead><tr><th>الاسم</th><th>الطلبات</th><th>المبيعات</th><th>المصاريف</th><th>السحوبات</th></tr></thead><tbody>{periodDataset.employees.map(row => <tr key={row.name}><td>{row.name}</td><td>{formatNumber(row.orders)}</td><td>{format(row.sales)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td></tr>)}</tbody></table>
-          </>}
+          </>
         </>}
       </>
     } else if (reportType === 'comprehensive') {
@@ -742,9 +682,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         <div className="report-view-header non-printable">
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
           <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> {reportType === 'period' ? 'طباعة تقرير الفترة' : 'طباعة A4'}</button>
+            <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button>
             <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
-            <button className="outline-btn" type="button" disabled={!directThermalReady} onClick={printReportDirect} title={directThermalReady ? 'إرسال ESC/POS إلى الخدمة المحلية' : 'فعّل الخدمة المحلية وتحقق من الطابعة أولاً'}><Icon name="printer" size={20} /> طباعة حرارية مباشرة</button>
           </div>
         </div>
         
@@ -752,8 +691,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <div className="report-paper-header">
             <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
             <h2>{title}</h2>
-            <p>{reportType === 'period' ? `من ${periodFrom} إلى ${periodTo}` : isOperationalScope ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${effectiveReportDate}`}</p>
-            {reportType === 'period' && <p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || session?.shiftName || 'الإدارة'}</p>}
+            <p>من {periodFrom} إلى {periodTo}</p>
+            <p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || session?.shiftName || 'الإدارة'}</p>
           </div>
           
           {content}

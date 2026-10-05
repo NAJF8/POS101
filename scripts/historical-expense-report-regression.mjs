@@ -18,7 +18,11 @@ assert.equal(rows[0].amount, 1000)
 assert.equal(rows[0].description, 'حليب')
 
 const reports = fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8')
-assert.match(reports, /getExpensesForBusinessDate\(expenses, effectiveReportDate, \{ operationalDayDates: expenseOperationalDayDates \}\)/)
+assert.match(reports, /filterRowsByBusinessDate\(/)
+assert.match(reports, /periodFrom, periodTo/)
+assert.doesNotMatch(reports, /نطاق التقرير/)
+assert.doesNotMatch(reports, /اختصار الفترة/)
+assert.doesNotMatch(reports, /نمط الطباعة/)
 assert.doesNotMatch(reports, /filterExpensesByOperationalDay\(expenses, operationalDay\.id\)/)
 
 const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
