@@ -795,10 +795,24 @@ const saveStaffAudit = async ({ action, entityType, entityId, before = null, aft
 }
 
 export const readCentralStaff = async () => { await staffUser(false); return objectValues(await get(financialPath(staffPath))).map(normalizeStaff).filter(row => row.id && row.name) }
-export const subscribeCentralStaff = callback => {
+export const subscribeCentralStaff = (callback, onError = error => console.error('STAFF_SUBSCRIBE_ERROR', error)) => {
   let active = true
   let stop = () => {}
-  void staffUser(false).then(() => { if (!active) return; stop = onValue(financialPath(staffPath), snapshot => callback(objectValues(snapshot).map(normalizeStaff).filter(row => row.id && row.name)), () => callback([])) }).catch(() => {})
+  void staffUser(false).then(() => {
+    if (!active) return
+    console.info('STAFF_SUBSCRIBE_START')
+    stop = onValue(financialPath(staffPath), snapshot => {
+      const rows = objectValues(snapshot).map(normalizeStaff).filter(row => row.id && row.name)
+      console.info('STAFF_SNAPSHOT_COUNT', rows.length)
+      if (active) callback(rows)
+    }, error => {
+      console.error('STAFF_SUBSCRIBE_ERROR', error)
+      onError(error)
+    })
+  }).catch(error => {
+    console.error('STAFF_AUTH_ERROR', error)
+    onError(error)
+  })
   return () => { active = false; stop() }
 }
 export const saveCentralStaff = async (staff, { actor = {} } = {}) => {

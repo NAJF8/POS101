@@ -258,7 +258,6 @@ export default function App() {
         return
       }
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
-        staffListener.current = subscribeCentralStaff(setStaff)
         cashboxListener.current = subscribeCentralCashboxTransactions(setCashboxTransactions)
         settlementListener.current = subscribeCentralSettlements(setSettlements)
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
@@ -303,10 +302,28 @@ export default function App() {
 
   useEffect(() => {
     if (!centralAuthUser || !canManageStaff(centralAuthUser, staffAuthorizationRecord)) return
-    void readCentralStaff().then(setStaff).catch(() => {})
-    staffListener.current?.()
-    staffListener.current = subscribeCentralStaff(setStaff)
+    let active = true
+    const loadStaff = async () => {
+      try {
+        const rows = await readCentralStaff()
+        if (!active) return
+        console.info('STAFF_AUTH_OK')
+        console.info('STAFF_DIRECT_READ_COUNT', rows.length)
+        console.info('STAFF_DIRECT_READ_NAMES', rows.map(row => row.name).join('، '))
+        setStaff(rows)
+        console.info('STAFF_SET_STATE_COUNT', rows.length)
+        staffListener.current = subscribeCentralStaff(rows => {
+          if (!active) return
+          setStaff(rows)
+          console.info('STAFF_SET_STATE_COUNT', rows.length)
+        })
+      } catch (error) {
+        console.error('STAFF_DIRECT_READ_ERROR', error)
+      }
+    }
+    void loadStaff()
     return () => {
+      active = false
       staffListener.current?.()
       staffListener.current = null
     }
