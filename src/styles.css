@@ -49,6 +49,7 @@
 .employee-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } .employee-card { display: grid; justify-items: start; }
 .staff-settings-form { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; } .staff-settings-form input, .staff-settings-form select { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; } .staff-settings-list { display: grid; gap: 8px; margin-top: 16px; } .staff-settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid #eeeae2; border-radius: 10px; } .staff-settings-row div { display: grid; gap: 4px; } .staff-settings-row small { color: #718078; } .staff-settings-row.is-disabled { opacity: .58; } .settlement-actual-cash { display: grid; gap: 5px; } .settlement-actual-cash input { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; }
 @media (max-width: 850px) { .financial-grid { grid-template-columns: 1fr; } .financial-heading { align-items: stretch; } }
+@media print { @page { size: A4 portrait; margin: 12mm; } .financial-center { padding: 0; background: #fff; color: #000; } .financial-center .financial-heading button, .financial-center .financial-filters, .financial-center form, .financial-center button { display: none !important; } .financial-card, .financial-center > .settings-card { box-shadow: none; border: 1px solid #999; break-inside: avoid; } .financial-table { font-size: 9pt; } .financial-table th, .financial-table td { padding: 4px; color: #000; } .financial-grid { display: block; } .financial-grid > .settings-card { margin-bottom: 8mm; } }
 .settings-heading, .settings-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .settings-heading { max-width: 1180px; margin: 0 auto 20px; }
 .settings-heading h1 { margin: 8px 0 3px; font-size: clamp(28px, 4vw, 42px); }
@@ -136,6 +137,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 html.settings-route, body.settings-route { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
+html.cashbox-route, body.cashbox-route { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 body {
   background: var(--bg-dark);
   color: var(--coffee);
@@ -155,6 +157,7 @@ input, textarea, select { cursor: text; }
   overflow: hidden;
 }
 .app-shell.settings-app-shell { height: auto; min-height: 100vh; overflow: visible; }
+.app-shell.cashbox-app-shell { height: auto; min-height: 100vh; overflow: visible; }
 
 /* ============================================================
    HEADER

@@ -7,7 +7,9 @@ import { readLocalSales, numberValue, filterReportSales } from '../services/repo
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { filterSalesByOperationalDay } from '../services/operationalDayReport.js'
 import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
+import { calculateCashboxBalance } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
+import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 const format = formatMoney
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
 // intentionally narrower than the Windows driver's confirmed 72.1mm limit.
@@ -23,6 +25,8 @@ const toDateInputValue = value => {
 }
 
 const getDefaultReportDate = () => toDateInputValue(new Date())
+const getBaghdadDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
+const shiftDate = (dateText, days) => { const date = new Date(`${dateText}T12:00:00+03:00`); date.setDate(date.getDate() + days); return getBaghdadDate(date) }
 
 const getLocalDayBounds = dateText => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateText || ''))
@@ -127,8 +131,13 @@ const thermalMaterialsStyles = `
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 `
 
-export default function Reports({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null }) {
+export default function Reports({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [] }) {
   const [reportType, setReportType] = useState(null)
+  const [periodFrom, setPeriodFrom] = useState(() => shiftDate(getDefaultReportDate(), -6))
+  const [periodTo, setPeriodTo] = useState(() => getDefaultReportDate())
+  const [periodPreset, setPeriodPreset] = useState('last7')
+  const [periodMode, setPeriodMode] = useState('detailed')
+  const [periodError, setPeriodError] = useState('')
   
   const [reportDate, setReportDate] = useState(() => operationalDay?.businessDate || getDefaultReportDate())
   const [reportScope, setReportScope] = useState(() => operationalDay?.id ? 'operational' : 'calendar')
@@ -160,35 +169,32 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   }, [])
   useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
   const [expenseOperationalDayDates, setExpenseOperationalDayDates] = useState({})
+  const [expenseReadError, setExpenseReadError] = useState('')
   const normalizeReportExpenses = (rows, operationalDayDates = expenseOperationalDayDates) => (Array.isArray(rows) ? rows : []).map(expense => {
     return normalizeExpense(expense, { operationalDayDates })
   })
   const [expenses, setExpenses] = useState(() => readLocalExpenses().map(normalizeExpense))
   useEffect(() => {
     let active = true
-    const refreshLocal = () => {
-      if (!active) return
-      setExpenses(current => {
-        const latest = readLocalExpenses()
-        return normalizeReportExpenses(latest, expenseOperationalDayDates)
-      })
-    }
     const refreshCentral = async () => {
       try {
-        const result = await readCentralExpensesForReports()
+        // readCentralExpensesForReports() remains the documented report entry point.
+        const result = await readCentralExpensesForReports({ includeAllLocal: true })
         if (!active) return
         const operationalDayDates = result?.operationalDayDates || {}
         setExpenseOperationalDayDates(operationalDayDates)
         setExpenses(normalizeReportExpenses(result?.expenses || [], operationalDayDates))
-      } catch {
-        refreshLocal()
+        setExpenseReadError('')
+      } catch (error) {
+        if (!active) return
+        setExpenseReadError(error?.message || 'تعذر قراءة المصاريف المركزية بعد التحقق من تسجيل الدخول.')
       }
     }
-    window.addEventListener('pos101-expenses-updated', refreshLocal)
+    window.addEventListener('pos101-expenses-updated', refreshCentral)
     void refreshCentral()
     return () => {
       active = false
-      window.removeEventListener('pos101-expenses-updated', refreshLocal)
+      window.removeEventListener('pos101-expenses-updated', refreshCentral)
     }
   }, [])
 
@@ -204,6 +210,46 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   const filteredExpenses = useMemo(() => {
     return getExpensesForBusinessDate(expenses, effectiveReportDate, { operationalDayDates: expenseOperationalDayDates })
   }, [expenses, effectiveReportDate, expenseOperationalDayDates])
+
+  const periodDataset = useMemo(() => {
+    const valid = isValidDateRange(periodFrom, periodTo)
+    const rangeSales = filterRowsByBusinessDate(sales, periodFrom, periodTo)
+    const rangeExpenses = filterRowsByBusinessDate(expenses.map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)
+    const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo)
+    const dailyMap = new Map()
+    const ensureDay = date => { if (!dailyMap.has(date)) dailyMap.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, adjustments: 0, net: 0, orders: 0 }); return dailyMap.get(date) }
+    rangeSales.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.total ?? row.subtotal); day.sales += value; day.orders += 1; if ((row.paymentMethod || row.payment?.method) === 'cash') day.cash += value; if ((row.paymentMethod || row.payment?.method) === 'electronic') day.electronic += value })
+    rangeExpenses.forEach(row => { ensureDay(businessDateOf(row)).expenses += numberValue(row.amount) })
+    rangeTransactions.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.amount); if (row.type === 'withdrawal') day.withdrawals += value; if (row.type === 'deposit' || row.type === 'return') day.deposits += value; if (row.type === 'adjustment') day.adjustments += numberValue(row.signedAmount ?? row.amount) })
+    const daily = [...dailyMap.values()].sort((a, b) => a.businessDate.localeCompare(b.businessDate)).map(row => ({ ...row, net: row.cash - row.expenses - row.withdrawals + row.deposits + row.adjustments }))
+    const grossSales = rangeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
+    const cashSales = rangeSales.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
+    const electronicSales = rangeSales.filter(row => (row.paymentMethod || row.payment?.method) === 'electronic').reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
+    const expensesTotal = rangeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const withdrawals = rangeTransactions.filter(row => row.type === 'withdrawal').reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const deposits = rangeTransactions.filter(row => row.type === 'deposit' || row.type === 'return').reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const adjustments = rangeTransactions.filter(row => row.type === 'adjustment').reduce((sum, row) => sum + numberValue(row.signedAmount ?? row.amount), 0)
+    const beforeTransactions = (Array.isArray(cashboxTransactions) ? cashboxTransactions : []).filter(row => businessDateOf(row) < periodFrom)
+    const beforeSales = (Array.isArray(sales) ? sales : []).filter(row => businessDateOf(row) < periodFrom && (row.paymentMethod || row.payment?.method) === 'cash')
+    const beforeExpenses = (Array.isArray(expenses) ? expenses : []).filter(row => businessDateOf(row) < periodFrom)
+    const beforeBalance = calculateCashboxBalance(beforeTransactions) + beforeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - beforeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const endTransactions = (Array.isArray(cashboxTransactions) ? cashboxTransactions : []).filter(row => businessDateOf(row) <= periodTo)
+    const endSales = (Array.isArray(sales) ? sales : []).filter(row => businessDateOf(row) <= periodTo && (row.paymentMethod || row.payment?.method) === 'cash')
+    const endExpenses = (Array.isArray(expenses) ? expenses : []).filter(row => businessDateOf(row) <= periodTo)
+    const endBalance = calculateCashboxBalance(endTransactions) + endSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - endExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const employeeMap = new Map()
+    const addEmployee = (row, value, kind) => { const name = row.employeeNameSnapshot || row.cashierNameSnapshot || row.person || row.seller || row.cashierName || 'غير محدد'; const key = String(row.employeeId || row.cashierId || name); const current = employeeMap.get(key) || { name, orders: 0, sales: 0, expenses: 0, withdrawals: 0 }; if (kind === 'sale') { current.orders += 1; current.sales += value } else if (kind === 'withdrawal') current.withdrawals += value; else current.expenses += value; employeeMap.set(key, current) }
+    rangeSales.forEach(row => addEmployee(row, numberValue(row.total ?? row.subtotal), 'sale'))
+    rangeExpenses.forEach(row => addEmployee(row, numberValue(row.amount), 'expense'))
+    rangeTransactions.filter(row => row.type === 'withdrawal').forEach(row => addEmployee(row, numberValue(row.amount), 'withdrawal'))
+    return { valid, sales: rangeSales, expenses: rangeExpenses, transactions: rangeTransactions, daily, employees: [...employeeMap.values()], summary: { grossSales, cashSales, electronicSales, expensesTotal, withdrawals, deposits, adjustments, orderCount: rangeSales.length, averageOrder: rangeSales.length ? grossSales / rangeSales.length : 0, netCash: cashSales - expensesTotal - withdrawals + deposits + adjustments, beforeBalance, endBalance } }
+  }, [periodFrom, periodTo, sales, expenses, cashboxTransactions, expenseOperationalDayDates])
+
+  const openPeriodReport = () => {
+    if (!periodFrom || !periodTo || periodFrom > periodTo) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
+    setPeriodError('')
+    setReportType('period')
+  }
 
   const printReport = (format) => {
     const paper = document.querySelector('.report-paper')
@@ -246,7 +292,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
 
   const printReportDirect = () => {
     if (!directThermalReady || !onDirectThermalPrint) return
-    const titleByType = { comprehensive: 'تقرير شامل', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
+    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
       : undefined
@@ -274,10 +320,19 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
           </label>
           <label>التاريخ<input aria-label="التاريخ" type="date" value={effectiveReportDate} disabled={isOperationalScope} onChange={e => setReportDate(e.target.value)} /></label>
           {isOperationalScope && <small>يعرض يوم العمل {operationalDay.businessDate} كاملاً حتى تضغط إنهاء اليوم. لا يتغير عند منتصف الليل.</small>}
+          <hr />
+          <h4>تقرير فترة مخصصة</h4>
+          <label>من تاريخ<input aria-label="من تاريخ" type="date" value={periodFrom} onChange={e => { setPeriodFrom(e.target.value); setPeriodPreset('custom') }} /></label>
+          <label>إلى تاريخ<input aria-label="إلى تاريخ" type="date" value={periodTo} onChange={e => { setPeriodTo(e.target.value); setPeriodPreset('custom') }} /></label>
+          <label>اختصار الفترة<select aria-label="اختصار الفترة" value={periodPreset} onChange={e => { const next = e.target.value; const today = getDefaultReportDate(); setPeriodPreset(next); if (next === 'today') { setPeriodFrom(today); setPeriodTo(today) } else if (next === 'yesterday') { const yesterday = shiftDate(today, -1); setPeriodFrom(yesterday); setPeriodTo(yesterday) } else if (next === 'last7') { setPeriodFrom(shiftDate(today, -6)); setPeriodTo(today) } else if (next === 'week') { const day = new Date(`${today}T12:00:00+03:00`).getDay(); const start = shiftDate(today, -(day === 0 ? 6 : day - 1)); setPeriodFrom(start); setPeriodTo(today) } else if (next === 'month') { setPeriodFrom(`${today.slice(0, 7)}-01`); setPeriodTo(today) } else if (next === 'previous-month') { const first = new Date(`${today.slice(0, 7)}-01T12:00:00+03:00`); first.setMonth(first.getMonth() - 1); const firstKey = getBaghdadDate(first); setPeriodFrom(`${firstKey.slice(0, 7)}-01`); setPeriodTo(shiftDate(`${today.slice(0, 7)}-01`, -1)) } }}><option value="today">اليوم</option><option value="yesterday">أمس</option><option value="last7">آخر 7 أيام</option><option value="week">هذا الأسبوع</option><option value="month">هذا الشهر</option><option value="previous-month">الشهر السابق</option><option value="custom">فترة مخصصة</option></select></label>
+          <label>نمط الطباعة<select aria-label="نمط الطباعة" value={periodMode} onChange={e => setPeriodMode(e.target.value)}><option value="summary">تقرير مختصر</option><option value="detailed">تقرير تفصيلي</option></select></label>
+          {periodError && <p className="form-error" role="alert">{periodError}</p>}
+          <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
         </div>
       </div>
       
       <div className="reports-main">
+        {expenseReadError && <div className="settings-notice" role="alert">{expenseReadError}</div>}
         <div className="reports-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
           <h2>التقارير</h2>
           <button className="outline-btn" onClick={() => onNavigate('dashboard')}>العودة للرئيسية</button>
@@ -318,6 +373,11 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
             <Icon name="user" size={40} />
             <b>تقرير مبيعات الكابتن</b>
             <small>مبيعات كل كابتن (علي - روان - محمد - ميس)</small>
+          </button>
+          <button className="report-card-btn period-report-card" onClick={openPeriodReport}>
+            <Icon name="file-text" size={40} />
+            <b>تقرير الفترة</b>
+            <small>مبيعات ومصاريف وحركات من تاريخ إلى تاريخ</small>
           </button>
         </div>
       </div>
@@ -420,7 +480,20 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
       </section>
     }
 
-    if (reportType === 'comprehensive') {
+    if (reportType === 'period') {
+      title = 'تقرير الفترة'
+      const s = periodDataset.summary
+      const kpis = [['إجمالي المبيعات', s.grossSales], ['المبيعات النقدية', s.cashSales], ['المبيعات الإلكترونية', s.electronicSales], ['إجمالي المصاريف', s.expensesTotal], ['سحوبات الصندوق', s.withdrawals], ['إيداعات الصندوق', s.deposits], ['التعديلات', s.adjustments], ['عدد الطلبات', s.orderCount], ['متوسط قيمة الطلب', s.averageOrder], ['صافي النقد', s.netCash], ['رصيد أول الفترة', s.beforeBalance], ['رصيد آخر الفترة', s.endBalance]]
+      content = <>
+        {!periodDataset.valid || (!periodDataset.sales.length && !periodDataset.expenses.length && !periodDataset.transactions.length) ? <p className="settings-notice">{periodDataset.valid ? 'لا توجد بيانات ضمن الفترة المختارة.' : 'من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'}</p> : <>
+          <table className="print-table report-summary"><tbody>{kpis.map(([label, value]) => <tr key={label}><td>{label}</td><td className="number-cell">{label === 'عدد الطلبات' ? formatNumber(value) : format(value)}</td></tr>)}</tbody></table>
+          {periodMode === 'detailed' && <>
+            <h3>التفصيل اليومي</h3><table className="print-table"><thead><tr><th>businessDate</th><th>المبيعات</th><th>نقدي</th><th>إلكتروني</th><th>المصاريف</th><th>السحوبات</th><th>الإيداعات</th><th>الصافي</th><th>الطلبات</th></tr></thead><tbody>{periodDataset.daily.map(row => <tr key={row.businessDate}><td>{row.businessDate}</td><td>{format(row.sales)}</td><td>{format(row.cash)}</td><td>{format(row.electronic)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td><td>{format(row.deposits)}</td><td>{format(row.net)}</td><td>{formatNumber(row.orders)}</td></tr>)}</tbody></table>
+            <h3>تفصيل الموظفين والكاشير</h3><table className="print-table"><thead><tr><th>الاسم</th><th>الطلبات</th><th>المبيعات</th><th>المصاريف</th><th>السحوبات</th></tr></thead><tbody>{periodDataset.employees.map(row => <tr key={row.name}><td>{row.name}</td><td>{formatNumber(row.orders)}</td><td>{format(row.sales)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td></tr>)}</tbody></table>
+          </>}
+        </>}
+      </>
+    } else if (reportType === 'comprehensive') {
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
       const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses)
@@ -643,7 +716,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
         <div className="report-view-header non-printable">
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
           <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4</button>
+            <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> {reportType === 'period' ? 'طباعة تقرير الفترة' : 'طباعة A4'}</button>
             <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
             <button className="outline-btn" type="button" disabled={!directThermalReady} onClick={printReportDirect} title={directThermalReady ? 'إرسال ESC/POS إلى الخدمة المحلية' : 'فعّل الخدمة المحلية وتحقق من الطابعة أولاً'}><Icon name="printer" size={20} /> طباعة حرارية مباشرة</button>
           </div>
@@ -653,7 +726,8 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
           <div className="report-paper-header">
             <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
             <h2>{title}</h2>
-            <p>{isOperationalScope ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${effectiveReportDate}`}</p>
+            <p>{reportType === 'period' ? `من ${periodFrom} إلى ${periodTo}` : isOperationalScope ? `اليوم التشغيلي: ${operationalDay.businessDate}` : `التاريخ: ${effectiveReportDate}`}</p>
+            {reportType === 'period' && <p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || session?.shiftName || 'الإدارة'}</p>}
           </div>
           
           {content}

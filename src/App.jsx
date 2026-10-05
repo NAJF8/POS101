@@ -14,7 +14,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, subscribeCentralCashboxTransactions, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -102,8 +102,10 @@ export default function App() {
   const expenseListener = useRef(null)
   const staffListener = useRef(null)
   const cashboxListener = useRef(null)
+  const settlementListener = useRef(null)
   const [staff, setStaff] = useState([])
   const [cashboxTransactions, setCashboxTransactions] = useState([])
+  const [settlements, setSettlements] = useState([])
   const saleInFlight = useRef(false)
 
   const downloadSalesBackup = useCallback(() => {
@@ -172,10 +174,15 @@ export default function App() {
   useEffect(() => {
     const settingsRoute = currentView === 'settings'
     document.documentElement.classList.toggle('settings-route', settingsRoute)
+    const cashboxRoute = currentView === 'cashbox'
+    document.documentElement.classList.toggle('cashbox-route', cashboxRoute)
     document.body.classList.toggle('settings-route', settingsRoute)
+    document.body.classList.toggle('cashbox-route', cashboxRoute)
     return () => {
       document.documentElement.classList.remove('settings-route')
       document.body.classList.remove('settings-route')
+      document.documentElement.classList.remove('cashbox-route')
+      document.body.classList.remove('cashbox-route')
     }
   }, [currentView])
 
@@ -202,6 +209,7 @@ export default function App() {
       expenseListener.current = null
       staffListener.current?.(); staffListener.current = null
       cashboxListener.current?.(); cashboxListener.current = null
+      settlementListener.current?.(); settlementListener.current = null
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
@@ -215,6 +223,7 @@ export default function App() {
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         staffListener.current = subscribeCentralStaff(setStaff)
         cashboxListener.current = subscribeCentralCashboxTransactions(setCashboxTransactions)
+        settlementListener.current = subscribeCentralSettlements(setSettlements)
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
         // Migrate the device cache before attaching the listener. Otherwise an
         // initial empty RTDB snapshot could overwrite legacy local expenses.
@@ -248,6 +257,7 @@ export default function App() {
       expenseListener.current?.()
       staffListener.current?.()
       cashboxListener.current?.()
+      settlementListener.current?.()
       setAdminCentralSales([])
       setProductAuthUser(null)
     }
@@ -701,7 +711,7 @@ export default function App() {
   }, [])
 
   return (
-    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''}`}>
+    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''}`}>
       {session && (
         <Header
           session={session}
@@ -722,7 +732,7 @@ export default function App() {
       {currentView === 'settings' && (session || adminReady) && (
         <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
-      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter staff={staff} transactions={cashboxTransactions} onSaveStaff={saveCentralStaff} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
+      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
         <OrderHistoryMenu
@@ -771,6 +781,7 @@ export default function App() {
         <Reports
           session={session || { name: 'الإدارة', status: 'admin-readonly' }}
           operationalDay={operationalDay}
+          cashboxTransactions={cashboxTransactions}
           salesOverride={adminReady ? adminCentralSales : null}
           onNavigate={setCurrentView}
           onDirectThermalPrint={session ? printReportDirect : undefined}
@@ -794,7 +805,7 @@ export default function App() {
           </header>
           <div className="admin-central-actions"><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
-          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} salesOverride={adminCentralSales} onNavigate={() => {}} />
+          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} salesOverride={adminCentralSales} onNavigate={() => {}} />
         </section>
       )}
 

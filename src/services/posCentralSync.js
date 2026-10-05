@@ -750,6 +750,7 @@ export const normalizeStaff = (value, id) => ({
   code: String(value?.code || '').trim(),
   role: ['cashier', 'employee', 'manager'].includes(value?.role) ? value.role : 'employee',
   active: value?.active !== false,
+  deactivatedAt: value?.deactivatedAt || null,
 })
 
 export const readCentralStaff = async () => { await financialUser(false); return objectValues(await get(financialPath(staffPath))).map(normalizeStaff).filter(row => row.id && row.name) }
@@ -764,7 +765,9 @@ export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
   const id = String(staff?.id || `staff-${crypto.randomUUID()}`).trim()
   const existing = (await get(financialPath(`${staffPath}/${id}`))).val() || null
   const now = Date.now()
-  const payload = { ...normalizeStaff({ ...existing, ...staff, id }), createdAt: existing?.createdAt || now, updatedAt: now, createdBy: existing?.createdBy || user.uid, updatedBy: user.uid }
+  const wasActive = existing?.active !== false
+  const isActive = staff?.active !== false
+  const payload = { ...normalizeStaff({ ...existing, ...staff, id }), createdAt: existing?.createdAt || now, updatedAt: now, deactivatedAt: !isActive && wasActive ? now : (isActive ? null : (existing?.deactivatedAt || now)), createdBy: existing?.createdBy || user.uid, updatedBy: user.uid }
   if (!payload.name) throw new Error('اسم الموظف مطلوب.')
   await set(financialPath(`${staffPath}/${id}`), payload)
   const readBack = await get(financialPath(`${staffPath}/${id}`))
@@ -853,7 +856,12 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const transactionPayload = { id: transactionId, type: 'expense', amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
   const auditId = `audit-linked-expense-${safeKey(expenseId)}`
   const audit = financialAuditPayload({ id: auditId, user, action: 'create', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: transactionPayload.reason, businessDate: expensePayload.businessDate })
-  await update(ref(db), { [`pos101_expenses/${expenseId}`]: expensePayload, [`${cashboxTransactionsPath}/${transactionId}`]: transactionPayload, [`${auditPath}/${auditId}`]: audit })
+  try {
+    await update(ref(db), { [`pos101_expenses/${expenseId}`]: expensePayload, [`${cashboxTransactionsPath}/${transactionId}`]: transactionPayload, [`${auditPath}/${auditId}`]: audit })
+  } catch (error) {
+    try { await saveFinancialAudit({ action: 'failed linked write', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: error?.message || 'atomic update failed', businessDate: expensePayload.businessDate }) } catch {}
+    throw error
+  }
   const readBack = await get(ref(db, `pos101_expenses/${expenseId}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من المصروف المرتبط.')
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== expenseId), normalizeExpense({ ...readBack.val(), id: expenseId })])
