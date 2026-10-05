@@ -302,6 +302,17 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!centralAuthUser || !canManageStaff(centralAuthUser, staffAuthorizationRecord)) return
+    void readCentralStaff().then(setStaff).catch(() => {})
+    staffListener.current?.()
+    staffListener.current = subscribeCentralStaff(setStaff)
+    return () => {
+      staffListener.current?.()
+      staffListener.current = null
+    }
+  }, [centralAuthUser?.uid, staffAuthorizationRecord?.role, staffAuthorizationRecord?.active, staffAuthorizationRecord?.authorized])
+
+  useEffect(() => {
     if (staffMigrationAttempted.current || !canManageStaff(centralAuth()?.currentUser) || !centralSales.length) return
     const candidates = collectLegacyStaffNames(centralSales)
     if (!candidates.length) {
