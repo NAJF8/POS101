@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
@@ -10,6 +10,8 @@ import { getExpensesForBusinessDate, normalizeExpense, sumExpenses } from '../se
 import { calculateCashboxBalance } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
+
+const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
 // intentionally narrower than the Windows driver's confirmed 72.1mm limit.
@@ -180,16 +182,25 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   useEffect(() => { if (Array.isArray(salesOverride)) setSales(salesOverride) }, [salesOverride])
   const [expenseOperationalDayDates, setExpenseOperationalDayDates] = useState({})
   const [expenseReadError, setExpenseReadError] = useState('')
+  const expenseReadInFlight = useRef(false)
+  const expenseReadQueued = useRef(false)
   const normalizeReportExpenses = (rows, operationalDayDates = expenseOperationalDayDates) => (Array.isArray(rows) ? rows : []).map(expense => {
     return normalizeExpense(expense, { operationalDayDates })
   })
   const [expenses, setExpenses] = useState(() => readLocalExpenses().map(normalizeExpense))
   useEffect(() => {
     let active = true
+    let refreshTimer = null
+    const scheduleRefresh = () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => { refreshTimer = null; void refreshCentral() }, 200)
+    }
     const refreshCentral = async () => {
+      if (expenseReadInFlight.current) { expenseReadQueued.current = true; return }
+      expenseReadInFlight.current = true
       try {
         // readCentralExpensesForReports() remains the documented report entry point.
-        const result = await readCentralExpensesForReports({ includeAllLocal: true })
+        const result = await readCentralExpensesForReports({ includeAllLocal: true, persistCache: false, dispatchUpdate: false })
         if (!active) return
         const operationalDayDates = result?.operationalDayDates || {}
         setExpenseOperationalDayDates(operationalDayDates)
@@ -198,13 +209,17 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       } catch (error) {
         if (!active) return
         setExpenseReadError(error?.message || 'تعذر قراءة المصاريف المركزية بعد التحقق من تسجيل الدخول.')
+      } finally {
+        expenseReadInFlight.current = false
+        if (active && expenseReadQueued.current) { expenseReadQueued.current = false; scheduleRefresh() }
       }
     }
-    window.addEventListener('pos101-expenses-updated', refreshCentral)
+    window.addEventListener('pos101-expenses-updated', scheduleRefresh)
     void refreshCentral()
     return () => {
       active = false
-      window.removeEventListener('pos101-expenses-updated', refreshCentral)
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      window.removeEventListener('pos101-expenses-updated', scheduleRefresh)
     }
   }, [])
 
@@ -222,6 +237,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   }, [expenses, effectiveReportDate, expenseOperationalDayDates])
 
   const periodDataset = useMemo(() => {
+    if (reportType !== 'period') return EMPTY_PERIOD_DATASET
     const valid = isValidDateRange(periodFrom, periodTo)
     const rangeSales = filterRowsByBusinessDate(sales, periodFrom, periodTo)
     const rangeExpenses = filterRowsByBusinessDate((Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)

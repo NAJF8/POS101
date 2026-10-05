@@ -111,7 +111,12 @@ const readCachedExpenses = () => {
     return Array.isArray(value) ? value.map(normalizeExpense) : []
   } catch { return [] }
 }
-const writeLocalExpenses = expenses => localStorage.setItem(EXPENSES_KEY, JSON.stringify(expenses))
+const writeLocalExpenses = expenses => {
+  const next = JSON.stringify(expenses)
+  if (localStorage.getItem(EXPENSES_KEY) === next) return false
+  localStorage.setItem(EXPENSES_KEY, next)
+  return true
+}
 const getDeviceId = () => {
   const existing = localStorage.getItem(DEVICE_ID_KEY)
   if (existing) return existing
@@ -501,7 +506,7 @@ export const readLocalExpenses = () => readCachedExpenses()
 // rows can be assigned to the business date of their original operational day.
 // This is read-only with respect to Firebase; the local cache is only merged,
 // never replaced, so pending/legacy rows remain protected.
-export const readCentralExpensesForReports = async ({ includeAllLocal = false } = {}) => {
+export const readCentralExpensesForReports = async ({ includeAllLocal = false, persistCache = true, dispatchUpdate = true } = {}) => {
   await requireExpenseRole(false)
   const [expensesSnapshot, daysSnapshot] = await Promise.all([
     get(expensesRef()),
@@ -530,8 +535,8 @@ export const readCentralExpensesForReports = async ({ includeAllLocal = false } 
   const reportLocalExpenses = includeAllLocal ? localCacheExpenses : pendingLocalExpenses
   const merged = mergeExpensesConservatively(reportLocalExpenses, centralExpenses)
   const protectedLocalCache = mergeExpensesConservatively(localCacheExpenses, centralExpenses)
-  writeLocalExpenses(protectedLocalCache)
-  dispatchExpensesUpdated()
+  const cacheChanged = persistCache ? writeLocalExpenses(protectedLocalCache) : false
+  if (cacheChanged && dispatchUpdate) dispatchExpensesUpdated()
   return {
     expenses: merged,
     centralExpenses,
@@ -558,8 +563,7 @@ const mergeCentralExpensesWithPendingLocal = centralExpenses => {
 
 const cacheCentralExpenses = expenses => {
   const merged = mergeExpensesConservatively(readCachedExpenses(), expenses)
-  writeLocalExpenses(merged)
-  dispatchExpensesUpdated()
+  if (writeLocalExpenses(merged)) dispatchExpensesUpdated()
   return merged
 }
 
