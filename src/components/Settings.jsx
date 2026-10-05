@@ -107,10 +107,11 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
   </div>
 }
 
-export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets, onFullRecovery, fullRecoveryBusy }) {
+export default function Settings({ products, categories, canWrite, onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets, onFullRecovery, fullRecoveryBusy, staff = [], onSaveStaff }) {
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
   const [discountForm, setDiscountForm] = useState(() => ({ baly: String(discountPresets.baly), toters: String(discountPresets.toters) }))
+  const [staffForm, setStaffForm] = useState({ id: '', name: '', code: '', role: 'cashier', active: true })
   const sorted = useMemo(() => products.slice().sort((a, b) => Number(b.enabled !== false) - Number(a.enabled !== false) || String(a.name).localeCompare(String(b.name), 'ar')), [products])
   const save = async product => { await onSave(product); setNotice('تم حفظ المنتج وتحديث الكاشير عند اتصاله.'); window.setTimeout(() => setNotice(''), 4000) }
   const toggle = product => save({ ...product, enabled: product.enabled === false }).catch(error => setNotice(error?.message || 'تعذر حفظ حالة المنتج.'))
@@ -125,6 +126,7 @@ export default function Settings({ products, categories, canWrite, onSave, onNav
     setNotice('تم حفظ خصومات بلي وتوترز على جهاز الكاشير.')
     window.setTimeout(() => setNotice(''), 4000)
   }
+  const saveStaff = async event => { event.preventDefault(); if (!staffForm.name.trim()) return; await onSaveStaff?.({ ...staffForm, name: staffForm.name.trim(), code: staffForm.code.trim() }); setStaffForm({ id: '', name: '', code: '', role: 'cashier', active: true }) }
   return <section className="settings-page" dir="rtl">
     <button className="full-recovery-action settings-recovery-action" type="button" onClick={onFullRecovery} disabled={fullRecoveryBusy}>{fullRecoveryBusy ? 'جارٍ إصلاح ومزامنة النظام...' : 'إصلاح ومزامنة النظام'}</button>
     <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات فقط</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
@@ -142,6 +144,7 @@ export default function Settings({ products, categories, canWrite, onSave, onNav
       </div>
       <button className="primary-action" type="submit">حفظ الخصومات</button>
     </form>
+    <section className="settings-card staff-management-card"><div className="settings-card-heading"><div><h2>إدارة الكاشير والموظفين</h2><p>الأسماء المركزية تُستخدم في المصاريف والصندوق والتقارير. التعطيل يحافظ على السجلات القديمة.</p></div></div><form className="staff-settings-form" onSubmit={saveStaff}><input value={staffForm.name} onChange={e => setStaffForm(v => ({ ...v, name: e.target.value }))} placeholder="اسم الموظف" required /><input value={staffForm.code} onChange={e => setStaffForm(v => ({ ...v, code: e.target.value }))} placeholder="الكود" /><select value={staffForm.role} onChange={e => setStaffForm(v => ({ ...v, role: e.target.value }))}><option value="cashier">cashier</option><option value="employee">employee</option><option value="manager">manager</option></select><button className="primary-action" disabled={!canWrite}>{staffForm.id ? 'حفظ التعديل' : 'إضافة موظف'}</button></form><div className="staff-settings-list">{staff.map(row => <div className={`staff-settings-row ${row.active === false ? 'is-disabled' : ''}`} key={row.id}><div><b>{row.name}</b><small>{row.code || 'بدون كود'} · {row.role}</small></div><button type="button" disabled={!canWrite} onClick={() => setStaffForm({ id: row.id, name: row.name, code: row.code || '', role: row.role, active: row.active !== false })}>تعديل</button><button type="button" disabled={!canWrite} onClick={() => onSaveStaff?.({ ...row, active: row.active === false })}>{row.active === false ? 'تفعيل' : 'تعطيل'}</button></div>)}</div></section>
     {notice && <p className="settings-notice" role="status">{notice}</p>}
     {editing && <ProductForm product={editing.id ? editing : null} products={products} categories={categories} onClose={() => setEditing(null)} onSave={save} />}
   </section>

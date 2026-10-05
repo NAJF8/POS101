@@ -32,6 +32,23 @@
 
 /* Settings / product management */
 .settings-page { min-height: calc(100vh - 88px); padding: 28px clamp(16px, 4vw, 56px) 48px; background: #f8f6f1; color: #26382e; }
+.financial-center { min-height: calc(100vh - 88px); padding: 28px clamp(16px, 4vw, 56px) 48px; background: #f8f6f1; color: #26382e; }
+.financial-heading, .financial-filters, .financial-form { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.financial-heading { max-width: 1180px; margin: 0 auto 20px; justify-content: space-between; }
+.financial-heading h1 { margin: 8px 0 3px; font-size: clamp(28px, 4vw, 42px); }
+.financial-filters, .financial-grid, .financial-center > .settings-card { max-width: 1180px; margin: 0 auto 16px; }
+.financial-filters { padding: 14px; background: #fff; border: 1px solid #e8e3d9; border-radius: 14px; }
+.financial-filters label, .financial-form input, .financial-form select { display: grid; gap: 5px; }
+.financial-filters input, .financial-form input, .financial-form select { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; }
+.financial-cards { max-width: 1180px; margin: 0 auto 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; }
+.financial-card { padding: 16px; border-radius: 14px; background: #fff; border: 1px solid #e8e3d9; display: grid; gap: 8px; }
+.financial-card span { color: #718078; font-size: 13px; } .financial-card strong { color: #245326; font-size: 20px; }
+.financial-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
+.financial-table-wrap { overflow-x: auto; margin-top: 16px; } .financial-table { width: 100%; border-collapse: collapse; min-width: 650px; } .financial-table th, .financial-table td { padding: 9px; border: 1px solid #e8e3d9; text-align: right; }
+.staff-list, .employee-cards { display: grid; gap: 9px; margin-top: 16px; } .staff-row, .employee-card { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 11px; border: 1px solid #eeeae2; border-radius: 10px; } .staff-row span, .staff-row small, .employee-card span { color: #718078; }
+.employee-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } .employee-card { display: grid; justify-items: start; }
+.staff-settings-form { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; } .staff-settings-form input, .staff-settings-form select { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; } .staff-settings-list { display: grid; gap: 8px; margin-top: 16px; } .staff-settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid #eeeae2; border-radius: 10px; } .staff-settings-row div { display: grid; gap: 4px; } .staff-settings-row small { color: #718078; } .staff-settings-row.is-disabled { opacity: .58; } .settlement-actual-cash { display: grid; gap: 5px; } .settlement-actual-cash input { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; }
+@media (max-width: 850px) { .financial-grid { grid-template-columns: 1fr; } .financial-heading { align-items: stretch; } }
 .settings-heading, .settings-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .settings-heading { max-width: 1180px; margin: 0 auto 20px; }
 .settings-heading h1 { margin: 8px 0 3px; font-size: clamp(28px, 4vw, 42px); }

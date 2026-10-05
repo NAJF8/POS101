@@ -6,6 +6,7 @@ import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, Quick
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Settings from './components/Settings'
+import FinancialCenter from './components/FinancialCenter'
 import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
 import { Purchases } from './components/Purchases'
@@ -13,12 +14,13 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, endOperationalDay, readOpenOperationalDay } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, subscribeCentralCashboxTransactions, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
 import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
+import { calculateSettlement } from './services/financialCenter.js'
 import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
 import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
 
@@ -98,6 +100,10 @@ export default function App() {
   const [ledgerVersion, setLedgerVersion] = useState(0)
   const operationalDayListener = useRef(null)
   const expenseListener = useRef(null)
+  const staffListener = useRef(null)
+  const cashboxListener = useRef(null)
+  const [staff, setStaff] = useState([])
+  const [cashboxTransactions, setCashboxTransactions] = useState([])
   const saleInFlight = useRef(false)
 
   const downloadSalesBackup = useCallback(() => {
@@ -194,6 +200,8 @@ export default function App() {
       operationalDayListener.current = null
       expenseListener.current?.()
       expenseListener.current = null
+      staffListener.current?.(); staffListener.current = null
+      cashboxListener.current?.(); cashboxListener.current = null
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
@@ -205,6 +213,8 @@ export default function App() {
         return
       }
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
+        staffListener.current = subscribeCentralStaff(setStaff)
+        cashboxListener.current = subscribeCentralCashboxTransactions(setCashboxTransactions)
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
         // Migrate the device cache before attaching the listener. Otherwise an
         // initial empty RTDB snapshot could overwrite legacy local expenses.
@@ -236,6 +246,8 @@ export default function App() {
       productListener.current?.()
       operationalDayListener.current?.()
       expenseListener.current?.()
+      staffListener.current?.()
+      cashboxListener.current?.()
       setAdminCentralSales([])
       setProductAuthUser(null)
     }
@@ -272,16 +284,27 @@ export default function App() {
     } finally { setOperationalDayLoading(false) }
   }, [session])
 
-  const handleEndOperationalDay = useCallback(async () => {
+  const handleEndOperationalDay = useCallback(async actualCash => {
     setOperationalDayError('')
     try {
-      const closed = await endOperationalDay(operationalDay, { endedBy: { name: session?.name || session?.shiftName || '' } })
-      setOperationalDay(closed?.status === 'open' ? closed : null)
+      const result = await settleAndEndOperationalDay(operationalDay, { actualCash, endedBy: { name: session?.name || session?.shiftName || '' } })
+      setOperationalDay(result?.day?.status === 'open' ? result.day : null)
+      return result
     } catch (error) {
       setOperationalDayError(error?.message || 'تعذر إنهاء اليوم التشغيلي.')
       throw error
     }
   }, [operationalDay, session])
+
+  const settlementPreview = useMemo(() => {
+    const dayId = operationalDay?.id
+    const dayDate = operationalDay?.businessDate
+    return calculateSettlement({
+      sales: readLocalSales().filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate)),
+      expenses: readLocalExpenses().filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate)),
+      transactions: cashboxTransactions.filter(row => row.businessDate === dayDate && row.status !== 'voided'),
+    })
+  }, [operationalDay, cashboxTransactions, ledgerVersion])
 
   const loginAdmin = useCallback(async () => {
     if (adminAuthBusy) return
@@ -693,12 +716,13 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady) && (
-        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
+        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
+      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter staff={staff} transactions={cashboxTransactions} onSaveStaff={saveCentralStaff} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
         <OrderHistoryMenu
@@ -754,11 +778,11 @@ export default function App() {
         />
       )}
       {currentView === 'expenses' && session && (
-        <Expenses session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />
+        <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={setCurrentView} />
       )}
       {currentView === 'purchases' && session && <Purchases session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />}
       {currentView === 'expense-entry' && session && (
-        <Expenses session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />
+        <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={setCurrentView} />
       )}
       {currentView === 'reports-captain' && session && <Reports session={session} onNavigate={setCurrentView} />}
 

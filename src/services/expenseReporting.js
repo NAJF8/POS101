@@ -22,8 +22,14 @@ const dateKeyFromInstant = instant => {
 
 export const normalizeDateKey = value => {
   const normalized = normalizeDigits(String(value ?? '').trim())
-  const match = DATE_KEY.exec(normalized)
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : ''
+  const isoLike = normalized.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/)
+  const dayFirst = normalized.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/)
+  const match = isoLike ? [isoLike[0], isoLike[1], isoLike[2], isoLike[3]] : dayFirst ? [dayFirst[0], dayFirst[3], dayFirst[2], dayFirst[1]] : null
+  if (!match) return ''
+  const year = Number(match[1]); const month = Number(match[2]); const day = Number(match[3])
+  const check = new Date(Date.UTC(year, month - 1, day))
+  return check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day
+    ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : ''
 }
 
 export const normalizeTimestamp = value => {
@@ -34,12 +40,16 @@ export const normalizeTimestamp = value => {
     return numeric < 1e12 ? numeric * 1000 : numeric
   }
   const normalized = normalizeDigits(value).trim()
-  if (DATE_KEY.test(normalized)) {
-    const [year, month, day] = normalized.split('-').map(Number)
-    return Date.UTC(year, month - 1, day)
-  }
+  const dateKey = normalizeDateKey(normalized)
+  if (dateKey && /^(?:\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}[-\/]\d{1,2}[-\/]\d{4})$/.test(normalized)) return Date.parse(`${dateKey}T12:00:00+03:00`)
   const parsed = Date.parse(normalized)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+export const safeCreatedAtForBusinessDate = businessDate => {
+  const normalized = normalizeDateKey(businessDate)
+  const timestamp = normalized ? Date.parse(`${normalized}T12:00:00+03:00`) : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
 }
 
 export const getLocalDateKey = value => normalizeDateKey(value) || dateKeyFromInstant(normalizeTimestamp(value))

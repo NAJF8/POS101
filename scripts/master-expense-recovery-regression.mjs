@@ -39,9 +39,9 @@ const handler = createMasterExpenseRecoveryHandler({
 const result = await handler()
 assert.equal(reads, 2)
 assert.equal(result.localBefore, 1)
-assert.equal(result.backupCandidatesFound, 4)
+assert.equal(result.backupCandidatesFound, 5)
 assert.equal(result.firebaseBefore, 4)
-assert.equal(result.uniqueCandidates, 3)
+assert.equal(result.uniqueCandidates, 4)
 assert.equal(result.duplicateCandidates, 1)
 assert.equal(result.uploaded, 3)
 assert.equal(result.firebaseAfter, 7)
@@ -58,4 +58,37 @@ assert.equal(classifyRecoveryCandidates([{ id: 'central-duplicate', amount: 99, 
 const expensesSource = fs.readFileSync(new URL('../src/components/Expenses.jsx', import.meta.url), 'utf8')
 assert.match(expensesSource, /مزامنة واسترجاع كل المصاريف/)
 assert.doesNotMatch(expensesSource, /placeholder=\{['"]2026-10-02 \| 5000/)
+
+const currentLedgerOnly = new Map([['pos101.expenses', JSON.stringify([{ amount: 1000, date: '27/09/2026', notes: 'test old expense' }])]])
+globalThis.localStorage = {
+  get length() { return currentLedgerOnly.size },
+  key: index => [...currentLedgerOnly.keys()][index] ?? null,
+  getItem: key => currentLedgerOnly.get(key) ?? null,
+  setItem: (key, value) => currentLedgerOnly.set(key, String(value)),
+}
+let currentReads = 0
+let recoveredId = ''
+const currentLedgerHandler = createMasterExpenseRecoveryHandler({
+  getCurrentUser: () => ({ uid: 'admin-1', email: 'admin@example.test', authorization: { role: 'admin', active: true, authorized: true } }),
+  readCentral: async () => {
+    currentReads += 1
+    const centralExpenses = currentReads === 1 ? [] : [{ id: recoveredId, amount: 1000, businessDate: '2026-09-27', notes: 'test old expense', createdAt: Date.parse('2026-09-27T12:00:00+03:00') }]
+    return { expenses: centralExpenses, centralExpenses, centralCount: centralExpenses.length, mergedCount: centralExpenses.length }
+  },
+  syncCentral: async () => {
+    recoveredId = JSON.parse(currentLedgerOnly.get('pos101.expenses')).find(row => row.syncStatus === 'pending')?.id || ''
+    return { uploaded: 1, skipped: 0, retainedPending: 0 }
+  },
+})
+const currentResult = await currentLedgerHandler()
+assert.equal(currentResult.localBefore, 1)
+assert.equal(currentResult.dateDiagnostics['2026-09-27'].local, 1)
+assert.equal(currentResult.dateDiagnostics['2026-09-27'].uploaded, 1)
+assert.equal(currentResult.uploaded, 1)
+assert.equal(currentResult.firebaseBefore, 0)
+assert.equal(currentResult.firebaseAfter, 1)
+assert.equal(currentResult.reportVerification.pass, true)
+assert.equal(currentResult.candidateDiagnostics[0].businessDate, '2026-09-27')
+assert.match(currentResult.candidateDiagnostics[0].id, /^recovered-expense-/)
+assert.equal(currentResult.candidateDiagnostics[0].createdAt, Date.parse('2026-09-27T12:00:00+03:00'))
 console.log('MASTER_EXPENSE_RECOVERY_REGRESSION=PASS')

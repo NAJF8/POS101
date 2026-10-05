@@ -2,13 +2,14 @@
 import { Icon } from './Icons'
 import OperationalDay from './OperationalDay'
 
-export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled = true, operationalDay, operationalDaySummary, operationalDayLoading, operationalDayError, onStartOperationalDay, onEndOperationalDay, onFullRecovery, fullRecoveryBusy }) {
+export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, operationalDayLoading, operationalDayError, onStartOperationalDay, onEndOperationalDay, onFullRecovery, fullRecoveryBusy }) {
   const cards = [
     { id: 'pos', title: 'الكاشير', icon: 'monitor', action: () => onNavigate('pos') },
     { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => onNavigate('orders') },
     { id: 'inventory', title: 'المخزون', icon: 'box', action: () => alert('تحت التطوير') },
     { id: 'reports', title: 'التقارير', icon: 'chart', action: () => onNavigate('reports') },
     { id: 'expenses', title: 'المصاريف', icon: 'wallet', action: () => onNavigate('expenses') },
+    { id: 'cashbox', title: 'الصندوق', icon: 'wallet', action: () => onNavigate('cashbox') },
     { id: 'employees', title: 'الموظفين', icon: 'users', action: () => alert('تحت التطوير') },
     { id: 'settings', title: 'الإعدادات', icon: 'settings', action: () => onNavigate('settings') },
     { id: 'captain-sales', title: 'مبيعات الكابتن', icon: 'user', action: () => onNavigate('reports-captain') },
@@ -23,7 +24,7 @@ export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled 
 
   return (
     <div className="dashboard-container" dir="rtl">
-      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} loading={operationalDayLoading} error={operationalDayError} onStart={onStartOperationalDay} onEnd={onEndOperationalDay} />}
+      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} settlementPreview={settlementPreview} loading={operationalDayLoading} error={operationalDayError} onStart={onStartOperationalDay} onEnd={onEndOperationalDay} />}
       <button className="full-recovery-action" type="button" onClick={onFullRecovery} disabled={fullRecoveryBusy}>{fullRecoveryBusy ? 'جارٍ إصلاح ومزامنة النظام...' : 'إصلاح ومزامنة النظام'}</button>
       <div className="dashboard-grid">
         {cards.map(card => (

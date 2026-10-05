@@ -4,9 +4,10 @@ import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.
 
 const money = value => formatMoney(Number(value || 0))
 
-export default function OperationalDay({ day, summary, loading, error, onStart, onEnd }) {
+export default function OperationalDay({ day, summary, settlementPreview = summary, loading, error, onStart, onEnd }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [actualCash, setActualCash] = useState('')
   const open = day?.status === 'open'
   const forgotten = open && day.startedAt && new Date(day.startedAt).toDateString() !== new Date().toDateString()
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])
@@ -20,7 +21,8 @@ export default function OperationalDay({ day, summary, loading, error, onStart, 
   const end = async () => {
     if (busy) return
     setBusy(true)
-    try { await onEnd(); setEndOpen(false) } finally { setBusy(false) }
+    if (actualCash === '') return
+    try { await onEnd(actualCash); setEndOpen(false); setActualCash('') } finally { setBusy(false) }
   }
 
   return <section className={`operational-day-card ${open ? 'is-open' : 'is-closed'}`} dir="rtl" aria-label="اليوم التشغيلي">
@@ -66,15 +68,19 @@ export default function OperationalDay({ day, summary, loading, error, onStart, 
         <div className="operational-day-summary">
           <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>
           <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
-          <span>نقدي <b>{money(summary.cash)}</b></span>
-          <span>إلكتروني <b>{money(summary.electronic)}</b></span>
-          <span>الخصومات <b>{money(summary.discount)}</b></span>
-            <span>المصاريف <b>{money(summary.expenses)}</b></span>
-            <span>الصافي <b>{money(summary.netAfterDiscountAndExpenses)}</b></span>
+          <span>مبيعات نقدية <b>{money(settlementPreview.cashSales)}</b></span>
+          <span>مبيعات إلكترونية <b>{money(settlementPreview.electronicSales)}</b></span>
+          <span>مصاريف نقدية <b>{money(settlementPreview.expenses)}</b></span>
+          <span>سحوبات <b>{money(settlementPreview.withdrawals)}</b></span>
+          <span>إيداعات <b>{money(settlementPreview.deposits)}</b></span>
+          <span>تعديلات <b>{money(settlementPreview.adjustments)}</b></span>
+          <span>المبلغ المتوقع <b>{money(settlementPreview.expectedCash)}</b></span>
+          <label className="settlement-actual-cash">المبلغ الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل المبلغ الفعلي" /></label>
+          {actualCash !== '' && <span>الفرق <b>{money(Number(actualCash) - settlementPreview.expectedCash)}</b></span>}
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>
-          <button className="danger-button" type="button" disabled={busy} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد إنهاء اليوم'}</button>
+          <button className="danger-button" type="button" disabled={busy || actualCash === ''} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
         </div>
       </div>
     </div>}

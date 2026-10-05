@@ -17,8 +17,10 @@ import {
   ref,
   runTransaction,
   set,
+  update,
 } from 'firebase/database'
-import { areExpenseDuplicates, mergeExpensesConservatively, normalizeDateKey, normalizeExpense } from './expenseReporting.js'
+import { areExpenseDuplicates, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
+import { calculateCashboxBalance, calculateSettlement } from './financialCenter.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -597,14 +599,15 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   let skipped = 0
   const retainedPending = []
   for (const localExpense of localExpenses) {
-    const normalized = normalizeExpense(localExpense)
+    const base = normalizeExpense(localExpense)
+    const normalized = { ...base, createdAt: base.createdAt || safeCreatedAtForBusinessDate(base.businessDate), timestamp: base.timestamp || base.createdAt }
+    const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `recovered-expense-${crypto.randomUUID()}`
     if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) {
       skipped += 1
-      retainedPending.push({ ...normalized, id: expenseIdOf(normalized) || `expense-${crypto.randomUUID()}`, syncStatus: 'pending' })
+      retainedPending.push({ ...normalized, id, syncStatus: 'pending' })
       continue
     }
     if (centralExpenses.some(remote => areExpenseDuplicates(normalized, remote))) { skipped += 1; continue }
-    const id = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
     const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: true })
     try {
       const expenseRef = ref(db, `pos101_expenses/${id}`)
@@ -721,4 +724,177 @@ export const saveCentralProduct = async product => {
   if (!readBack.exists() || String(readBack.val()?.id || id) !== id) throw new Error('تعذر التحقق من حفظ المنتج.')
   return normalizeProduct(readBack.val(), id)
 }
+
+// Financial records use separate RTDB paths and never overwrite legacy sales
+// or expense records. Every write is read back before the caller treats it as
+// durable; voiding is represented as a status change, never a hard delete.
+const financialPath = path => ref(db, path)
+const financialUser = async (write = false) => {
+  if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  await authReady
+  const user = auth?.currentUser
+  if (!user || !await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول للبيانات المالية.'), { code: 'FINANCIAL_PERMISSION_DENIED' })
+  if (write && !['admin-viewer', 'cashier-sync'].includes(getCentralRole(user))) throw Object.assign(new Error('صلاحية الكتابة المالية مطلوبة.'), { code: 'FINANCIAL_WRITE_DENIED' })
+  return user
+}
+
+const objectValues = snapshot => snapshot.exists() ? Object.entries(snapshot.val() || {}).map(([id, value]) => ({ ...value, id: value?.id || id })) : []
+const staffPath = 'pos101_staff'
+const cashboxTransactionsPath = 'pos101_cashbox_transactions'
+const auditPath = 'pos101_financial_audit_log'
+
+export const normalizeStaff = (value, id) => ({
+  ...value,
+  id: String(value?.id || id || ''),
+  name: String(value?.name || '').trim(),
+  code: String(value?.code || '').trim(),
+  role: ['cashier', 'employee', 'manager'].includes(value?.role) ? value.role : 'employee',
+  active: value?.active !== false,
+})
+
+export const readCentralStaff = async () => { await financialUser(false); return objectValues(await get(financialPath(staffPath))).map(normalizeStaff).filter(row => row.id && row.name) }
+export const subscribeCentralStaff = callback => {
+  let active = true
+  let stop = () => {}
+  void financialUser(false).then(() => { if (!active) return; stop = onValue(financialPath(staffPath), snapshot => callback(objectValues(snapshot).map(normalizeStaff).filter(row => row.id && row.name)), () => callback([])) }).catch(() => {})
+  return () => { active = false; stop() }
+}
+export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
+  const user = await financialUser(true)
+  const id = String(staff?.id || `staff-${crypto.randomUUID()}`).trim()
+  const existing = (await get(financialPath(`${staffPath}/${id}`))).val() || null
+  const now = Date.now()
+  const payload = { ...normalizeStaff({ ...existing, ...staff, id }), createdAt: existing?.createdAt || now, updatedAt: now, createdBy: existing?.createdBy || user.uid, updatedBy: user.uid }
+  if (!payload.name) throw new Error('اسم الموظف مطلوب.')
+  await set(financialPath(`${staffPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${staffPath}/${id}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ الموظف.')
+  const action = !existing ? 'staff add' : existing.active !== payload.active ? (payload.active ? 'activate' : 'deactivate') : 'staff edit'
+  await saveFinancialAudit({ action, entityType: 'staff', entityId: id, before: existing, after: readBack.val(), reason: actor.reason || '' })
+  return normalizeStaff(readBack.val(), id)
+}
+
+export const readCentralCashboxTransactions = async () => { await financialUser(false); return objectValues(await get(financialPath(cashboxTransactionsPath))) }
+export const subscribeCentralCashboxTransactions = callback => {
+  let active = true
+  let stop = () => {}
+  void financialUser(false).then(() => { if (!active) return; stop = onValue(financialPath(cashboxTransactionsPath), snapshot => callback(objectValues(snapshot)), () => callback([])) }).catch(() => {})
+  return () => { active = false; stop() }
+}
+const settlementPath = 'pos101_cashbox_settlements'
+const countsPath = 'pos101_cashbox_counts'
+const safeKey = value => String(value || '').replace(/[.#$\[\]/]/g, '_')
+const settlementKey = operationalDayId => `settlement-${safeKey(operationalDayId)}`
+const financialAuditPayload = ({ id, user, action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => ({ id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', businessDate, timestamp: Date.now(), before, after, reason })
+
+export const readCentralSettlements = async () => { await financialUser(false); return objectValues(await get(financialPath(settlementPath))) }
+export const subscribeCentralSettlements = callback => {
+  let active = true
+  let stop = () => {}
+  void financialUser(false).then(() => { if (!active) return; stop = onValue(financialPath(settlementPath), snapshot => callback(objectValues(snapshot)), () => callback([])) }).catch(() => {})
+  return () => { active = false; stop() }
+}
+
+const centralSettlementInputs = async operationalDay => {
+  const [salesSnapshot, expensesSnapshot, transactionsSnapshot] = await Promise.all([get(salesRef()), get(expensesRef()), get(financialPath(cashboxTransactionsPath))])
+  const dayId = String(operationalDay?.id || operationalDay?.operationalDayId || '')
+  const dayDate = String(operationalDay?.businessDate || '')
+  const sales = centralValues(salesSnapshot).filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate))
+  const expenses = expenseValues(expensesSnapshot).filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate))
+  const transactions = objectValues(transactionsSnapshot).filter(row => row.businessDate === dayDate && row.status !== 'voided')
+  return { sales, expenses, transactions }
+}
+
+export const settleAndEndOperationalDay = async (day, { actualCash, endedBy = {} } = {}) => {
+  const user = await financialUser(true)
+  const id = String(day?.id || day?.operationalDayId || '').trim()
+  if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
+  const actual = Number(actualCash)
+  if (!Number.isFinite(actual) || actual < 0) throw Object.assign(new Error('المبلغ الفعلي للصندوق مطلوب.'), { code: 'ACTUAL_CASH_REQUIRED' })
+  const key = settlementKey(id)
+  const existing = await get(financialPath(`${settlementPath}/${key}`))
+  if (existing.exists()) return { settlement: existing.val(), day: { ...day, status: 'closed' }, duplicate: true }
+  const inputs = await centralSettlementInputs(day)
+  const summary = calculateSettlement(inputs)
+  const difference = actual - summary.expectedCash
+  const status = difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
+  const settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: day.businessDate, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
+  const cashboxId = `settlement-${safeKey(id)}`
+  const cashbox = { id: cashboxId, type: 'settlement', amount: Math.max(0, summary.expectedCash), businessDate: day.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + Math.max(0, summary.expectedCash) }
+  const auditId = `audit-settlement-${safeKey(id)}`
+  const closedDay = { ...day, status: 'closed', endedAt: Date.now(), endedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' }, settlementId: key }
+  const updates = { [`${settlementPath}/${key}`]: settlement, [`${cashboxTransactionsPath}/${cashboxId}`]: cashbox, [`${auditPath}/${auditId}`]: financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: day.businessDate }), [`pos101_operational_days/${id}`]: closedDay }
+  await update(ref(db), updates)
+  const readBack = await get(financialPath(`${settlementPath}/${key}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ التسوية.')
+  return { settlement: readBack.val(), day: closedDay, duplicate: false }
+}
+
+export const saveCashCount = async ({ businessDate, operationalDayId = '', systemBalance, actualBalance, reason = '' }) => {
+  const user = await financialUser(true)
+  const id = `count-${safeKey(operationalDayId || businessDate)}-${Date.now()}`
+  const payload = { id, businessDate, operationalDayId, systemBalance: Number(systemBalance), actualBalance: Number(actualBalance), difference: Number(actualBalance) - Number(systemBalance), createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '', reason }
+  const auditId = `audit-${id}`
+  await update(ref(db), { [`${countsPath}/${id}`]: payload, [`${auditPath}/${auditId}`]: financialAuditPayload({ id: auditId, user, action: 'cash count', entityType: 'cash_count', entityId: id, after: payload, reason, businessDate }) })
+  const readBack = await get(financialPath(`${countsPath}/${id}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ الجرد.')
+  return readBack.val()
+}
+
+export const saveCentralExpenseWithCashbox = async expense => {
+  const user = await financialUser(true)
+  const normalized = normalizeExpense(expense)
+  const expenseId = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
+  const transactionId = `expense-${safeKey(expenseId)}`
+  const existingTransactions = objectValues(await get(financialPath(cashboxTransactionsPath)))
+  if (existingTransactions.some(row => row.id === transactionId)) return (await get(ref(db, `pos101_expenses/${expenseId}`))).val()
+  if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) throw new Error('المبلغ والتاريخ التشغيلي ووقت الإنشاء مطلوبة للمصروف.')
+  const expensePayload = { ...centralExpensePayload({ ...normalized, id: expenseId }, user), paymentSource: 'cashbox', linkedTransactionId: transactionId }
+  const transactionPayload = { id: transactionId, type: 'expense', amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
+  const auditId = `audit-linked-expense-${safeKey(expenseId)}`
+  const audit = financialAuditPayload({ id: auditId, user, action: 'create', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: transactionPayload.reason, businessDate: expensePayload.businessDate })
+  await update(ref(db), { [`pos101_expenses/${expenseId}`]: expensePayload, [`${cashboxTransactionsPath}/${transactionId}`]: transactionPayload, [`${auditPath}/${auditId}`]: audit })
+  const readBack = await get(ref(db, `pos101_expenses/${expenseId}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من المصروف المرتبط.')
+  cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== expenseId), normalizeExpense({ ...readBack.val(), id: expenseId })])
+  return normalizeExpense({ ...readBack.val(), id: expenseId })
+}
+export const saveCashboxTransaction = async transaction => {
+  const user = await financialUser(true)
+  const id = String(transaction?.id || `cash-${crypto.randomUUID()}`).trim()
+  const existing = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
+  if (existing.exists()) return existing.val()
+  if (transaction?.type === 'withdrawal') {
+    const current = objectValues(await get(financialPath(cashboxTransactionsPath)))
+    if (calculateCashboxBalance(current) < Number(transaction.amount)) throw Object.assign(new Error('الرصيد غير كافٍ.'), { code: 'CASHBOX_INSUFFICIENT_BALANCE' })
+  }
+  const payload = { ...transaction, id, createdAt: transaction?.createdAt || Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '', status: transaction?.status || 'active' }
+  if (!payload.businessDate || !Number.isFinite(Number(payload.amount)) || Number(payload.amount) <= 0) throw new Error('businessDate والمبلغ الصحيحان مطلوبان.')
+  await set(financialPath(`${cashboxTransactionsPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ حركة الصندوق.')
+  await saveFinancialAudit({ action: 'create', entityType: 'cashbox_transaction', entityId: id, after: readBack.val(), reason: payload.reason || '' })
+  return readBack.val()
+}
+export const voidCashboxTransaction = async (transaction, voidReason) => {
+  const user = await financialUser(true)
+  const id = String(transaction?.id || '').trim()
+  if (!id) throw new Error('معرف الحركة غير صالح.')
+  const payload = { ...(await get(financialPath(`${cashboxTransactionsPath}/${id}`))).val(), status: 'voided', voidedAt: Date.now(), voidedBy: user.uid, voidReason: String(voidReason || '').trim() }
+  await set(financialPath(`${cashboxTransactionsPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
+  await saveFinancialAudit({ action: 'void', entityType: 'cashbox_transaction', entityId: id, before: transaction, after: readBack.val(), reason: voidReason || '' })
+  return readBack.val()
+}
+
+export const saveFinancialAudit = async ({ action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => {
+  const user = await financialUser(true)
+  const id = `audit-${crypto.randomUUID()}`
+  const payload = { id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', businessDate, timestamp: Date.now(), before, after, reason }
+  await set(financialPath(`${auditPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${auditPath}/${id}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ سجل التدقيق.')
+  return readBack.val()
+}
+export const readFinancialAudit = async () => { await financialUser(false); return objectValues(await get(financialPath(auditPath))) }
 

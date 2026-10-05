@@ -1,5 +1,5 @@
 import { centralAuth, isAuthorizedPosSyncUser, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending, signInCentralWithGoogle } from './posCentralSync.js'
-import { areExpenseDuplicates, getLocalDateKey, normalizeDateKey, normalizeExpense, normalizeTimestamp, resolveExpenseBusinessDate } from './expenseReporting.js'
+import { areExpenseDuplicates, getExpensesForBusinessDate, getLocalDateKey, normalizeDateKey, normalizeExpense, normalizeTimestamp, resolveExpenseBusinessDate, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 
 const readJson = (key, fallback) => {
   try { const value = JSON.parse(localStorage.getItem(key) || 'null'); return value === null ? fallback : value } catch { return fallback }
@@ -55,8 +55,7 @@ const validRecoveryId = value => {
 }
 
 const safeRecoveryCreatedAt = businessDate => {
-  const timestamp = Date.parse(`${businessDate}T12:00:00+03:00`)
-  return Number.isFinite(timestamp) ? timestamp : Date.now()
+  return safeCreatedAtForBusinessDate(businessDate) || Date.now()
 }
 
 const normalizeRecoveredExpense = (raw, operationalDayDates) => {
@@ -80,23 +79,24 @@ const normalizeRecoveredExpense = (raw, operationalDayDates) => {
 
 export const scanAllExpenseBackups = () => {
   const existing = readLocalExpenses()
+  const currentLedger = readJson('pos101.expenses', [])
   const operationalDayDates = readOperationalDayDates()
   const candidates = []
   const keys = []
+  if (Array.isArray(currentLedger)) currentLedger.forEach((raw, index) => collectExpenseCandidates(raw, `current-local-ledger[${index}]`, candidates))
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index)
     if (!key) continue
     keys.push(key)
     const value = readJson(key, null)
-    // Inspect the current ledger for diagnostics, but do not offer its own
-    // rows as recovered candidates; they are already in the system.
     if (value !== null && key !== 'pos101.expenses') collectExpenseCandidates(value, key, candidates)
   }
   const recovered = []
   for (const candidate of candidates) {
     const row = normalizeRecoveredExpense(candidate.raw, operationalDayDates)
     const valid = row.amount > 0 && Boolean(normalizeDateKey(row.businessDate))
-    recovered.push({ ...row, recoverySource: candidate.path, source: candidate.path, recoveryStatus: valid ? 'جديد' : 'غير محدد', candidateStatus: valid ? 'VALID' : 'INVALID', candidateReason: valid ? 'businessDate و amount صالحان' : 'المبلغ أو businessDate غير صالح' })
+    const currentLedgerSource = candidate.path.startsWith('current-local-ledger')
+    recovered.push({ ...row, recoverySource: currentLedgerSource ? 'current-local-ledger' : candidate.path, source: currentLedgerSource ? 'current-local-ledger' : candidate.path, recoveryStatus: valid ? 'جديد' : 'غير محدد', candidateStatus: valid ? 'VALID' : 'INVALID', candidateReason: valid ? 'businessDate و amount صالحان' : 'المبلغ أو businessDate غير صالح' })
   }
   const invalidCount = recovered.filter(row => row.candidateStatus === 'INVALID').length
   return {
@@ -109,7 +109,8 @@ export const scanAllExpenseBackups = () => {
     withoutDateCount: recovered.filter(row => !row.businessDate).length,
     recoverableTotal: recovered.reduce((sum, row) => sum + Number(row.amount || 0), 0),
     candidates: recovered,
-    sources: [...new Set(recovered.map(row => String(row.recoverySource).split('.')[0]))],
+    sources: [...new Set(recovered.map(row => row.recoverySource))],
+    localLedger: recovered.filter(row => row.recoverySource === 'current-local-ledger'),
   }
 }
 
@@ -237,6 +238,22 @@ export const createMasterExpenseRecoveryHandler = ({
         ? `تم العثور على ${uniqueCandidates.length} سجل قديم لكن تعذر رفعها: ${upload.retainedPending ? `${upload.retainedPending} Pending` : 'تعذر التحقق من الرفع'}.`
         : null
       const totalAmount = after.expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+      const countByDate = rows => rows.reduce((result, row) => {
+        const date = normalizeDateKey(row.businessDate) || 'غير محدد'
+        result[date] = (result[date] || 0) + 1
+        return result
+      }, {})
+      const localByDate = countByDate(scan.localLedger)
+      const firebaseBeforeByDate = countByDate(before.centralExpenses || [])
+      const firebaseAfterByDate = countByDate(after.centralExpenses || [])
+      const uploadedByDate = {}
+      for (const row of uniqueCandidates) {
+        if ((after.centralExpenses || []).some(remote => String(remote.id || remote.expenseId || '') === String(row.id))) {
+          const date = normalizeDateKey(row.businessDate) || 'غير محدد'
+          uploadedByDate[date] = (uploadedByDate[date] || 0) + 1
+        }
+      }
+      const targetDate = '2026-09-27'
       const result = {
         backup,
         localBefore: backup.snapshot.expenses.length,
@@ -255,6 +272,8 @@ export const createMasterExpenseRecoveryHandler = ({
         finalMergedCount: after.mergedCount,
         totalAmount,
         businessDateCount: new Set(after.expenses.map(row => row.businessDate).filter(Boolean)).size,
+        dateDiagnostics: Object.fromEntries([...new Set([...Object.keys(localByDate), ...Object.keys(firebaseBeforeByDate), ...Object.keys(firebaseAfterByDate)])].map(date => [date, { local: localByDate[date] || 0, firebaseBefore: firebaseBeforeByDate[date] || 0, uploaded: uploadedByDate[date] || 0, firebaseAfter: firebaseAfterByDate[date] || 0 }])),
+        reportVerification: { date: targetDate, centralCount: getExpensesForBusinessDate(after.centralExpenses || [], targetDate).length, pass: getExpensesForBusinessDate(after.centralExpenses || [], targetDate).length > 0 },
         message: uploadFailureMessage || (!invariantOk
           ? `تعذر إثبات إضافة كل السجلات: Firebase قبل ${before.centralCount} وبعد ${after.centralCount}.`
           : upload.uploaded > 0
