@@ -65,6 +65,21 @@ const shifts = [
   { shiftId: 'evening', name: 'كاشير مسائي' }
 ]
 
+const LEGACY_STAFF_NAME_FIELDS = ['seller', 'cashierNameSnapshot', 'cashierName', 'employeeNameSnapshot', 'employeeName', 'captainName']
+const LEGACY_STAFF_ARRAY_FIELDS = ['employees', 'employeeNames', 'captains', 'captainNames', 'legacyEmployees', 'legacyCaptains']
+const normalizeLegacyStaffName = value => String(value || '').trim()
+const legacyStaffNamesFromValue = value => {
+  if (typeof value === 'string') return [normalizeLegacyStaffName(value)].filter(Boolean)
+  if (Array.isArray(value)) return value.flatMap(legacyStaffNamesFromValue)
+  if (!value || typeof value !== 'object') return []
+  return [...LEGACY_STAFF_NAME_FIELDS, 'name'].flatMap(field => legacyStaffNamesFromValue(value[field]))
+}
+const collectLegacyStaffNames = sales => [...new Set((sales || []).flatMap(sale => [
+  ...LEGACY_STAFF_NAME_FIELDS.flatMap(field => legacyStaffNamesFromValue(sale?.[field])),
+  ...LEGACY_STAFF_ARRAY_FIELDS.flatMap(field => legacyStaffNamesFromValue(sale?.[field])),
+]))].filter(Boolean)
+const stableStaffId = name => `staff-${encodeURIComponent(name).replace(/%/g, '').replace(/[^a-zA-Z0-9\u0600-\u06ff_-]/g, '-').replace(/-+/g, '-').slice(0, 80)}`
+
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard')
   const [orders, setOrders] = useState(() => ensureOrderSlots(read('pos101.orders', []), 10))
@@ -275,26 +290,27 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (staffMigrationAttempted.current || !canManageStaff(centralAuth()?.currentUser) || !centralSales.length || staff.length) return
-    staffMigrationAttempted.current = true
-    const candidates = [...new Set(centralSales.flatMap(sale => [sale?.seller, sale?.cashierNameSnapshot, sale?.cashierName, sale?.employeeNameSnapshot].map(value => String(value || '').trim()).filter(Boolean)))]
-    if (!candidates.length) return
+    if (staffMigrationAttempted.current || !canManageStaff(centralAuth()?.currentUser) || !centralSales.length) return
+    const candidates = collectLegacyStaffNames(centralSales)
+    if (!candidates.length) {
+      staffMigrationAttempted.current = true
+      return
+    }
     void (async () => {
-      const existing = await readCentralStaff()
-      if (existing.length) return
+      let current = await readCentralStaff()
       for (const name of candidates) {
-        const stableId = `staff-${encodeURIComponent(name).replace(/%/g, '').replace(/[^a-zA-Z0-9\u0600-\u06ff_-]/g, '-').replace(/-+/g, '-').slice(0, 80)}`
-        const current = await readCentralStaff()
-        if (current.length || current.some(item => item.name === name || item.id === stableId)) return
-        await saveCentralStaff({ id: stableId, name, role: 'employee', active: true, code: '' }, { actor: { reason: 'one-time migration from pos101_sales snapshots' } })
+        const stableId = stableStaffId(name)
+        if (current.some(item => item.name === name || item.id === stableId)) continue
+        const saved = await saveCentralStaff({ id: stableId, name, role: 'employee', active: true, code: '', source: 'legacy-sales' }, { actor: { reason: 'one-time migration from pos101_sales and legacy employee fields' } })
+        current = [...current, saved]
       }
       const after = await readCentralStaff()
-      if (after.length !== candidates.length) throw new Error('تعذر التحقق من اكتمال ترحيل الموظفين.')
       setStaff(after)
+      staffMigrationAttempted.current = true
     })().catch(error => {
       console.warn('STAFF_MIGRATION_NOT_COMPLETED', error?.code || error?.message || 'unknown')
     })
-  }, [productAuthUser, centralSales, staff])
+  }, [productAuthUser, centralSales, staff.length])
 
   const operationalDaySummary = useMemo(() => {
     const expenses = readLocalExpenses()

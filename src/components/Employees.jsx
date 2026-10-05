@@ -51,7 +51,7 @@ export default function Employees({ staff = [], canWrite = false, onSaveStaff, o
 
   return <section className="employees-page" dir="rtl">
     <div className="employees-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الموظفين</h1><p>إدارة الموظفين الحاليين والسابقين مع الحفاظ على التاريخ.</p></div><button className="primary-action" type="button" disabled={!canWrite} onClick={() => setForm(emptyForm)}><Icon name="plus" size={18} /> إضافة موظف</button></div>
-    {!canWrite && <p className="settings-readonly" role="status">تسجيل دخول حساب إدارة مصرح به مطلوب لتعديل الموظفين.</p>}
+    {!canWrite && <p className="settings-readonly" role="status">حساب POS مصرح به لإدارة الموظفين مطلوب للتعديل.</p>}
     <form className="settings-card employee-form" onSubmit={save}>
       <h2>{form.id ? 'تعديل موظف' : 'إضافة موظف'}</h2>
       <div className="employee-form-grid"><label>الاسم *<input value={form.name} onChange={event => setForm(value => ({ ...value, name: event.target.value }))} required /></label><label>الكود<input value={form.code} onChange={event => setForm(value => ({ ...value, code: event.target.value }))} /></label><label>الدور<select value={form.role} onChange={event => setForm(value => ({ ...value, role: event.target.value }))}><option value="cashier">كاشير</option><option value="employee">موظف</option><option value="manager">مدير</option></select></label></div>
