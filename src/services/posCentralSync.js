@@ -242,6 +242,11 @@ export const readCentralAuthorizationRecord = async user => {
     return localRecord
   }
 }
+export const refreshCentralAuthorizationRecord = async user => {
+  if (!user?.uid) return null
+  authorizationCache.delete(user.uid)
+  return readCentralAuthorizationRecord(user)
+}
 const roleFromAuthorization = record => {
   const role = String(record?.role || '').trim().toLowerCase()
   if (ADMIN_ROLES.has(role)) return 'admin-viewer'
@@ -254,9 +259,9 @@ const isActiveAuthorizedRecord = record => {
 }
 const legacyRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
 
-export const canManageStaff = user => {
+export const canManageStaff = (user, authorizationRecord = null) => {
   if (!user?.uid) return false
-  const record = user.pos101Authorization || user.authorization || authorizationCache.get(user.uid)
+  const record = authorizationRecord || user.pos101Authorization || user.authorization || authorizationCache.get(user.uid)
   const role = String(record?.role || '').trim().toLowerCase()
   return Boolean(record && record.active !== false && record.authorized !== false && STAFF_MANAGEMENT_ROLES.has(role))
 }

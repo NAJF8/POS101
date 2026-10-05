@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { canManageStaff, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { canManageStaff, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -231,7 +231,7 @@ export default function App() {
     const stopAuth = subscribeCentralAuth(user => {
       setCentralAuthUser(user)
       setStaffAuthError('')
-      if (user) void readCentralAuthorizationRecord(user).then(record => {
+      if (user) void refreshCentralAuthorizationRecord(user).then(record => {
         setStaffAuthorizationRecord(record)
         if (!record) setStaffAuthError(`AUTHORIZED_RECORD = MISSING\nUID = ${user.uid || '—'}\nEMAIL = ${user.email || '—'}`)
       }).catch(() => setStaffAuthorizationRecord(null))
@@ -398,14 +398,14 @@ export default function App() {
       setStaffAuthError('')
       try {
         const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
-        const record = await readCentralAuthorizationRecord(user)
+        const record = await refreshCentralAuthorizationRecord(user)
         setCentralAuthUser(user)
         setStaffAuthorizationRecord(record)
         if (!record) {
           setStaffAuthError(`AUTHORIZED_RECORD = MISSING\nUID = ${user?.uid || '—'}\nEMAIL = ${user?.email || '—'}`)
           return false
         }
-        if (!canManageStaff(user)) {
+        if (!canManageStaff(user, record)) {
           setStaffAuthError(`AUTHORIZED_RECORD = NOT AUTHORIZED\nUID = ${user?.uid || '—'}\nEMAIL = ${user?.email || '—'}`)
           return false
         }
@@ -796,7 +796,7 @@ export default function App() {
 
   const adminReady = isCentralAdminUser(adminAuthUser)
   const productManagerReady = isCentralProductManager(productAuthUser)
-  const staffManagerReady = canManageStaff(centralAuth()?.currentUser)
+  const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
   const saveProduct = useCallback(async product => {
     const saved = await saveCentralProduct(product)
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
