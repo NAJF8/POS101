@@ -179,13 +179,18 @@ export default function App() {
     document.documentElement.classList.toggle('settings-route', settingsRoute)
     const cashboxRoute = currentView === 'cashbox'
     document.documentElement.classList.toggle('cashbox-route', cashboxRoute)
+    const employeesRoute = currentView === 'employees'
+    document.documentElement.classList.toggle('employees-route', employeesRoute)
     document.body.classList.toggle('settings-route', settingsRoute)
     document.body.classList.toggle('cashbox-route', cashboxRoute)
+    document.body.classList.toggle('employees-route', employeesRoute)
     return () => {
       document.documentElement.classList.remove('settings-route')
       document.body.classList.remove('settings-route')
       document.documentElement.classList.remove('cashbox-route')
       document.body.classList.remove('cashbox-route')
+      document.documentElement.classList.remove('employees-route')
+      document.body.classList.remove('employees-route')
     }
   }, [currentView])
 
@@ -740,7 +745,7 @@ export default function App() {
   }, [])
 
   return (
-    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''}`}>
+    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''}`}>
       {session && (
         <Header
           session={session}
