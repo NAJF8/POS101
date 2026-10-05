@@ -131,7 +131,17 @@ const thermalMaterialsStyles = `
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 `
 
-export default function Reports({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [] }) {
+class ReportsErrorBoundary extends React.Component {
+  state = { error: null }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidCatch(error) { console.error('REPORTS_RENDER_ERROR', error) }
+  render() {
+    if (this.state.error) return <section className="reports-container" dir="rtl"><div className="reports-main"><div className="settings-notice" role="alert">تعذر عرض التقارير بسبب خطأ في بيانات التقرير. أعد المحاولة أو ارجع إلى الرئيسية.</div></div></section>
+    return this.props.children
+  }
+}
+
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [] }) {
   const [reportType, setReportType] = useState(null)
   const [periodFrom, setPeriodFrom] = useState(() => shiftDate(getDefaultReportDate(), -6))
   const [periodTo, setPeriodTo] = useState(() => getDefaultReportDate())
@@ -157,7 +167,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   // Keep reporting local-only until the ACC/Firebase source is explicitly
   // reconciled. A report must never silently mix another cashier's data with
   // this device's local ledger.
-  const [sales, setSales] = useState(() => salesOverride || readLocalSales())
+  const [sales, setSales] = useState(() => Array.isArray(salesOverride) ? salesOverride : readLocalSales())
   useEffect(() => {
     const refresh = () => setSales(readLocalSales())
     window.addEventListener('pos101-sales-updated', refresh)
@@ -167,7 +177,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
       window.removeEventListener('pos101-sale-created', refresh)
     }
   }, [])
-  useEffect(() => { if (salesOverride) setSales(salesOverride) }, [salesOverride])
+  useEffect(() => { if (Array.isArray(salesOverride)) setSales(salesOverride) }, [salesOverride])
   const [expenseOperationalDayDates, setExpenseOperationalDayDates] = useState({})
   const [expenseReadError, setExpenseReadError] = useState('')
   const normalizeReportExpenses = (rows, operationalDayDates = expenseOperationalDayDates) => (Array.isArray(rows) ? rows : []).map(expense => {
@@ -214,7 +224,7 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   const periodDataset = useMemo(() => {
     const valid = isValidDateRange(periodFrom, periodTo)
     const rangeSales = filterRowsByBusinessDate(sales, periodFrom, periodTo)
-    const rangeExpenses = filterRowsByBusinessDate(expenses.map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)
+    const rangeExpenses = filterRowsByBusinessDate((Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)
     const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo)
     const dailyMap = new Map()
     const ensureDay = date => { if (!dailyMap.has(date)) dailyMap.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, adjustments: 0, net: 0, orders: 0 }); return dailyMap.get(date) }
@@ -743,4 +753,8 @@ export default function Reports({ onNavigate, session, operationalDay = null, on
   }
 
   return reportType ? renderPrintableReport() : renderReportCards()
+}
+
+export default function Reports(props) {
+  return <ReportsErrorBoundary><ReportsView {...props} /></ReportsErrorBoundary>
 }
