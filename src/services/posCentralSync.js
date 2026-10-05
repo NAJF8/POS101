@@ -228,6 +228,20 @@ export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, 
   void hydrateCentralAuthorization(user).finally(() => callback(user))
 }) : () => {}
 const normalizedAuthorization = record => record && typeof record === 'object' ? record : null
+export const readCentralAuthorizationRecord = async user => {
+  if (!user?.uid) return null
+  if (authorizationCache.has(user.uid)) return authorizationCache.get(user.uid)
+  const localRecord = normalizedAuthorization(user.pos101Authorization || user.authorization)
+  if (!db) return localRecord
+  try {
+    const snapshot = await get(ref(db, `${AUTHORIZED_UIDS_PATH}/${user.uid}`))
+    const record = snapshot.exists() ? normalizedAuthorization(snapshot.val()) : null
+    if (record) authorizationCache.set(user.uid, record)
+    return record
+  } catch {
+    return localRecord
+  }
+}
 const roleFromAuthorization = record => {
   const role = String(record?.role || '').trim().toLowerCase()
   if (ADMIN_ROLES.has(role)) return 'admin-viewer'
@@ -254,16 +268,7 @@ export const isAuthorizedPosSyncUser = async user => {
     authorizationCache.set(user.uid, { role: legacy === 'admin-viewer' ? 'admin-viewer' : 'cashier-sync', active: true, authorized: true })
     return true
   }
-  if (!db) return isActiveAuthorizedRecord(user.pos101Authorization || user.authorization)
-  if (authorizationCache.has(user.uid)) return isActiveAuthorizedRecord(authorizationCache.get(user.uid))
-  try {
-    const snapshot = await get(ref(db, `${AUTHORIZED_UIDS_PATH}/${user.uid}`))
-    const record = snapshot.exists() ? normalizedAuthorization(snapshot.val()) : null
-    if (record) authorizationCache.set(user.uid, record)
-    return isActiveAuthorizedRecord(record)
-  } catch {
-    return false
-  }
+  return isActiveAuthorizedRecord(await readCentralAuthorizationRecord(user))
 }
 
 export const hydrateCentralAuthorization = async user => {

@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { canManageStaff, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { canManageStaff, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -105,6 +105,10 @@ export default function App() {
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
+  const [centralAuthUser, setCentralAuthUser] = useState(null)
+  const [staffAuthorizationRecord, setStaffAuthorizationRecord] = useState(null)
+  const [staffAuthBusy, setStaffAuthBusy] = useState(false)
+  const [staffAuthError, setStaffAuthError] = useState('')
   const [productAuthUser, setProductAuthUser] = useState(null)
   const [adminCentralSales, setAdminCentralSales] = useState([])
   const [centralSales, setCentralSales] = useState([])
@@ -125,6 +129,7 @@ export default function App() {
   const [settlements, setSettlements] = useState([])
   const saleInFlight = useRef(false)
   const staffMigrationAttempted = useRef(false)
+  const staffAuthInFlight = useRef(null)
 
   const downloadSalesBackup = useCallback(() => {
     const backup = buildSalesBackup()
@@ -224,6 +229,13 @@ export default function App() {
 
   useEffect(() => {
     const stopAuth = subscribeCentralAuth(user => {
+      setCentralAuthUser(user)
+      setStaffAuthError('')
+      if (user) void readCentralAuthorizationRecord(user).then(record => {
+        setStaffAuthorizationRecord(record)
+        if (!record) setStaffAuthError(`AUTHORIZED_RECORD = MISSING\nUID = ${user.uid || '—'}\nEMAIL = ${user.email || '—'}`)
+      }).catch(() => setStaffAuthorizationRecord(null))
+      else setStaffAuthorizationRecord(null)
       centralListener.current?.()
       centralListener.current = null
       operationalDayListener.current?.()
@@ -377,6 +389,37 @@ export default function App() {
       setAdminAuthBusy(false)
     }
   }, [adminAuthBusy])
+
+  const ensureStaffAuth = useCallback(async () => {
+    if (canManageStaff(centralAuth()?.currentUser)) return true
+    if (staffAuthInFlight.current) return staffAuthInFlight.current
+    const task = (async () => {
+      setStaffAuthBusy(true)
+      setStaffAuthError('')
+      try {
+        const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
+        const record = await readCentralAuthorizationRecord(user)
+        setCentralAuthUser(user)
+        setStaffAuthorizationRecord(record)
+        if (!record) {
+          setStaffAuthError(`AUTHORIZED_RECORD = MISSING\nUID = ${user?.uid || '—'}\nEMAIL = ${user?.email || '—'}`)
+          return false
+        }
+        if (!canManageStaff(user)) {
+          setStaffAuthError(`AUTHORIZED_RECORD = NOT AUTHORIZED\nUID = ${user?.uid || '—'}\nEMAIL = ${user?.email || '—'}`)
+          return false
+        }
+        return true
+      } catch (error) {
+        setStaffAuthError(error?.message || 'تعذر تسجيل الدخول بحساب POS.')
+        return false
+      } finally {
+        setStaffAuthBusy(false)
+      }
+    })()
+    staffAuthInFlight.current = task
+    try { return await task } finally { staffAuthInFlight.current = null }
+  }, [])
 
   const logoutAdmin = useCallback(async () => {
     setAdminAuthError('')
@@ -780,9 +823,9 @@ export default function App() {
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
-      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onSaveStaff={saveCentralStaff} onNavigate={setCurrentView} />}
+      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onNavigate={setCurrentView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
