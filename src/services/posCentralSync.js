@@ -764,8 +764,9 @@ const staffUser = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
-  if (!user || !await isAuthorizedPosSyncUser(user) || !canManageStaff(user)) throw Object.assign(new Error('هذا الحساب غير مخول لإدارة الموظفين.'), { code: 'STAFF_PERMISSION_DENIED' })
-  if (write && !canManageStaff(user)) throw Object.assign(new Error('صلاحية إدارة الموظفين مطلوبة.'), { code: 'STAFF_WRITE_DENIED' })
+  const authorizationRecord = user ? await refreshCentralAuthorizationRecord(user) : null
+  if (!user || !authorizationRecord || !canManageStaff(user, authorizationRecord)) throw Object.assign(new Error('هذا الحساب غير مخول لإدارة الموظفين.'), { code: 'STAFF_PERMISSION_DENIED' })
+  if (write && !canManageStaff(user, authorizationRecord)) throw Object.assign(new Error('صلاحية إدارة الموظفين مطلوبة.'), { code: 'STAFF_WRITE_DENIED' })
   return user
 }
 
