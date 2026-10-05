@@ -877,6 +877,8 @@ export default function App() {
           operationalDay={operationalDay}
           cashboxTransactions={cashboxTransactions}
           salesOverride={adminReady ? adminCentralSales : null}
+          products={catalogProducts}
+          categories={catalogCategories}
           onNavigate={setCurrentView}
           onDirectThermalPrint={session ? printReportDirect : undefined}
           directThermalReady={Boolean(session && directThermalReady)}
@@ -899,7 +901,7 @@ export default function App() {
           </header>
           <div className="admin-central-actions"><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
-          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} salesOverride={adminCentralSales} onNavigate={() => {}} />
+          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} salesOverride={adminCentralSales} products={catalogProducts} categories={catalogCategories} onNavigate={() => {}} />
         </section>
       )}
 

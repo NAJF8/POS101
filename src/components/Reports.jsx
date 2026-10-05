@@ -9,6 +9,7 @@ import { normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
+import { buildMaterialsReport } from '../services/materialsReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -36,6 +37,7 @@ const a4PrintStyles = `
   body { direction: rtl; font-size: 12pt; line-height: 1.5; }
   .report-paper { width: 100%; max-width: none; margin: 0; padding: 0; background: #fff; }
   .report-paper-header { text-align: center; padding-bottom: 6mm; margin-bottom: 7mm; border-bottom: .4mm solid #40533b; }
+  .materials-brand { margin-bottom: 1mm; font-size: 15pt; font-weight: 900; letter-spacing: .2mm; }
   .report-logo { display: block; width: 40mm; height: 29mm; object-fit: contain; margin: 0 auto 3mm; filter: brightness(0); }
   h2 { margin: 0 0 2mm; font-size: 20pt; color: #000; }
   h3 { margin: 7mm 0 3mm; font-size: 15pt; color: #000; }
@@ -44,6 +46,9 @@ const a4PrintStyles = `
   .print-table th, .print-table td { border: .35mm solid #000; padding: 2.8mm; color: #000; text-align: right; vertical-align: top; }
   .print-table th { background: #fff; color: #000; font-weight: 800; }
   .print-table tfoot td { background: #fff; color: #000; font-weight: 800; }
+  .summary-row td, .summary-highlight td { font-weight: 900; }
+  .materials-section { break-inside: auto; page-break-inside: auto; }
+  .materials-section h3 { break-after: avoid; page-break-after: avoid; }
   .number-cell { direction: ltr; text-align: left; white-space: nowrap; }
   .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; }
   thead { display: table-header-group; }
@@ -76,6 +81,8 @@ const thermalComprehensiveStyles = `
   .summary-highlight td, tr.summary-highlight td { font-size: 12pt !important; font-weight: 900 !important; border-top: .6mm solid #000 !important; border-bottom: .6mm solid #000 !important; }
   .summary-negative td, tr.summary-negative td { font-size: 11pt !important; font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
+  .materials-section { break-inside: auto; page-break-inside: auto; }
+  .materials-section h3 { break-after: avoid; page-break-after: avoid; }
 
   .thermal-cards-list { display: flex; flex-direction: column; gap: 2mm; min-width: 0; margin-bottom: 3mm; }
   .thermal-sale-card { display: flex; flex-direction: column; min-width: 0; max-width: 100%; border: .35mm solid #000; padding: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
@@ -105,6 +112,7 @@ const thermalMaterialsStyles = `
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
   .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; break-inside: avoid; }
+  .materials-brand { margin-bottom: 1mm; font-size: 13pt; font-weight: 900; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; font-size: 16pt; font-weight: 900; line-height: 1.2; }
   p { margin: 0; }
@@ -130,7 +138,7 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [] }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [], products = [], categories = [] }) {
   const [reportType, setReportType] = useState(null)
   const defaultBusinessDate = operationalDay?.businessDate || getDefaultReportDate()
   const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
@@ -292,11 +300,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
 
   const printReportDirect = () => {
     if (!directThermalReady || !onDirectThermalPrint) return
-    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير المواد المباعة', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
+    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
       : undefined
-    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: filteredExpenses, ...(summary ? { summary } : {}) })
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: filteredExpenses, ...(reportType === 'materials' ? { products, categories, materials: buildMaterialsReport({ sales: filteredSales, products, categories }) } : {}), ...(summary ? { summary } : {}) })
   }
 
   const renderReportCards = () => (
@@ -582,46 +590,22 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       
       content = <><table className="print-table"><thead><tr><th>البيان</th><th>المبلغ (IQD)</th></tr></thead><tbody><tr><td>إجمالي المبيعات</td><td>{format(stats.gross)}</td></tr><tr><td>الخصومات</td><td>{format(stats.discounts)}</td></tr><tr><td>المرتجعات</td><td>{format(stats.refunds)}</td></tr><tr><td>صافي المبيعات</td><td>{format(stats.net)}</td></tr><tr><td>المصاريف</td><td>{format(expensesTotal)}</td></tr><tr><td>عدد الطلبات</td><td>{formatNumber(stats.count)}</td></tr><tr><td>المتوسط لكل طلب</td><td>{format(stats.avg)}</td></tr></tbody></table>{thermalSalesDetails(sList)}</>
     } else if (reportType === 'materials') {
-      title = 'تقرير المواد المباعة'
-      const materials = {}
-      filteredSales.forEach(s => {
-        const sItems = s.items || s.order?.items || []
-        sItems.forEach(i => {
-          if (!materials[i.name]) materials[i.name] = { qty: 0, total: 0 }
-          materials[i.name].qty += Number(i.quantity || 0)
-          materials[i.name].total += Number(i.quantity || 0) * Number(i.price || 0)
-        })
-      })
-      const list = Object.entries(materials).sort((a, b) => b[1].qty - a[1].qty)
-      const totalQty = list.reduce((sum, item) => sum + item[1].qty, 0)
-      const totalAmt = list.reduce((sum, item) => sum + item[1].total, 0)
-      
-      content = (
-        <table className="print-table">
-          <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
-          <tbody>
-            {list.map(([name, data], idx) => (
-              <tr key={name}>
-                <td>{formatNumber(idx + 1)}</td>
-                <td>{name}</td>
-                <td>{formatNumber(data.qty)}</td>
-                <td>{format(data.total)}</td>
-              </tr>
-            ))}
-            {list.length === 0 && <tr><td colSpan="4">لا توجد مبيعات</td></tr>}
-            <tr className="summary-row">
-              <td colSpan="2">إجمالي المبيعات</td>
-              <td>{formatNumber(totalQty)}</td>
-              <td>{format(totalAmt)}</td>
-            </tr>
-            <tr className="summary-row">
-              <td colSpan="2">إجمالي الكمية</td>
-              <td>{formatNumber(totalQty)}</td>
-              <td></td>
-            </tr>
-          </tbody>
-        </table>
-      )
+      title = 'تقرير مبيعات المواد'
+      const materials = buildMaterialsReport({ sales: filteredSales, products, categories })
+      content = <>
+        {materials.sections.map(section => <section className="materials-section" data-category-id={section.id} key={section.id}>
+          <h3>{section.name}</h3>
+          <table className="print-table materials-table">
+            <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>إجمالي البيع</th></tr></thead>
+            <tbody>
+              {section.items.map((item, idx) => <tr key={item.name}><td>{formatNumber(idx + 1)}</td><td>{item.name}</td><td>{formatNumber(item.quantity)}</td><td>{format(item.total)}</td></tr>)}
+              <tr className="summary-row"><td colSpan="2">مجموع {section.name}</td><td>{formatNumber(section.quantity)}</td><td>{format(section.total)}</td></tr>
+            </tbody>
+          </table>
+        </section>)}
+        {!materials.sections.length && <table className="print-table"><tbody><tr><td>لا توجد مبيعات</td></tr></tbody></table>}
+        <table className="print-table report-summary materials-grand-total" data-testid="materials-grand-total"><tbody><tr className="summary-highlight"><td>الإجمالي العام</td><td>{formatNumber(materials.grandQuantity)}</td><td>{format(materials.grandTotal)}</td></tr></tbody></table>
+      </>
     } else if (reportType === 'expenses') {
       title = 'تقرير المصاريف'
       content = (
@@ -690,6 +674,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         <div className={`report-paper${reportType === 'comprehensive' ? ' comprehensive-report' : reportType === 'materials' ? ' materials-report' : ''}`}>
           <div className="report-paper-header">
             <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
+            {reportType === 'materials' && <div className="materials-brand">101 COFFEE HOUSE</div>}
             <h2>{title}</h2>
             <p>من {periodFrom} إلى {periodTo}</p>
             <p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || session?.shiftName || 'الإدارة'}</p>
