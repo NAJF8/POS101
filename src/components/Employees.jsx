@@ -46,14 +46,14 @@ export default function Employees({ staff = [], canWrite = false, onSaveStaff, o
       setBusy(false)
     }
   }
+  const canAttemptWrite = canWrite || Boolean(onStaffSignIn)
 
   const row = person => <article className={`employee-management-row ${person.active === false ? 'is-disabled' : ''}`} key={person.id}>
     <div className="employee-management-info"><strong>{person.name}</strong><span>الكود: {person.code || 'بدون كود'}</span><span>الدور: {ROLE_LABELS[person.role] || ROLE_LABELS.employee}</span></div>
     <span className={`employee-management-status ${person.active === false ? 'is-disabled' : ''}`}>{person.active === false ? 'سابق' : 'حالي'}</span>
-    <div className="employee-management-actions"><button type="button" disabled={!canWrite || busy} onClick={() => edit(person)}>تعديل</button><button type="button" disabled={!canWrite || busy} onClick={() => toggle(person)}>{person.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button></div>
+    <div className="employee-management-actions"><button type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={() => edit(person)}>تعديل</button><button type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={() => toggle(person)}>{person.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button></div>
   </article>
 
-  const canAttemptWrite = canWrite || Boolean(onStaffSignIn)
   return <section className="employees-page" dir="rtl">
     <div className="employees-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الموظفين</h1><p>إدارة الموظفين الحاليين والسابقين مع الحفاظ على التاريخ.</p></div><button className="primary-action" type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={openNew}><Icon name="plus" size={18} /> {staffAuthBusy ? 'جارٍ تسجيل الدخول…' : 'إضافة موظف'}</button></div>
     {!canWrite && <div className="settings-readonly" role="status"><p>{staffAuthError || 'يلزم تسجيل الدخول بحساب POS المصرح لإدارة الموظفين.'}</p>{!staffAuthError && <button type="button" className="secondary-action" onClick={onStaffSignIn} disabled={staffAuthBusy}>{staffAuthBusy ? 'جارٍ تسجيل الدخول…' : 'تسجيل دخول'}</button>}</div>}
