@@ -543,8 +543,8 @@ export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogo
 }
 
 /* ── Seller Selection ── */
-export function SellerSelection({ onClose, onSelect }) {
-  const sellers = ['علي', 'روان', 'محمد', 'ميس']
+export function SellerSelection({ staff = [], onClose, onSelect }) {
+  const sellers = staff.filter(person => person.active !== false)
   const [busy, setBusy] = React.useState(false)
   const choose = async name => {
     if (busy) return
@@ -561,12 +561,12 @@ export function SellerSelection({ onClose, onSelect }) {
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <h2>اختر اسم الكابتن</h2>
       <div className="type-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-        {sellers.map(name => (
-          <button disabled={busy} onClick={() => choose(name)} key={name}>
+        {sellers.length ? sellers.map(person => (
+          <button disabled={busy} onClick={() => choose(person.name)} key={person.id}>
             <span><Icon name="user" size={27} /></span>
-            <b>{busy ? 'جارٍ الحفظ…' : name}</b>
+            <b>{busy ? 'جارٍ الحفظ…' : person.name}</b>
           </button>
-        ))}
+        )) : <p className="settings-readonly">لا يوجد موظفون حاليون</p>}
       </div>
     </Dialog>
   )
