@@ -48,6 +48,7 @@
 .staff-list, .employee-cards { display: grid; gap: 9px; margin-top: 16px; } .staff-row, .employee-card { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 11px; border: 1px solid #eeeae2; border-radius: 10px; } .staff-row span, .staff-row small, .employee-card span { color: #718078; }
 .employee-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } .employee-card { display: grid; justify-items: start; }
 .staff-settings-form { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; } .staff-settings-form input, .staff-settings-form select { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; } .staff-settings-list { display: grid; gap: 8px; margin-top: 16px; } .staff-settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid #eeeae2; border-radius: 10px; } .staff-settings-row div { display: grid; gap: 4px; } .staff-settings-row small { color: #718078; } .staff-settings-row.is-disabled { opacity: .58; } .settlement-actual-cash { display: grid; gap: 5px; } .settlement-actual-cash input { padding: 9px; border: 1px solid #d9ded8; border-radius: 8px; }
+.employees-page { min-height: 100vh; padding: 28px clamp(16px, 4vw, 52px); background: #f7f5ef; } .employees-heading { max-width: 1180px; margin: 0 auto 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; } .employees-heading h1 { margin: 14px 0 5px; } .employees-heading p { margin: 0; color: #718078; } .employee-form { margin-bottom: 16px; } .employee-form h2 { margin-top: 0; } .employee-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; } .employee-form-grid label { display: grid; gap: 6px; } .employee-form-grid input, .employee-form-grid select { padding: 10px; border: 1px solid #d9ded8; border-radius: 8px; } .employee-management-list { display: grid; gap: 8px; margin-top: 16px; } .employee-management-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid #eeeae2; border-radius: 10px; } .employee-management-info { display: grid; gap: 4px; } .employee-management-info span { color: #718078; font-size: 13px; } .employee-management-status { color: #2e704b; font-size: 13px; } .employee-management-status.is-disabled, .employee-management-row.is-disabled { opacity: .62; } .employee-management-actions { display: flex; gap: 8px; } .employee-management-actions button { padding: 8px 10px; }
 @media (max-width: 850px) { .financial-grid { grid-template-columns: 1fr; } .financial-heading { align-items: stretch; } }
 @media print { @page { size: A4 portrait; margin: 12mm; } .financial-center { padding: 0; background: #fff; color: #000; } .financial-center .financial-heading button, .financial-center .financial-filters, .financial-center form, .financial-center button { display: none !important; } .financial-card, .financial-center > .settings-card { box-shadow: none; border: 1px solid #999; break-inside: avoid; } .financial-table { font-size: 9pt; } .financial-table th, .financial-table td { padding: 4px; color: #000; } .financial-grid { display: block; } .financial-grid > .settings-card { margin-bottom: 8mm; } }
 .settings-heading, .settings-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
@@ -1289,55 +1290,43 @@ input, textarea, select { cursor: text; }
 
 /* Reports */
 .reports-container {
-  display: flex;
-  gap: 2rem;
-  padding: 2rem;
+  display: block;
+  padding: clamp(1rem, 3vw, 2rem);
   min-height: calc(100vh - 64px);
 }
 
-.reports-sidebar {
-  width: 300px;
-  background: var(--surface);
-  border-radius: 12px;
-  padding: 1.5rem;
-  border: 1px solid var(--border);
-  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-}
-
-.date-filter label {
-  display: flex;
-  flex-direction: column;
-  margin-top: 1rem;
-  font-weight: 600;
-}
-
-.date-filter input {
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-
 .reports-main {
-  flex: 1;
+  width: min(100%, 1180px);
+  margin: 0 auto;
 }
+
+.reports-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.reports-header h2 { margin: 0; }
+.reports-header p { margin: .35rem 0 0; color: var(--text-muted); }
+.reports-range-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto; align-items: end; gap: .75rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.reports-range-toolbar label { display: flex; flex-direction: column; gap: .35rem; font-weight: 700; }
+.reports-range-toolbar input { min-height: 42px; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--text); }
+.reports-shortcuts { display: flex; flex-wrap: wrap; gap: .45rem; margin: .65rem 0 1.25rem; }
+.reports-shortcuts button { border: 0; border-radius: 999px; padding: .35rem .75rem; background: transparent; color: var(--accent); cursor: pointer; }
+.reports-shortcuts button:hover { background: var(--surface); }
 
 .reports-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
 }
 
 .report-card-btn {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 1.5rem;
+  min-height: 150px;
+  padding: 1.1rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
   cursor: pointer;
   transition: 0.2s;
 }
@@ -1348,12 +1337,28 @@ input, textarea, select { cursor: text; }
 }
 
 .report-card-btn b {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   margin-top: 0.5rem;
 }
 
 .report-card-btn small {
   color: var(--text-muted);
+}
+
+@media (max-width: 1050px) {
+  .reports-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .reports-header { align-items: flex-start; flex-direction: column; }
+  .reports-range-toolbar { grid-template-columns: 1fr 1fr; }
+  .reports-range-toolbar button { width: 100%; }
+  .reports-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 460px) {
+  .reports-range-toolbar { grid-template-columns: 1fr; }
+  .reports-grid { grid-template-columns: 1fr; }
 }
 
 .report-view-container {

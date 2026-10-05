@@ -6,6 +6,7 @@ import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, Quick
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Settings from './components/Settings'
+import Employees from './components/Employees'
 import FinancialCenter from './components/FinancialCenter'
 import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
@@ -14,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -91,6 +92,7 @@ export default function App() {
   const [adminAuthError, setAdminAuthError] = useState('')
   const [productAuthUser, setProductAuthUser] = useState(null)
   const [adminCentralSales, setAdminCentralSales] = useState([])
+  const [centralSales, setCentralSales] = useState([])
   const centralListener = useRef(null)
   const productListener = useRef(null)
   const [centralProducts, setCentralProducts] = useState([])
@@ -107,6 +109,7 @@ export default function App() {
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
   const saleInFlight = useRef(false)
+  const staffMigrationAttempted = useRef(false)
 
   const downloadSalesBackup = useCallback(() => {
     const backup = buildSalesBackup()
@@ -213,6 +216,8 @@ export default function App() {
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
+      setCentralSales([])
+      staffMigrationAttempted.current = false
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setProductAuthUser(isCentralProductManager(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
@@ -241,7 +246,8 @@ export default function App() {
         productListener.current = subscribeCentralProducts(setCentralProducts)
       }
        if (!isCentralAdminUser(user) && !isCentralCashierUser(user)) return
-       centralListener.current = subscribeCentralSales(({ centralCount, mergedSales }) => {
+       centralListener.current = subscribeCentralSales(({ centralSales: receivedSales, centralCount, mergedSales }) => {
+         if (receivedSales) setCentralSales(receivedSales)
          if (mergedSales) setAdminCentralSales(mergedSales)
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
@@ -262,6 +268,28 @@ export default function App() {
       setProductAuthUser(null)
     }
   }, [])
+
+  useEffect(() => {
+    if (staffMigrationAttempted.current || !adminAuthUser || !centralSales.length || staff.length) return
+    staffMigrationAttempted.current = true
+    const candidates = [...new Set(centralSales.flatMap(sale => [sale?.seller, sale?.cashierNameSnapshot, sale?.cashierName, sale?.employeeNameSnapshot].map(value => String(value || '').trim()).filter(Boolean)))]
+    if (!candidates.length) return
+    void (async () => {
+      const existing = await readCentralStaff()
+      if (existing.length) return
+      for (const name of candidates) {
+        const stableId = `staff-${encodeURIComponent(name).replace(/%/g, '').replace(/[^a-zA-Z0-9\u0600-\u06ff_-]/g, '-').replace(/-+/g, '-').slice(0, 80)}`
+        const current = await readCentralStaff()
+        if (current.length || current.some(item => item.name === name || item.id === stableId)) return
+        await saveCentralStaff({ id: stableId, name, role: 'employee', active: true, code: '' }, { actor: { reason: 'one-time migration from pos101_sales snapshots' } })
+      }
+      const after = await readCentralStaff()
+      if (after.length !== candidates.length) throw new Error('تعذر التحقق من اكتمال ترحيل الموظفين.')
+      setStaff(after)
+    })().catch(error => {
+      console.warn('STAFF_MIGRATION_NOT_COMPLETED', error?.code || error?.message || 'unknown')
+    })
+  }, [adminAuthUser, centralSales, staff])
 
   const operationalDaySummary = useMemo(() => {
     const expenses = readLocalExpenses()
@@ -730,8 +758,9 @@ export default function App() {
       )}
 
       {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={adminReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
+      {currentView === 'employees' && (session || adminReady) && <Employees staff={staff} canWrite={adminReady} onSaveStaff={saveCentralStaff} onNavigate={setCurrentView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
