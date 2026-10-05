@@ -84,6 +84,7 @@ export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
 const AUTHORIZED_UIDS_PATH = 'pos101_authorized_uids'
 const SYNC_ROLES = new Set(['super_admin', 'admin', 'manager', 'cashier', 'cashier-sync', 'employee', 'admin-viewer'])
 const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager', 'admin-viewer'])
+const STAFF_MANAGEMENT_ROLES = new Set(['super_admin', 'admin', 'manager', 'cashier', 'cashier-sync', 'employee'])
 const authorizationCache = new Map()
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
@@ -238,6 +239,13 @@ const isActiveAuthorizedRecord = record => {
   return Boolean(record && record.active !== false && record.authorized !== false && (SYNC_ROLES.has(role) || record.read === true || record.write === true || record.sync === true))
 }
 const legacyRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
+
+export const canManageStaff = user => {
+  if (!user?.uid) return false
+  const record = user.pos101Authorization || user.authorization || authorizationCache.get(user.uid)
+  const role = String(record?.role || '').trim().toLowerCase()
+  return Boolean(record && record.active !== false && record.authorized !== false && STAFF_MANAGEMENT_ROLES.has(role))
+}
 
 export const isAuthorizedPosSyncUser = async user => {
   if (!user?.uid) return false
@@ -742,6 +750,15 @@ const financialUser = async (write = false) => {
   return user
 }
 
+const staffUser = async (write = false) => {
+  if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  await authReady
+  const user = auth?.currentUser
+  if (!user || !await isAuthorizedPosSyncUser(user) || !canManageStaff(user)) throw Object.assign(new Error('هذا الحساب غير مخول لإدارة الموظفين.'), { code: 'STAFF_PERMISSION_DENIED' })
+  if (write && !canManageStaff(user)) throw Object.assign(new Error('صلاحية إدارة الموظفين مطلوبة.'), { code: 'STAFF_WRITE_DENIED' })
+  return user
+}
+
 const objectValues = snapshot => snapshot.exists() ? Object.entries(snapshot.val() || {}).map(([id, value]) => ({ ...value, id: value?.id || id })) : []
 const staffPath = 'pos101_staff'
 const cashboxTransactionsPath = 'pos101_cashbox_transactions'
@@ -757,15 +774,25 @@ export const normalizeStaff = (value, id) => ({
   deactivatedAt: value?.deactivatedAt || null,
 })
 
-export const readCentralStaff = async () => { await financialUser(false); return objectValues(await get(financialPath(staffPath))).map(normalizeStaff).filter(row => row.id && row.name) }
+const saveStaffAudit = async ({ action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => {
+  const user = await staffUser(true)
+  const id = `audit-${crypto.randomUUID()}`
+  const payload = { id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', businessDate, timestamp: Date.now(), before, after, reason }
+  await set(financialPath(`${auditPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${auditPath}/${id}`))
+  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ سجل تدقيق الموظف.')
+  return readBack.val()
+}
+
+export const readCentralStaff = async () => { await staffUser(false); return objectValues(await get(financialPath(staffPath))).map(normalizeStaff).filter(row => row.id && row.name) }
 export const subscribeCentralStaff = callback => {
   let active = true
   let stop = () => {}
-  void financialUser(false).then(() => { if (!active) return; stop = onValue(financialPath(staffPath), snapshot => callback(objectValues(snapshot).map(normalizeStaff).filter(row => row.id && row.name)), () => callback([])) }).catch(() => {})
+  void staffUser(false).then(() => { if (!active) return; stop = onValue(financialPath(staffPath), snapshot => callback(objectValues(snapshot).map(normalizeStaff).filter(row => row.id && row.name)), () => callback([])) }).catch(() => {})
   return () => { active = false; stop() }
 }
 export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
-  const user = await financialUser(true)
+  const user = await staffUser(true)
   const id = String(staff?.id || `staff-${crypto.randomUUID()}`).trim()
   const existing = (await get(financialPath(`${staffPath}/${id}`))).val() || null
   const now = Date.now()
@@ -777,7 +804,7 @@ export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
   const readBack = await get(financialPath(`${staffPath}/${id}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ الموظف.')
   const action = !existing ? 'staff add' : existing.active !== payload.active ? (payload.active ? 'activate' : 'deactivate') : 'staff edit'
-  await saveFinancialAudit({ action, entityType: 'staff', entityId: id, before: existing, after: readBack.val(), reason: actor.reason || '' })
+  await saveStaffAudit({ action, entityType: 'staff', entityId: id, before: existing, after: readBack.val(), reason: actor.reason || '' })
   return normalizeStaff(readBack.val(), id)
 }
 

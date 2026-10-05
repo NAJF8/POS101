@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { canManageStaff, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -270,7 +270,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (staffMigrationAttempted.current || !adminAuthUser || !centralSales.length || staff.length) return
+    if (staffMigrationAttempted.current || !canManageStaff(centralAuth()?.currentUser) || !centralSales.length || staff.length) return
     staffMigrationAttempted.current = true
     const candidates = [...new Set(centralSales.flatMap(sale => [sale?.seller, sale?.cashierNameSnapshot, sale?.cashierName, sale?.employeeNameSnapshot].map(value => String(value || '').trim()).filter(Boolean)))]
     if (!candidates.length) return
@@ -289,7 +289,7 @@ export default function App() {
     })().catch(error => {
       console.warn('STAFF_MIGRATION_NOT_COMPLETED', error?.code || error?.message || 'unknown')
     })
-  }, [adminAuthUser, centralSales, staff])
+  }, [productAuthUser, centralSales, staff])
 
   const operationalDaySummary = useMemo(() => {
     const expenses = readLocalExpenses()
@@ -732,6 +732,7 @@ export default function App() {
 
   const adminReady = isCentralAdminUser(adminAuthUser)
   const productManagerReady = isCentralProductManager(productAuthUser)
+  const staffManagerReady = canManageStaff(centralAuth()?.currentUser)
   const saveProduct = useCallback(async product => {
     const saved = await saveCentralProduct(product)
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
@@ -753,14 +754,14 @@ export default function App() {
         />
       )}
 
-      {currentView === 'dashboard' && (session || adminReady) && (
+      {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
         <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
       )}
 
-      {currentView === 'settings' && (session || adminReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={adminReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
+      {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
-      {currentView === 'employees' && (session || adminReady) && <Employees staff={staff} canWrite={adminReady} onSaveStaff={saveCentralStaff} onNavigate={setCurrentView} />}
+      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onSaveStaff={saveCentralStaff} onNavigate={setCurrentView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
