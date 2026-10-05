@@ -261,7 +261,7 @@ const legacyRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : use
 
 export const canManageStaff = (user, authorizationRecord = null) => {
   if (!user?.uid) return false
-  const record = authorizationRecord || user.pos101Authorization || user.authorization || authorizationCache.get(user.uid)
+  const record = authorizationRecord || authorizationCache.get(user.uid) || user.pos101Authorization || user.authorization
   const role = String(record?.role || '').trim().toLowerCase()
   return Boolean(record && record.active !== false && record.authorized !== false && STAFF_MANAGEMENT_ROLES.has(role))
 }
@@ -285,7 +285,7 @@ export const hydrateCentralAuthorization = async user => {
 }
 
 export const getCentralRole = user => {
-  const record = user?.pos101Authorization || user?.authorization || (user?.uid ? authorizationCache.get(user.uid) : null)
+  const record = user?.uid ? (authorizationCache.get(user.uid) || user.pos101Authorization || user.authorization) : null
   return roleFromAuthorization(record) !== 'blocked' ? roleFromAuthorization(record) : legacyRole(user)
 }
 export const getCentralPermissions = user => {
