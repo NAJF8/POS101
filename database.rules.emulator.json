@@ -2,31 +2,22 @@
   "rules": {
     ".read": false,
     ".write": false,
-    "pos101_authorized_uids": {
+    "pos101_authorized_uids": { ".read": false, ".write": false },
+    "pos101_kiosk_activation_codes": { ".read": false, ".write": false },
+    "pos101_kiosk_challenges": { ".read": false, ".write": false },
+    "pos101_kiosks": {
       ".read": false,
       ".write": false,
-      "$uid": { ".read": "auth != null && auth.uid === $uid" }
+      "$kioskId": { ".read": "auth != null && auth.token.pos101_kiosk === true && auth.token.scope === 'cashier' && auth.token.kioskId === $kioskId && data.child('active').val() === true", ".write": false }
     },
-    "pos101_sales": {
-      ".read": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('read').val() === true",
-      "$saleId": {
-        ".write": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('write').val() === true && newData.exists() && newData.child('saleId').val() === $saleId",
-        ".validate": "newData.hasChildren(['saleId', 'createdAt', 'orderNumber', 'total'])"
-      }
-    },
-    "pos101_products": {
-      ".read": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73' || root.child('pos101_authorized_uids').child(auth.uid).child('read').val() === true)",
-      ".write": "auth != null && (auth.uid === '4Tx0bMygd8gVuDDDOblnt3HOvo72' || auth.uid === 'rtDA9erW11geHfLpa3ZW3LacZR73' || root.child('pos101_authorized_uids').child(auth.uid).child('write').val() === true)",
-      "$productId": {
-        ".validate": "newData.hasChildren(['id', 'name', 'price', 'enabled']) && newData.child('id').val() === $productId && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('price').isNumber() && newData.child('price').val() >= 0 && newData.child('enabled').isBoolean()"
-      }
-    },
-    "pos101_operational_days": {
-      ".read": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('read').val() === true",
-      ".write": "auth != null && root.child('pos101_authorized_uids').child(auth.uid).child('write').val() === true",
-      "$dayId": {
-        ".validate": "newData.hasChildren(['id', 'operationalDayId', 'businessDate', 'startedAt', 'startedBy', 'status']) && newData.child('id').val() === $dayId && newData.child('operationalDayId').val() === $dayId && newData.child('businessDate').isString() && newData.child('startedAt').isNumber() && (newData.child('status').val() === 'open' || newData.child('status').val() === 'closed')"
-      }
-    }
+    "pos101_sales": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_products": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_operational_days": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_expenses": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_staff": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_cashbox_transactions": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_cashbox_settlements": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_cashbox_counts": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" },
+    "pos101_financial_audit_log": { ".read": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true", ".write": "auth != null && auth.token.pos101_kiosk === true && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true" }
   }
 }

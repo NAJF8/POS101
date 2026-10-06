@@ -1,0 +1,8 @@
+{
+  "name": "pos101-kiosk-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/kiosk-worker.test.mjs"
+  }
+}

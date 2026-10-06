@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
-import { deleteCentralExpense, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveLocalExpensePending, signInCentralWithGoogle, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { deleteCentralExpense, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
 import { createExpenseRecoveryBackup, createMasterExpenseRecoveryHandler, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
 
 const format = formatMoney
@@ -92,8 +92,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         result = await runExpenseCentralSync({ initial: true })
       } catch (error) {
         if (error?.code !== 'AUTH_REQUIRED') throw error
-        await signInCentralWithGoogle()
-        result = await runExpenseCentralSync({ initial: true })
+        throw error
       }
       setSyncMessage(`تمت المزامنة: رفع ${result?.uploaded || 0}، تخطي ${result?.skipped || 0}، الإجمالي المركزي ${result?.centralCount || 0}`)
     } catch (error) {
@@ -117,8 +116,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
           syncResult = await runExpenseCentralSync({ initial: true })
         } catch (error) {
           if (error?.code !== 'AUTH_REQUIRED') throw error
-          await signInCentralWithGoogle()
-          syncResult = await runExpenseCentralSync({ initial: true })
+          throw error
         }
       }
 

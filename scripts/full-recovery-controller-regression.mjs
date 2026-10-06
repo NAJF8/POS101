@@ -14,7 +14,7 @@ let starts = 0
 let runs = 0
 let successes = 0
 const handler = createFullRecoveryClickHandler({
-  getCurrentUser: () => ({ uid: '4Tx0bMygd8gVuDDDOblnt3HOvo72' }),
+  getCurrentUser: () => ({ uid: 'test-admin', authorization: { role: 'admin', active: true, authorized: true } }),
   runRecovery: async () => { runs += 1; await new Promise(resolve => setTimeout(resolve, 20)); return { ok: true } },
   onStart: () => { starts += 1 },
   onSuccess: () => { successes += 1 },

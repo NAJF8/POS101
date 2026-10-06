@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { canManageStaff, centralAuth, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralProductManager, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signInCentralWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -23,6 +23,7 @@ import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
 import { calculateSettlement } from './services/financialCenter.js'
 import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
+import KioskActivation from './components/KioskActivation.jsx'
 import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -109,6 +110,8 @@ export default function App() {
   const [staffAuthorizationRecord, setStaffAuthorizationRecord] = useState(null)
   const [staffAuthBusy, setStaffAuthBusy] = useState(false)
   const [staffAuthError, setStaffAuthError] = useState('')
+  const [kioskActivationBusy, setKioskActivationBusy] = useState(false)
+  const [kioskActivationError, setKioskActivationError] = useState('')
   const [productAuthUser, setProductAuthUser] = useState(null)
   const [adminCentralSales, setAdminCentralSales] = useState([])
   const [centralSales, setCentralSales] = useState([])
@@ -231,7 +234,7 @@ export default function App() {
     const stopAuth = subscribeCentralAuth(user => {
       setCentralAuthUser(user)
       setStaffAuthError('')
-      if (user) void refreshCentralAuthorizationRecord(user).then(record => {
+      if (user && !isCentralCashierUser(user)) void refreshCentralAuthorizationRecord(user).then(record => {
         setStaffAuthorizationRecord(record)
         if (!record) setStaffAuthError(`AUTHORIZED_RECORD = MISSING\nUID = ${user.uid || '—'}\nEMAIL = ${user.email || '—'}`)
       }).catch(error => {
@@ -377,7 +380,6 @@ export default function App() {
     setOperationalDayError('')
     setOperationalDayLoading(true)
     try {
-      if (!centralAuth()?.currentUser) await signInCentralWithGoogle()
       const day = await startOperationalDay({ startedBy: { name: session?.name || session?.shiftName || '' } })
       setOperationalDay(day)
       setModal(null)
@@ -430,7 +432,7 @@ export default function App() {
       setStaffAuthBusy(true)
       setStaffAuthError('')
       try {
-        const user = centralAuth()?.currentUser || await signInCentralWithGoogle()
+        const user = centralAuth()?.currentUser || await ensureKioskFirebaseSession()
         const record = await refreshCentralAuthorizationRecord(user)
         setCentralAuthUser(user)
         setStaffAuthorizationRecord(record)
@@ -478,7 +480,7 @@ export default function App() {
 
   const handleCentralSyncClick = useMemo(() => createCentralSyncClickHandler({
     getCurrentUser: () => centralAuth()?.currentUser,
-    signIn: signInCentralWithGoogle,
+    signIn: ensureKioskFirebaseSession,
     runAdminRefresh: runAdminCentralRefresh,
     runCashierSync: async () => {
       const salesResult = await runCashierCentralSync({ initial: !getCentralSyncState().initialSyncCompleted })
@@ -826,6 +828,11 @@ export default function App() {
     setSession(null); setModal(null)
   }, [session])
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
+  const activateKiosk = useCallback(async code => {
+    setKioskActivationBusy(true)
+    setKioskActivationError('')
+    try { await activateKioskWithCode(code) } catch (error) { setKioskActivationError(error?.message || 'تعذر تفعيل جهاز POS.') } finally { setKioskActivationBusy(false) }
+  }, [])
 
   const adminReady = isCentralAdminUser(adminAuthUser)
   const productManagerReady = isCentralProductManager(productAuthUser)
@@ -835,6 +842,8 @@ export default function App() {
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
     return saved
   }, [])
+
+  if (isCentralConfigured() && !centralAuthUser) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''}`}>

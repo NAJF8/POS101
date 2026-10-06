@@ -1,5 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
 
+.kiosk-activation-shell { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: #f7f4ed; }
+.kiosk-activation-card { width: min(100%, 420px); padding: 32px; border: 1px solid #ded8ca; border-radius: 24px; background: #fffdf8; box-shadow: 0 18px 60px rgb(61 52 34 / 12%); text-align: center; }
+.kiosk-activation-mark { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 18px; background: #1f8f4c; color: #fff; font-weight: 700; font-size: 24px; }
+.kiosk-activation-card form { display: grid; gap: 10px; margin-top: 24px; text-align: right; }
+.kiosk-activation-card input { min-height: 46px; padding: 0 12px; border: 1px solid #cfc7b7; border-radius: 12px; font: inherit; direction: ltr; }
+.kiosk-activation-card button { min-height: 46px; margin-top: 8px; }
+.kiosk-activation-card small { display: block; margin-top: 18px; color: #736b5c; line-height: 1.7; }
+.kiosk-activation-error { margin: 16px 0 0; color: #a22a2a; white-space: pre-line; }
+
 /* ============================================================
    101 POS â€” TOUCHSCREEN UI (FINAL REVISION)
    Target: 1024Ã—768 / 1366Ã—768 / 1280Ã—800 / 1920Ã—1080

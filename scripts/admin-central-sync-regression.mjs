@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import { createCentralSyncClickHandler } from '../src/services/centralSyncController.js'
 
-const ADMIN_UID = 'rtDA9erW11geHfLpa3ZW3LacZR73'
-const CASHIER_UID = '4Tx0bMygd8gVuDDDOblnt3HOvo72'
 const local = [
   { saleId: 'sale-1051', id: 'sale-1051', orderNumber: 1051 },
   { saleId: 'sale-1052', id: 'sale-1052', orderNumber: 1052 },
@@ -14,7 +12,7 @@ const central = Array.from({ length: 71 }, (_, index) => ({
 }))
 const mergeBySaleId = (left, right) => [...new Map([...left, ...right].map(sale => [sale.saleId, sale])).values()]
 
-let currentUser = { uid: ADMIN_UID, email: 'mohameadalhaear100@gmail.com' }
+let currentUser = { uid: 'test-admin', email: 'admin@example.test', authorization: { role: 'admin', active: true, authorized: true } }
 let popupCalls = 0
 let adminRefreshCalls = 0
 let cashierSyncCalls = 0
@@ -55,7 +53,7 @@ assert.equal(popupCalls, 0)
 assert.equal(readCalls, 0)
 assert.equal(toast, 'تمت المزامنة')
 
-currentUser = { uid: CASHIER_UID, email: '101cofeehouse@gmail.com' }
+currentUser = { uid: 'test-cashier', email: 'cashier@example.test', authorization: { role: 'cashier', active: true, authorized: true } }
 await handleCentralSyncClick()
 assert.equal(cashierSyncCalls, 3)
 assert.equal(uploadCalls, 3)

@@ -3,9 +3,11 @@ import {
   browserLocalPersistence,
   connectAuthEmulator,
   getAuth,
+  getIdTokenResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   setPersistence,
+  signInWithCustomToken,
   signInWithPopup,
   signOut,
 } from 'firebase/auth'
@@ -19,14 +21,20 @@ import {
   set,
   update,
 } from 'firebase/database'
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { areExpenseDuplicates, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
-import { calculateCashboxBalance, calculateSettlement } from './financialCenter.js'
+import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
+import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
-const useEmulator = env.VITE_POS101_USE_FIREBASE_EMULATOR === 'true' && localHost
+// Emulator routing is opt-in only. Localhost alone must always use Production
+// Firebase for the cashier kiosk flow.
+const emulatorFlag = env.VITE_POS101_FIREBASE_EMULATOR ?? env.VITE_POS101_USE_FIREBASE_EMULATOR
+const useEmulator = emulatorFlag === 'true' && localHost
 const emulatorHost = env.VITE_POS101_EMULATOR_HOST || '127.0.0.1'
 const emulatorProjectId = env.VITE_POS101_EMULATOR_PROJECT_ID || 'cmms-37512-pos-emulator'
+const kioskWorkerUrl = env.VITE_POS101_KIOSK_WORKER_URL || (useEmulator ? `http://${emulatorHost}:8787` : '')
 
 const config = {
   apiKey: useEmulator ? 'pos101-emulator-api-key' : env.VITE_POS101_API_KEY,
@@ -46,6 +54,7 @@ const authDebug = (event, details = {}) => {
 let app = null
 let auth = null
 let db = null
+let appCheck = null
 let authReady = Promise.resolve()
 
 if (configured) {
@@ -56,39 +65,38 @@ if (configured) {
   if (useEmulator) {
     connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true })
     connectDatabaseEmulator(db, emulatorHost, 9000)
+  } else if (env.VITE_POS101_APPCHECK_SITE_KEY) {
+    try {
+      appCheck = initializeAppCheck(app, { provider: new ReCaptchaV3Provider(env.VITE_POS101_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true })
+      authDebug('POS_APPCHECK_ENABLED')
+    } catch (error) {
+      console.error('POS_APPCHECK_INIT_ERROR', error)
+    }
   }
-  const authStateReady = new Promise(resolve => {
-    let stop = () => {}
-    stop = onAuthStateChanged(auth, user => {
-      stop()
-      authDebug(user ? 'POS_AUTH_RESTORED' : 'POS_AUTH_REQUIRED', {
-        currentUserExists: Boolean(user),
-        provider: user?.providerData?.[0]?.providerId || '',
+  // Persistence and Kiosk session restore are one shared gate for every POS
+  // listener. No operational path may start before this promise resolves.
+  authReady = setPersistence(auth, browserLocalPersistence)
+    .catch(error => { console.error('POS_AUTH_PERSISTENCE_ERROR', error); return null })
+    .then(async () => {
+      const restored = await new Promise(resolve => {
+        let stop = () => {}
+        stop = onAuthStateChanged(auth, user => { stop(); resolve(user) }, error => { console.error('POS_AUTH_STATE_ERROR', error); resolve(null) })
       })
-      resolve(user)
-    }, () => resolve(null))
-  })
-  // Persistence and Firebase's first auth-state callback are one shared gate
-  // for sales, expenses, products, and operational-day access.
-  authReady = Promise.all([
-    setPersistence(auth, browserLocalPersistence).catch(error => {
-      console.error('POS_AUTH_PERSISTENCE_ERROR', error)
-      return null
-    }),
-    authStateReady,
-  ]).then(([, user]) => user)
+      if (restored) return restored
+      try { return await restoreKioskSession() } catch (error) {
+        if (error?.code !== 'KIOSK_ACTIVATION_REQUIRED') console.error('POS_KIOSK_RESTORE_ERROR', error)
+        return null
+      }
+    })
 }
 
 const SALES_KEY = 'pos101.sales'
-const CASHIER_LOGIN_HINT_EMAIL = '101cofeehouse@gmail.com'
-export const CENTRAL_SYNC_UID = '4Tx0bMygd8gVuDDDOblnt3HOvo72'
-export const ADMIN_UID = 'rtDA9erW11geHfLpa3ZW3LacZR73'
-export const ADMIN_EMAIL = 'mohameadalhaear100@gmail.com'
 const AUTHORIZED_UIDS_PATH = 'pos101_authorized_uids'
 const SYNC_ROLES = new Set(['super_admin', 'admin', 'manager', 'cashier', 'cashier-sync', 'employee', 'admin-viewer'])
 const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager', 'admin-viewer'])
 const STAFF_MANAGEMENT_ROLES = new Set(['super_admin', 'admin', 'manager', 'cashier', 'cashier-sync', 'employee'])
 const authorizationCache = new Map()
+const tokenClaimsCache = new Map()
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const productsRef = () => ref(db, 'pos101_products')
@@ -108,6 +116,37 @@ const readSales = () => {
 const writeSales = sales => localStorage.setItem(SALES_KEY, JSON.stringify(sales))
 const dispatchUpdated = () => window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
 const dispatchExpensesUpdated = () => window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
+
+const kioskWorkerRequest = async (path, payload) => {
+  if (!kioskWorkerUrl) throw Object.assign(new Error('إعداد Kiosk Worker غير موجود.'), { code: 'KIOSK_BACKEND_NOT_CONFIGURED' })
+  const response = await fetch(`${kioskWorkerUrl.replace(/\/$/, '')}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw Object.assign(new Error(body.error || 'فشل اتصال Kiosk Worker.'), { code: `KIOSK_WORKER_${response.status}` })
+  return body
+}
+const issueKioskToken = async ({ mode, activationCode = '', kioskId = '' } = {}) => {
+  const device = await getOrCreateKioskDeviceRecord()
+  const begin = await kioskWorkerRequest('/kiosk/challenge', { mode, activationCode, kioskId, publicKeyJwk: device.publicKeyJwk })
+  const signature = signatureToBase64Url(await signKioskChallenge(begin.challenge))
+  const complete = await kioskWorkerRequest(mode === 'activate' ? '/kiosk/activate' : '/kiosk/renew', { challengeId: begin.challengeId, signature, publicKeyJwk: device.publicKeyJwk })
+  const user = (await signInWithCustomToken(auth, complete.token)).user
+  await saveKioskIdentity({ kioskId: complete.kioskId })
+  authDebug('POS_KIOSK_SESSION_READY', { kioskId: complete.kioskId, anonymous: false, backend: 'cloudflare-worker' })
+  return user
+}
+const restoreKioskSession = async () => {
+  const device = await getKioskDeviceRecord()
+  if (!device?.kioskId || !device?.privateKey) throw Object.assign(new Error('تفعيل جهاز POS مطلوب مرة واحدة.'), { code: 'KIOSK_ACTIVATION_REQUIRED' })
+  return issueKioskToken({ mode: 'renew', kioskId: device.kioskId })
+}
+export const activateKioskWithCode = async activationCode => issueKioskToken({ mode: 'activate', activationCode: String(activationCode || '').trim() })
+export const kioskAuthStatus = async () => {
+  await authReady
+  const user = auth?.currentUser
+  if (!user) return { ready: false, activated: Boolean((await getKioskDeviceRecord())?.kioskId), appCheck: Boolean(appCheck) }
+  const token = await getIdTokenResult(user)
+  return { ready: token.claims.pos101_kiosk === true && token.claims.scope === 'cashier', kioskId: token.claims.kioskId || '', appCheck: Boolean(appCheck) }
+}
 
 const readCachedExpenses = () => {
   try {
@@ -187,6 +226,7 @@ const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(s
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession()
+  if (expectedRole === 'cashier-sync') return requireKioskUser(user)
   if (!await isAuthorizedPosSyncUser(user)) {
     throw Object.assign(new Error(expectedRole === 'cashier-sync' ? 'هذا الحساب لا يملك صلاحية رفع المبيعات.' : 'تسجيل دخول الإدارة مطلوب للقراءة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
   }
@@ -196,17 +236,13 @@ const requireRole = async expectedRole => {
 const requireOperationalDayRole = async () => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession('تسجيل دخول POS مطلوب لإدارة اليوم التشغيلي.')
-  if (!await isAuthorizedPosSyncUser(user)) {
-    throw Object.assign(new Error('هذا الحساب غير مخول لإدارة اليوم التشغيلي.'), { code: 'OPERATIONAL_DAY_PERMISSION_DENIED' })
-  }
-  return user
+  return requireKioskUser(user)
 }
 
 const requireExpenseRole = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession('تسجيل دخول POS مطلوب لمزامنة المصاريف.')
-  if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'EXPENSE_PERMISSION_DENIED' })
-  return user
+  return requireKioskUser(user)
 }
 
 export const isCentralConfigured = () => configured
@@ -222,15 +258,40 @@ export const ensurePosFirebaseSession = async (message = 'تسجيل دخول Fi
   }
   return user
 }
+export const ensureKioskFirebaseSession = async (message = 'تفعيل جهاز POS موثوق مطلوب.') => requireKioskUser(await ensurePosFirebaseSession(message))
 export const subscribeCentralAuth = callback => auth ? onAuthStateChanged(auth, user => {
   if (!user) {
     authorizationCache.clear()
+    tokenClaimsCache.clear()
     callback(null)
     return
   }
-  void hydrateCentralAuthorization(user).finally(() => callback(user))
+  void hydrateKioskClaims(user).then(claims => claims?.pos101_kiosk ? true : hydrateCentralAuthorization(user)).finally(() => callback(user))
 }) : () => {}
 const normalizedAuthorization = record => record && typeof record === 'object' ? record : null
+const hydrateKioskClaims = async user => {
+  if (!user?.uid) return null
+  if (typeof user.getIdToken !== 'function') return tokenClaimsCache.get(user.uid) || null
+  try {
+    const result = await getIdTokenResult(user)
+    const claims = result.claims || {}
+    tokenClaimsCache.set(user.uid, claims)
+    return claims
+  } catch (error) {
+    console.error('POS_KIOSK_CLAIMS_READ_ERROR', error)
+    tokenClaimsCache.delete(user.uid)
+    return null
+  }
+}
+const isKioskUser = user => {
+  const claims = user?.uid ? tokenClaimsCache.get(user.uid) : null
+  return Boolean(claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId)
+}
+const requireKioskUser = async user => {
+  const claims = await hydrateKioskClaims(user)
+  if (!user?.uid || claims?.pos101_kiosk !== true || claims?.scope !== 'cashier' || !claims?.kioskId) throw Object.assign(new Error('تفعيل جهاز POS موثوق مطلوب.'), { code: 'KIOSK_AUTH_REQUIRED' })
+  return user
+}
 export const readCentralAuthorizationRecord = async user => {
   if (!user?.uid) return null
   if (authorizationCache.has(user.uid)) return authorizationCache.get(user.uid)
@@ -261,10 +322,9 @@ const isActiveAuthorizedRecord = record => {
   const role = String(record?.role || '').trim().toLowerCase()
   return Boolean(record && record.active !== false && record.authorized !== false && (SYNC_ROLES.has(role) || record.read === true || record.write === true || record.sync === true))
 }
-const legacyRole = user => user?.uid === CENTRAL_SYNC_UID ? 'cashier-sync' : user?.uid === ADMIN_UID ? 'admin-viewer' : 'blocked'
-
 export const canManageStaff = (user, authorizationRecord = null) => {
   if (!user?.uid) return false
+  if (isKioskUser(user)) return true
   const record = authorizationRecord || authorizationCache.get(user.uid) || user.pos101Authorization || user.authorization
   const role = String(record?.role || '').trim().toLowerCase()
   return Boolean(record && record.active !== false && record.authorized !== false && STAFF_MANAGEMENT_ROLES.has(role))
@@ -272,11 +332,7 @@ export const canManageStaff = (user, authorizationRecord = null) => {
 
 export const isAuthorizedPosSyncUser = async user => {
   if (!user?.uid) return false
-  const legacy = legacyRole(user)
-  if (legacy !== 'blocked') {
-    authorizationCache.set(user.uid, { role: legacy === 'admin-viewer' ? 'admin-viewer' : 'cashier-sync', active: true, authorized: true })
-    return true
-  }
+  if (await hydrateKioskClaims(user) && isKioskUser(user)) return true
   return isActiveAuthorizedRecord(await readCentralAuthorizationRecord(user))
 }
 
@@ -289,8 +345,9 @@ export const hydrateCentralAuthorization = async user => {
 }
 
 export const getCentralRole = user => {
+  if (isKioskUser(user)) return 'cashier-sync'
   const record = user?.uid ? (authorizationCache.get(user.uid) || user.pos101Authorization || user.authorization) : null
-  return roleFromAuthorization(record) !== 'blocked' ? roleFromAuthorization(record) : legacyRole(user)
+  return roleFromAuthorization(record)
 }
 export const getCentralPermissions = user => {
   const role = getCentralRole(user)
@@ -301,13 +358,6 @@ export const getCentralPermissions = user => {
 export const isCentralCashierUser = user => getCentralRole(user) === 'cashier-sync'
 export const isCentralAdminUser = user => getCentralRole(user) === 'admin-viewer'
 export const isOperationalDayUser = user => getCentralRole(user) !== 'blocked'
-export const signInCentralWithGoogle = async () => {
-  if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
-  await authReady
-  const provider = new GoogleAuthProvider()
-  provider.setCustomParameters({ login_hint: CASHIER_LOGIN_HINT_EMAIL })
-  return (await signInWithPopup(auth, provider)).user
-}
 export const signInAdminWithGoogle = async () => {
   if (!configured || !auth) throw new Error('إعداد Firebase المركزي غير موجود.')
   await authReady
@@ -599,7 +649,7 @@ export const subscribeCentralExpenses = callback => {
     if (!configured || !db) return
     await authReady
     const user = auth?.currentUser
-    if (!active || !user || !await isAuthorizedPosSyncUser(user)) return
+    if (!active || !user || !isKioskUser(user)) return
     stop = onValue(expensesRef(), snapshot => {
       const expenses = expenseValues(snapshot)
       const localExpenses = readCachedExpenses()
@@ -697,7 +747,7 @@ export const deleteCentralExpense = async expense => {
 // static menu records are never deleted or rewritten; this path contains only
 // new products and explicit updates/hide/show overlays keyed by product ID.
 export const isCentralProductReader = user => isCentralCashierUser(user) || isCentralAdminUser(user)
-export const isCentralProductManager = user => isCentralProductReader(user)
+export const isCentralProductManager = user => Boolean(user?.uid) && isCentralProductReader(user)
 export const isCentralProductAdmin = isCentralProductManager
 const requireProductRole = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
@@ -733,7 +783,7 @@ export const loadCentralProducts = async () => {
 }
 
 export const subscribeCentralProducts = callback => {
-  if (!configured || !db || !isCentralProductReader(auth?.currentUser)) return () => {}
+  if (!configured || !db || !isKioskUser(auth?.currentUser)) return () => {}
   return onValue(productsRef(), snapshot => {
     const products = snapshot.exists()
       ? Object.entries(snapshot.val() || {}).map(([id, value]) => normalizeProduct(value, id))
@@ -762,19 +812,14 @@ const financialUser = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
-  if (!user || !await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول للبيانات المالية.'), { code: 'FINANCIAL_PERMISSION_DENIED' })
-  if (write && !['admin-viewer', 'cashier-sync'].includes(getCentralRole(user))) throw Object.assign(new Error('صلاحية الكتابة المالية مطلوبة.'), { code: 'FINANCIAL_WRITE_DENIED' })
-  return user
+  return requireKioskUser(user)
 }
 
 const staffUser = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
-  const authorizationRecord = user ? await refreshCentralAuthorizationRecord(user) : null
-  if (!user || !authorizationRecord || !canManageStaff(user, authorizationRecord)) throw Object.assign(new Error('هذا الحساب غير مخول لإدارة الموظفين.'), { code: 'STAFF_PERMISSION_DENIED' })
-  if (write && !canManageStaff(user, authorizationRecord)) throw Object.assign(new Error('صلاحية إدارة الموظفين مطلوبة.'), { code: 'STAFF_WRITE_DENIED' })
-  return user
+  return requireKioskUser(user)
 }
 
 const objectValues = snapshot => snapshot.exists() ? Object.entries(snapshot.val() || {}).map(([id, value]) => ({ ...value, id: value?.id || id })) : []

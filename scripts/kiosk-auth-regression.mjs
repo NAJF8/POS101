@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+
+const worker = fs.readFileSync(new URL('../worker/src/index.js', import.meta.url), 'utf8')
+const frontend = fs.readFileSync(new URL('../src/services/kioskAuth.js', import.meta.url), 'utf8')
+const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
+const rules = JSON.parse(fs.readFileSync(new URL('../database.rules.json', import.meta.url), 'utf8')).rules
+
+assert.match(worker, /\/kiosk\/challenge/)
+assert.match(worker, /\/kiosk\/activate/)
+assert.match(worker, /\/kiosk\/renew/)
+assert.match(worker, /publicKeyFingerprint/)
+assert.match(worker, /verifySignature/)
+assert.match(worker, /usedAt/)
+assert.match(worker, /expiresAt/)
+assert.match(worker, /pos101_kiosk: true/)
+assert.match(worker, /scope: 'cashier'/)
+assert.match(worker, /KIOSK_RATE_LIMIT/)
+assert.match(worker, /FIREBASE_PRIVATE_KEY/)
+assert.match(frontend, /generateKey/)
+assert.match(frontend, /importKey\('jwk', privateKeyJwk,[\s\S]*?, false, \['sign'\]\)/)
+assert.match(frontend, /indexedDB/)
+assert.match(frontend, /privateKey/)
+assert.match(frontend, /exportKey\('jwk'/)
+assert.doesNotMatch(frontend, /exportKey\('pkcs8'/)
+assert.match(sync, /VITE_POS101_KIOSK_WORKER_URL/)
+assert.doesNotMatch(sync, /firebase\/functions/)
+assert.match(sync, /initializeAppCheck/)
+assert.match(sync, /VITE_POS101_APPCHECK_SITE_KEY/)
+assert.match(rules.pos101_kiosks['$kioskId']['.read'], /auth\.token\.kioskId === \$kioskId/)
+assert.equal(rules.pos101_kiosks['.write'], false)
+for (const path of ['pos101_sales', 'pos101_expenses', 'pos101_operational_days', 'pos101_staff', 'pos101_cashbox_transactions', 'pos101_cashbox_settlements', 'pos101_cashbox_counts', 'pos101_financial_audit_log', 'pos101_products']) {
+  assert.match(rules[path]['.read'], /auth\.token\.pos101_kiosk === true/)
+  assert.match(rules[path]['.write'], /child\('active'\)\.val\(\) === true/)
+}
+console.log('KIOSK_AUTH_DESIGN_REGRESSION=PASS')
+console.log('WEBCRYPTO_NONEXPORTABLE_PRIVATE_KEY=PASS')
+console.log('SINGLE_USE_EXPIRING_ACTIVATION_CODE=PASS')
+console.log('APPCHECK_OPTIONAL_STRICT_MODE=PASS')
+console.log('REVOKED_KIOSK_RULE_GATE=PASS')

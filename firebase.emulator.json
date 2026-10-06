@@ -1,4 +1,5 @@
 {
+  "functions": { "source": "functions" },
   "database": {
     "rules": "database.rules.emulator.json"
   },

@@ -17,8 +17,7 @@ assert.doesNotMatch(sync, /if \(existing\.exists\(\)\) return \{ settlement: exi
 assert.match(app, /const reopened = await readOpenOperationalDay\(\)/)
 assert.match(app, /setOperationalDay\(reopened\)/)
 assert.match(ui, /disabled=\{busy \|\| actualCash === ''\}/)
-assert.match(rules.pos101_cashbox_settlements['.write'], /active.*!== false/)
-assert.match(rules.pos101_cashbox_settlements['.write'], /authorized.*!== false/)
-assert.match(rules.pos101_cashbox_settlements['.write'], /role.*cashier/)
+assert.match(rules.pos101_cashbox_settlements['.read'], /auth\.token\.pos101_kiosk === true/)
+assert.match(rules.pos101_cashbox_settlements['.write'], /child\('active'\)\.val\(\) === true/)
 
 console.log('OPERATIONAL_DAY_CLOSE_REGRESSION=PASS')

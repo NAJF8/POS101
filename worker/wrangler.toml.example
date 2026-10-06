@@ -1,0 +1,17 @@
+name = "pos101-kiosk-auth"
+main = "src/index.js"
+compatibility_date = "2026-10-06"
+
+[vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://najf8.github.io,http://localhost:5174,http://127.0.0.1:5174"
+FIREBASE_DATABASE_URL = "https://cmms-37512-default-rtdb.asia-southeast1.firebasedatabase.app"
+
+[[kv_namespaces]]
+binding = "KIOSK_RATE_LIMIT"
+id = "replace-with-production-kv-namespace-id"
+
+# Set these with wrangler secrets; never commit values:
+# wrangler secret put FIREBASE_PROJECT_ID
+# wrangler secret put FIREBASE_CLIENT_EMAIL
+# wrangler secret put FIREBASE_PRIVATE_KEY

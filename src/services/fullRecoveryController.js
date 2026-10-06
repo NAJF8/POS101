@@ -1,4 +1,4 @@
-import { centralAuth, isAuthorizedPosSyncUser, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending, signInCentralWithGoogle } from './posCentralSync.js'
+import { centralAuth, ensureKioskFirebaseSession, isAuthorizedPosSyncUser, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending } from './posCentralSync.js'
 import { areExpenseDuplicates, getExpensesForBusinessDate, getLocalDateKey, normalizeDateKey, normalizeExpense, normalizeTimestamp, resolveExpenseBusinessDate, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 
 const readJson = (key, fallback) => {
@@ -198,7 +198,7 @@ export const createMasterExpenseRecoveryBackup = user => {
 
 export const createMasterExpenseRecoveryHandler = ({
   getCurrentUser = () => centralAuth()?.currentUser,
-  signIn = signInCentralWithGoogle,
+  signIn = ensureKioskFirebaseSession,
   readCentral = readCentralExpensesForReports,
   syncCentral = runExpenseCentralSync,
   onStatus,
@@ -287,7 +287,7 @@ export const createMasterExpenseRecoveryHandler = ({
   }
 }
 
-export const createFullRecoveryClickHandler = ({ getCurrentUser = () => centralAuth()?.currentUser, signIn = signInCentralWithGoogle, runRecovery = runFullRecoverySync, onStart, onSuccess, onError } = {}) => {
+export const createFullRecoveryClickHandler = ({ getCurrentUser = () => centralAuth()?.currentUser, signIn = ensureKioskFirebaseSession, runRecovery = runFullRecoverySync, onStart, onSuccess, onError } = {}) => {
   let busy = false
   return async function handleFullRecoveryClick() {
     if (busy) return { skipped: true }

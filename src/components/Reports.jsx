@@ -319,7 +319,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <label>من تاريخ<input aria-label="من تاريخ" type="date" value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} /></label>
           <label>إلى تاريخ<input aria-label="إلى تاريخ" type="date" value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></label>
           <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
-          <button className="outline-btn" type="button" onClick={openPeriodReport}>طباعة الفترة</button>
+          <button className="outline-btn" type="button" onClick={openPeriodReport}>طباعة تقرير الفترة</button>
         </div>
         <div className="reports-shortcuts" aria-label="اختصارات الفترة">
           <button type="button" onClick={() => { const today = defaultBusinessDate; setPeriodFrom(today); setPeriodTo(today) }}>اليوم</button>

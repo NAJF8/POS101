@@ -19,6 +19,7 @@ jobs:
       VITE_POS101_STORAGE_BUCKET: cmms-37512.firebasestorage.app
       VITE_POS101_MESSAGING_SENDER_ID: "451592788539"
       VITE_POS101_APP_ID: "1:451592788539:web:d3dc3e68b1543996b39a1e"
+      VITE_POS101_KIOSK_WORKER_URL: https://pos101-kiosk-auth.coffee101.workers.dev
     steps:
       - uses: actions/checkout@v4
         with:
