@@ -543,6 +543,58 @@ export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogo
   )
 }
 
+export function FinancialPinDialog({ staff = [], onClose, onUnlock }) {
+  const candidates = staff.filter(row => row.active !== false && row.pinEnabled === true)
+  const [staffId, setStaffId] = React.useState(candidates[0]?.id || '')
+  const [pin, setPin] = React.useState('')
+  const [error, setError] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+  const pinRef = React.useRef(null)
+  React.useEffect(() => { pinRef.current?.focus() }, [staffId])
+  const submit = async event => {
+    event.preventDefault()
+    if (busy) return
+    setError('')
+    setBusy(true)
+    try {
+      const ok = await onUnlock?.({ staffId, pin })
+      if (!ok) setError('رمز الدخول غير صحيح')
+    } catch (cause) {
+      setError(cause?.message || 'رمز الدخول غير صحيح')
+    } finally { setBusy(false); setPin('') }
+  }
+  return <Dialog onClose={onClose} className="financial-pin-dialog">
+    <h2>رمز دخول الكاشير</h2>
+    <form onSubmit={submit}>
+      <label>اسم الكاشير<select value={staffId} onChange={event => setStaffId(event.target.value)} disabled={!candidates.length}>{candidates.map(row => <option key={row.id} value={row.id}>{row.name}{row.code ? ` · ${row.code}` : ''}</option>)}</select></label>
+      <label>رمز الدخول<input ref={pinRef} type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0, 8))} disabled={!candidates.length} /></label>
+      {error && <p className="financial-pin-error" role="alert">{error}</p>}
+      {!candidates.length && <p className="financial-pin-error" role="alert">لا يوجد كاشير برمز مفعّل</p>}
+      <button className="primary-action" type="submit" disabled={busy || !staffId || !pin || !candidates.length}>{busy ? 'جارٍ التحقق…' : 'دخول'}</button>
+    </form>
+  </Dialog>
+}
+
+export function StaffPinDialog({ staff, onClose, onSave }) {
+  const [pin, setPin] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState('')
+  const enabled = staff?.pinEnabled === true
+  const save = async action => {
+    setError('')
+    setBusy(true)
+    try { await onSave?.({ staffId: staff.id, action, pin }); onClose() } catch (cause) { setError(cause?.message || 'تعذر تحديث رمز الدخول.') } finally { setBusy(false); setPin('') }
+  }
+  return <Dialog onClose={onClose} className="financial-pin-dialog staff-pin-dialog">
+    <h2>رمز الدخول</h2>
+    <p className="pin-status">{enabled ? 'الرمز مفعّل' : 'لا يوجد رمز'}</p>
+    <label>{enabled ? 'تغيير الرمز' : 'تعيين رمز'}<input type="password" inputMode="numeric" autoComplete="new-password" value={pin} onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="4 إلى 8 أرقام" /></label>
+    {error && <p className="financial-pin-error" role="alert">{error}</p>}
+    <div className="dialog-actions"><button type="button" className="secondary-action" onClick={onClose}>إلغاء</button><button type="button" className="primary-action" disabled={busy || !/^\d{4,8}$/.test(pin)} onClick={() => save('set')}>{busy ? 'جارٍ الحفظ…' : (enabled ? 'تغيير الرمز' : 'تعيين الرمز')}</button></div>
+    {enabled && <button type="button" className="pin-cancel-action" disabled={busy} onClick={() => save('cancel')}>إلغاء الرمز</button>}
+  </Dialog>
+}
+
 /* ── Seller Selection ── */
 export function SellerSelection({ staff = [], onClose, onSelect }) {
   const sellers = sellerEligibleStaff(staff)

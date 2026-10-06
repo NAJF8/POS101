@@ -754,6 +754,16 @@ input, textarea, select { cursor: text; }
 }
 .cashier-login form input { direction: ltr; text-align: right; }
 .cashier-login form .primary-action { width: 100%; min-height: 50px; margin-top: 4px; }
+.financial-pin-dialog { width: min(360px, calc(100vw - 32px)); padding: 20px; }
+.financial-pin-dialog h2 { margin: 0 0 14px; color: var(--coffee); font-size: 21px; }
+.financial-pin-dialog form, .financial-pin-dialog > label { display: grid; gap: 10px; }
+.financial-pin-dialog label { display: grid; gap: 5px; color: var(--coffee); font-weight: 700; }
+.financial-pin-dialog select, .financial-pin-dialog input { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; }
+.financial-pin-dialog input { direction: ltr; text-align: right; letter-spacing: .16em; }
+.financial-pin-error { margin: 0; color: var(--danger); font-size: 12px; }
+.pin-status { margin: -6px 0 12px; color: var(--muted); font-size: 13px; }
+.pin-cancel-action { margin-top: 10px; border: 0; background: transparent; color: var(--danger); font-size: 12px; cursor: pointer; }
+.pin-action { padding: 8px 10px; }
 .admin-login-panel { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .admin-login-heading h3 { margin: 0; color: var(--green); font-size: 17px; }
 .admin-login-heading p { margin: 5px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.55; }

@@ -26,6 +26,7 @@ import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesC
 import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
+import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { isSaleSyncEligible, markSaleSynced, readSaleQueue, retainQueuedSale } from './salesSyncQueue.js'
 
 const env = import.meta.env || {}
@@ -873,6 +874,7 @@ const staffUser = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
+  if (isCentralAdminUser(user)) return user
   return requireKioskUser(user)
 }
 
@@ -930,13 +932,36 @@ export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
   const now = Date.now()
   const wasActive = existing?.active !== false
   const isActive = staff?.active !== false
-  const payload = { ...normalizeStaff({ ...existing, ...staff, id }), createdAt: existing?.createdAt || now, updatedAt: now, deactivatedAt: !isActive && wasActive ? now : (isActive ? null : (existing?.deactivatedAt || now)), createdBy: existing?.createdBy || user.uid, updatedBy: user.uid }
+  const normalized = normalizeStaff({ ...existing, ...staff, id })
+  const payload = { ...normalized, pinEnabled: existing?.pinEnabled === true, pinHash: existing?.pinHash || null, pinSalt: existing?.pinSalt || null, pinUpdatedAt: existing?.pinUpdatedAt || null, createdAt: existing?.createdAt || now, updatedAt: now, deactivatedAt: !isActive && wasActive ? now : (isActive ? null : (existing?.deactivatedAt || now)), createdBy: existing?.createdBy || user.uid, updatedBy: user.uid }
   if (!payload.name) throw new Error('اسم الموظف مطلوب.')
   await set(financialPath(`${staffPath}/${id}`), payload)
   const readBack = await get(financialPath(`${staffPath}/${id}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ الموظف.')
   const action = !existing ? 'staff add' : existing.active !== payload.active ? (payload.active ? 'activate' : 'deactivate') : 'staff edit'
   await saveStaffAudit({ action, entityType: 'staff', entityId: id, before: existing, after: readBack.val(), reason: actor.reason || '' })
+  return normalizeStaff(readBack.val(), id)
+}
+
+export const saveCashierPin = async ({ staffId, action = 'set', pin = '' } = {}) => {
+  if (!isCentralAdminUser(auth?.currentUser)) throw Object.assign(new Error('إدارة رمز الدخول متاحة لحساب Super Admin فقط.'), { code: 'SUPER_ADMIN_REQUIRED' })
+  const user = await staffUser(true)
+  const id = String(staffId || '').trim()
+  if (!id) throw new Error('معرف الموظف مطلوب.')
+  const current = (await get(financialPath(`${staffPath}/${id}`))).val() || null
+  if (!current) throw new Error('الموظف غير موجود.')
+  const now = Date.now()
+  let payload = { ...current, id, updatedAt: now, updatedBy: user.uid }
+  if (action === 'cancel') payload = { ...payload, pinEnabled: false, pinHash: null, pinSalt: null, pinUpdatedAt: now }
+  else {
+    if (!/^\d{4,8}$/.test(String(pin))) throw new Error('رمز الدخول يجب أن يتكون من 4 إلى 8 أرقام.')
+    const pinSalt = createPinSalt()
+    payload = { ...payload, pinEnabled: true, pinSalt, pinHash: await hashCashierPin(pin, pinSalt), pinUpdatedAt: now }
+  }
+  await set(financialPath(`${staffPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${staffPath}/${id}`))
+  if (!readBack.exists() || readBack.val()?.pinEnabled !== payload.pinEnabled || (payload.pinEnabled && readBack.val()?.pinHash !== payload.pinHash)) throw new Error('تعذر التحقق من تحديث رمز الدخول.')
+  await saveStaffAudit({ action: action === 'cancel' ? 'staff pin cancel' : 'staff pin set', entityType: 'staff_pin', entityId: id, before: { pinEnabled: current.pinEnabled === true }, after: { pinEnabled: payload.pinEnabled, pinUpdatedAt: payload.pinUpdatedAt }, reason: 'Super Admin cashier PIN management' })
   return normalizeStaff(readBack.val(), id)
 }
 

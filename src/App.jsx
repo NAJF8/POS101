@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
-import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
+import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, FinancialPinDialog, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Settings from './components/Settings'
@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -25,6 +25,7 @@ import { calculateSettlement } from './services/financialCenter.js'
 import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
 import KioskActivation from './components/KioskActivation.jsx'
 import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
+import { isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -89,6 +90,7 @@ export default function App() {
   const [category, setCategory] = useState('الكل')
   const [query, setQuery] = useState('')
   const [modal, setModal] = useState(null)
+  const [financialPinTarget, setFinancialPinTarget] = useState(null)
   const [selected, setSelected] = useState(null)
   const [printSale, setPrintSale] = useState(null)
   const [printMessage, setPrintMessage] = useState(null)
@@ -844,6 +846,41 @@ export default function App() {
   const adminReady = isCentralAdminUser(adminAuthUser)
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
+  const requestView = useCallback(view => {
+    if ((view === 'expenses' || view === 'reports') && !adminReady && !isFinancialPinUnlocked()) {
+      setFinancialPinTarget(view)
+      setModal('financial-pin')
+      return
+    }
+    setCurrentView(view)
+  }, [adminReady])
+  const unlockFinancialView = useCallback(async ({ staffId, pin }) => {
+    const cashier = staff.find(row => String(row.id) === String(staffId))
+    if (!cashier || !await verifyCashierPin(pin, cashier)) return false
+    saveFinancialPinUnlock(cashier.id)
+    const target = financialPinTarget || 'reports'
+    setFinancialPinTarget(null)
+    setModal(null)
+    setCurrentView(target)
+    return true
+  }, [financialPinTarget, staff])
+  const savePin = useCallback(async payload => {
+    const saved = await saveCashierPin(payload)
+    setStaff(current => current.map(row => String(row.id) === String(saved.id) ? saved : row))
+    return saved
+  }, [])
+  useEffect(() => {
+    if (adminReady || !['expenses', 'reports'].includes(currentView)) return undefined
+    const check = () => {
+      if (!isFinancialPinUnlocked()) {
+        setFinancialPinTarget(currentView)
+        setCurrentView('dashboard')
+        setModal('financial-pin')
+      }
+    }
+    const timer = window.setInterval(check, 1000)
+    return () => window.clearInterval(timer)
+  }, [adminReady, currentView])
   const saveProduct = useCallback(async product => {
     const saved = await saveCentralProduct(product)
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
@@ -865,18 +902,18 @@ export default function App() {
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
           currentView={currentView}
-          onNavigate={setCurrentView}
+          onNavigate={requestView}
         />
       )}
 
       {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
-        <Dashboard onNavigate={setCurrentView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
+        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={setCurrentView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
-      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onNavigate={setCurrentView} />}
+      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} canManagePins={adminReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
@@ -931,19 +968,19 @@ export default function App() {
           salesOverride={adminReady ? adminCentralSales : null}
           products={catalogProducts}
           categories={catalogCategories}
-          onNavigate={setCurrentView}
+          onNavigate={requestView}
           onDirectThermalPrint={session ? printReportDirect : undefined}
           directThermalReady={Boolean(session && directThermalReady)}
         />
       )}
       {currentView === 'expenses' && session && (
-        <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={setCurrentView} />
+        <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
       {currentView === 'purchases' && session && <Purchases session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />}
       {currentView === 'expense-entry' && session && (
-        <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={setCurrentView} />
+        <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
-      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={setCurrentView} />}
+      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} />}
 
       {adminReady && !session && currentView === 'dashboard' && (
         <section className="admin-central-readonly" dir="rtl" aria-label="مركز مبيعات الإدارة">
@@ -973,6 +1010,7 @@ export default function App() {
 
       {/* Modals */}
       {modal === 'cashier-menu' && <CashierMenu session={session} onClose={() => setModal(null)} onLogout={logout} />}
+      {modal === 'financial-pin' && <FinancialPinDialog staff={staff} onClose={() => { setFinancialPinTarget(null); setModal(null) }} onUnlock={unlockFinancialView} />}
       {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>يجب بدء اليوم التشغيلي أولاً</h2><p>لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setModal(null)}>رجوع</button><button type="button" className="primary-action" disabled={operationalDayLoading} onClick={handleStartOperationalDay}>{operationalDayLoading ? 'جارٍ بدء اليوم…' : 'بدء اليوم'}</button></div></div></div>}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
       {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}
