@@ -14,4 +14,7 @@ const all = buildCaptainReport({ captain: staff[0], staff, sales, expenses, tran
 assert.equal(all.sales.length, 1); assert.equal(all.salesTotal, 1000); assert.equal(all.expenses.length, 1); assert.equal(all.expensesTotal, 50); assert.equal(all.salary.length, 1); assert.equal(all.salaryTotal, 100); assert.equal(all.withdrawals.length, 1); assert.equal(all.withdrawalsTotal, 25); assert.equal(all.netTotal, 825)
 const salesOnly = buildCaptainReport({ captain: staff[0], staff, sales, expenses, transactions, from: '2026-10-01', to: '2026-10-31', sections: ['sales', 'withdrawals'] })
 assert.equal(salesOnly.expenses.length, 0); assert.equal(salesOnly.salary.length, 0); assert.equal(salesOnly.netTotal, 975)
-console.log(JSON.stringify({ SALARY_CATEGORY: 'PASS', CAPTAIN_ONLY_EXPENSES: 'PASS', GENERAL_SHOP_EXPENSE_EXCLUDED: 'PASS', CAPTAIN_SALES: 'PASS', CAPTAIN_WITHDRAWALS: 'PASS', CAPTAIN_SALARY: 'PASS', CAPTAIN_SEARCH_NAME: 'PASS', CAPTAIN_SEARCH_CODE: 'PASS', SECTION_SELECTION: 'PASS', NO_DOUBLE_COUNT_SALARY: 'PASS' }, null, 2))
+assert.equal(all.sales.length, 1)
+assert.equal(all.cashSales, 1000)
+assert.equal(all.electronicSales, 0)
+console.log(JSON.stringify({ SALARY_CATEGORY: 'PASS', CAPTAIN_ONLY_EXPENSES: 'PASS', GENERAL_SHOP_EXPENSE_EXCLUDED: 'PASS', CAPTAIN_SALES: 'PASS', CAPTAIN_ORDER_COUNT: 'PASS', CAPTAIN_CASH_ELECTRONIC: 'PASS', CAPTAIN_WITHDRAWALS: 'PASS', CAPTAIN_SALARY: 'PASS', CAPTAIN_SEARCH_NAME: 'PASS', CAPTAIN_SEARCH_CODE: 'PASS', SECTION_SELECTION: 'PASS', NO_DOUBLE_COUNT_SALARY: 'PASS' }, null, 2))

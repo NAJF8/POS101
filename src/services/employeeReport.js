@@ -4,6 +4,8 @@ const text = value => String(value ?? '').trim()
 const normalizeText = value => text(value).replace(/[\u200f\u200e\u061c]/g, '').replace(/[\s\u00a0]+/g, ' ').toLocaleLowerCase('ar-IQ')
 const amount = value => { const number = Number(value); return Number.isFinite(number) ? number : 0 }
 const isVoided = row => row?.status === 'voided' || row?.voided === true
+export const EMPLOYEE_SALARY_CATEGORY = 'راتب'
+const isSalary = row => text(row?.category) === EMPLOYEE_SALARY_CATEGORY || text(row?.expenseCategory) === EMPLOYEE_SALARY_CATEGORY
 
 export const employeeNameOf = row => text(row?.name || row?.employeeNameSnapshot || row?.cashierNameSnapshot || row?.cashierName || row?.seller || row?.person)
 export const employeeCodeOf = row => text(row?.code || row?.employeeCode || row?.staffCode)
@@ -52,33 +54,29 @@ const inRange = (row, from, to) => isValidDateRange(from, to) && recordDate(row)
 
 const addSummary = (map, person) => {
   const key = text(person?.id) || `legacy:${normalizeText(person?.name)}`
-  if (!map.has(key)) map.set(key, { employee: person, ordersCount: 0, salesTotal: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawalsTotal: 0, sales: [], expenses: [], withdrawals: [] })
+  if (!map.has(key)) map.set(key, { employee: person, expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, expenses: [], salary: [], withdrawals: [] })
   return map.get(key)
 }
 
 export const buildEmployeeReport = ({ staff = [], sales = [], expenses = [], transactions = [], from = '', to = '' } = {}) => {
   const people = (Array.isArray(staff) ? staff : []).filter(row => row?.id && row?.name)
-  const rows = new Map(people.map(person => [String(person.id), { employee: person, ordersCount: 0, salesTotal: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawalsTotal: 0, sales: [], expenses: [], withdrawals: [] }]))
+  const rows = new Map(people.map(person => [String(person.id), { employee: person, expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, expenses: [], salary: [], withdrawals: [] }]))
   const add = (record, kind, value) => {
     if (isVoided(record) || !inRange(record, from, to)) return
     const person = employeeForRecord(record, people)
     if (!person) return
     const summary = addSummary(rows, person)
-    if (kind === 'sale') {
-      summary.ordersCount += 1; summary.salesTotal += value
-      if (paymentMethod(record) === 'cash') summary.cashSales += value
-      if (paymentMethod(record) === 'electronic') summary.electronicSales += value
-      summary.sales.push(record)
-    } else if (kind === 'expense') { summary.expensesTotal += value; summary.expenses.push(record) }
+    if (kind === 'salary') { summary.salaryTotal += value; summary.salary.push(record) }
+    else if (kind === 'expense') { summary.expensesTotal += value; summary.expenses.push(record) }
     else { summary.withdrawalsTotal += value; summary.withdrawals.push(record) }
   }
-  filterRowsByBusinessDate(sales, from, to).forEach(row => add(row, 'sale', saleAmount(row)))
   const linkedExpenseIds = new Set((Array.isArray(transactions) ? transactions : []).filter(row => row?.type === 'expense').map(row => text(row.linkedExpenseId)).filter(Boolean))
-  filterRowsByBusinessDate(expenses, from, to).forEach(row => { if (!linkedExpenseIds.has(text(row.id))) add(row, 'expense', amount(row.amount)) })
-  filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'expense').forEach(row => add(row, 'expense', amount(row.amount)))
+  const salaryExpenseIds = new Set((Array.isArray(expenses) ? expenses : []).filter(isSalary).map(row => text(row.id)).filter(Boolean))
+  filterRowsByBusinessDate(expenses, from, to).forEach(row => { if (!linkedExpenseIds.has(text(row.id))) add(row, isSalary(row) ? 'salary' : 'expense', amount(row.amount)) })
+  filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'expense').forEach(row => add(row, isSalary(row) || salaryExpenseIds.has(text(row.linkedExpenseId)) ? 'salary' : 'expense', amount(row.amount)))
   filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'withdrawal').forEach(row => add(row, 'withdrawal', amount(row.amount)))
-  const summaries = [...rows.values()].map(summary => ({ ...summary, netTotal: summary.salesTotal - summary.expensesTotal - summary.withdrawalsTotal })).sort((a, b) => b.salesTotal - a.salesTotal || text(a.employee.name).localeCompare(text(b.employee.name), 'ar'))
-  return { summaries, total: summaries.reduce((result, row) => ({ ordersCount: result.ordersCount + row.ordersCount, salesTotal: result.salesTotal + row.salesTotal, cashSales: result.cashSales + row.cashSales, electronicSales: result.electronicSales + row.electronicSales, expensesTotal: result.expensesTotal + row.expensesTotal, withdrawalsTotal: result.withdrawalsTotal + row.withdrawalsTotal, netTotal: result.netTotal + row.netTotal }), { ordersCount: 0, salesTotal: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawalsTotal: 0, netTotal: 0 }) }
+  const summaries = [...rows.values()].map(summary => ({ ...summary, employeeTotal: summary.expensesTotal + summary.salaryTotal + summary.withdrawalsTotal })).sort((a, b) => b.employeeTotal - a.employeeTotal || text(a.employee.name).localeCompare(text(b.employee.name), 'ar'))
+  return { summaries, total: summaries.reduce((result, row) => ({ expensesTotal: result.expensesTotal + row.expensesTotal, salaryTotal: result.salaryTotal + row.salaryTotal, withdrawalsTotal: result.withdrawalsTotal + row.withdrawalsTotal, employeeTotal: result.employeeTotal + row.employeeTotal }), { expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, employeeTotal: 0 }) }
 }
 
 export const filterEmployeeSummaries = (summaries, query = '') => {
