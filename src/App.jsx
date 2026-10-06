@@ -25,6 +25,7 @@ import { calculateSettlement } from './services/financialCenter.js'
 import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
 import KioskActivation from './components/KioskActivation.jsx'
 import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
+import { printReceiptDocument } from './services/printDocument.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -761,7 +762,7 @@ export default function App() {
             })
       await Promise.all([fontReady, imageReady])
       if (!cancelled) {
-        window.print()
+        await printReceiptDocument(document.querySelector('.receipt-sheet'))
         setPrintMessage({ sale: printSale, text: 'تم فتح الطباعة. إذا لم تخرج الفاتورة من الطابعة، استخدم إعادة الطباعة.' })
         setPrintSale(null)
       }

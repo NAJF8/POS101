@@ -13,8 +13,8 @@ import { buildMaterialsReport } from '../services/materialsReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
-// Reports print in their own A4 or thermal 80mm document. Thermal content is
-// intentionally narrower than the Windows driver's confirmed 72.1mm limit.
+// Reports print in their own A4 or thermal 80mm document. Thermal content uses
+// the previously accepted 74mm width inside the 80mm paper.
 const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
 
 const formatDate = value => formatDateTime(value)
@@ -63,7 +63,7 @@ const thermalComprehensiveStyles = `
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; unicode-bidi: plaintext; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; direction: rtl; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; direction: rtl; width: 74mm; max-width: 74mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
@@ -110,7 +110,7 @@ const thermalMaterialsStyles = `
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; width: 74mm; max-width: 74mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; break-inside: avoid; }
   .materials-brand { margin-bottom: 1mm; font-size: 13pt; font-weight: 900; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
@@ -270,15 +270,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
       return
     }
-    // Keep the print document same-origin and give Chrome a meaningful URL.
-    // If Headers and footers are accidentally enabled, this avoids printing
-    // `about:blank` while the user can still disable them in the dialog.
-    try { printWindow.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}#print-report`) } catch {}
     printWindow.document.open()
     const isA4 = format === 'a4'
     const isMaterials = reportType === 'materials'
     const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title></title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
     printWindow.document.close()
 
     const waitForAssetsAndPrint = async () => {
