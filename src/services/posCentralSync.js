@@ -71,7 +71,10 @@ if (configured) {
   // Persistence and Firebase's first auth-state callback are one shared gate
   // for sales, expenses, products, and operational-day access.
   authReady = Promise.all([
-    setPersistence(auth, browserLocalPersistence).catch(() => {}),
+    setPersistence(auth, browserLocalPersistence).catch(error => {
+      console.error('POS_AUTH_PERSISTENCE_ERROR', error)
+      return null
+    }),
     authStateReady,
   ]).then(([, user]) => user)
 }
@@ -238,7 +241,8 @@ export const readCentralAuthorizationRecord = async user => {
     const record = snapshot.exists() ? normalizedAuthorization(snapshot.val()) : null
     if (record) authorizationCache.set(user.uid, record)
     return record
-  } catch {
+  } catch (error) {
+    console.error('POS_AUTHORIZATION_READ_ERROR', error)
     return localRecord
   }
 }
@@ -351,7 +355,10 @@ export const subscribeOperationalDay = callback => {
     const day = latestOpenOperationalDay(operationalDayValues(snapshot))
     cacheOperationalDay(day)
     callback(day)
-  }, () => callback(readCachedOperationalDay()))
+  }, error => {
+    console.error('OPERATIONAL_DAY_SUBSCRIBE_ERROR', error)
+    callback(readCachedOperationalDay())
+  })
 }
 
 export const readLocalOperationalDay = readCachedOperationalDay
@@ -834,10 +841,13 @@ export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
 }
 
 export const readCentralCashboxTransactions = async () => { await financialUser(false); return objectValues(await get(financialPath(cashboxTransactionsPath))) }
-export const subscribeCentralCashboxTransactions = callback => {
+export const subscribeCentralCashboxTransactions = (callback, onError = error => console.error('CASHBOX_SUBSCRIBE_ERROR', error)) => {
   let active = true
   let stop = () => {}
-  void financialUser(false).then(() => { if (!active) return; stop = onValue(financialPath(cashboxTransactionsPath), snapshot => callback(objectValues(snapshot)), () => callback([])) }).catch(() => {})
+  void financialUser(false).then(() => {
+    if (!active) return
+    stop = onValue(financialPath(cashboxTransactionsPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
+  }).catch(error => onError(error))
   return () => { active = false; stop() }
 }
 const settlementPath = 'pos101_cashbox_settlements'
@@ -847,10 +857,13 @@ const settlementKey = operationalDayId => `settlement-${safeKey(operationalDayId
 const financialAuditPayload = ({ id, user, action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => ({ id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', businessDate, timestamp: Date.now(), before, after, reason })
 
 export const readCentralSettlements = async () => { await financialUser(false); return objectValues(await get(financialPath(settlementPath))) }
-export const subscribeCentralSettlements = callback => {
+export const subscribeCentralSettlements = (callback, onError = error => console.error('SETTLEMENT_SUBSCRIBE_ERROR', error)) => {
   let active = true
   let stop = () => {}
-  void financialUser(false).then(() => { if (!active) return; stop = onValue(financialPath(settlementPath), snapshot => callback(objectValues(snapshot)), () => callback([])) }).catch(() => {})
+  void financialUser(false).then(() => {
+    if (!active) return
+    stop = onValue(financialPath(settlementPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
+  }).catch(error => onError(error))
   return () => { active = false; stop() }
 }
 
@@ -868,25 +881,57 @@ export const settleAndEndOperationalDay = async (day, { actualCash, endedBy = {}
   const user = await financialUser(true)
   const id = String(day?.id || day?.operationalDayId || '').trim()
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
-  const actual = Number(actualCash)
-  if (!Number.isFinite(actual) || actual < 0) throw Object.assign(new Error('المبلغ الفعلي للصندوق مطلوب.'), { code: 'ACTUAL_CASH_REQUIRED' })
   const key = settlementKey(id)
-  const existing = await get(financialPath(`${settlementPath}/${key}`))
-  if (existing.exists()) return { settlement: existing.val(), day: { ...day, status: 'closed' }, duplicate: true }
-  const inputs = await centralSettlementInputs(day)
-  const summary = calculateSettlement(inputs)
-  const difference = actual - summary.expectedCash
-  const status = difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
-  const settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: day.businessDate, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
   const cashboxId = `settlement-${safeKey(id)}`
-  const cashbox = { id: cashboxId, type: 'settlement', amount: Math.max(0, summary.expectedCash), businessDate: day.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + Math.max(0, summary.expectedCash) }
   const auditId = `audit-settlement-${safeKey(id)}`
-  const closedDay = { ...day, status: 'closed', endedAt: Date.now(), endedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' }, settlementId: key }
-  const updates = { [`${settlementPath}/${key}`]: settlement, [`${cashboxTransactionsPath}/${cashboxId}`]: cashbox, [`${auditPath}/${auditId}`]: financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: day.businessDate }), [`pos101_operational_days/${id}`]: closedDay }
+  const [daySnapshot, settlementSnapshot, cashboxSnapshot, auditSnapshot] = await Promise.all([
+    get(financialPath(`pos101_operational_days/${id}`)),
+    get(financialPath(`${settlementPath}/${key}`)),
+    get(financialPath(`${cashboxTransactionsPath}/${cashboxId}`)),
+    get(financialPath(`${auditPath}/${auditId}`)),
+  ])
+  const remoteDay = daySnapshot.exists() ? { ...daySnapshot.val(), id } : null
+  const existingSettlement = settlementSnapshot.exists() ? settlementSnapshot.val() : null
+  const existingCashbox = cashboxSnapshot.exists() ? cashboxSnapshot.val() : null
+  const existingAudit = auditSnapshot.exists() ? auditSnapshot.val() : null
+  if (!remoteDay) throw Object.assign(new Error('حالة اليوم التشغيلي غير موجودة في Firebase؛ لم يتم تغيير البيانات.'), { code: 'DAY_NOT_FOUND' })
+  if (remoteDay.status === 'closed' && existingSettlement && existingCashbox && existingAudit) {
+    cacheOperationalDay(null)
+    return { settlement: existingSettlement, day: remoteDay, duplicate: true, repaired: false }
+  }
+  if (remoteDay.status === 'closed' && !existingSettlement) {
+    throw Object.assign(new Error('الحالة غير متسقة: اليوم مغلق بدون تسوية. راجع المدخلات التاريخية قبل إعادة البناء.'), { code: 'DAY_CLOSE_INCONSISTENT' })
+  }
+  const inputs = await centralSettlementInputs(remoteDay)
+  let settlement = existingSettlement
+  if (!settlement) {
+    const actual = Number(actualCash)
+    if (!Number.isFinite(actual) || actual < 0) throw Object.assign(new Error('المبلغ الفعلي للصندوق مطلوب.'), { code: 'ACTUAL_CASH_REQUIRED' })
+    const summary = calculateSettlement(inputs)
+    const difference = actual - summary.expectedCash
+    const status = difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
+    settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: remoteDay.businessDate, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
+  }
+  const expectedCash = Number(settlement.expectedCash || 0)
+  const cashbox = existingCashbox || { id: cashboxId, type: 'settlement', amount: Math.max(0, expectedCash), businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + Math.max(0, expectedCash) }
+  const audit = existingAudit || financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: remoteDay.businessDate })
+  const closedDay = remoteDay.status === 'closed'
+    ? remoteDay
+    : { ...remoteDay, status: 'closed', endedAt: settlement.createdAt || Date.now(), endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, settlementId: key }
+  const updates = { [`${settlementPath}/${key}`]: settlement, [`${cashboxTransactionsPath}/${cashboxId}`]: cashbox, [`${auditPath}/${auditId}`]: audit, [`pos101_operational_days/${id}`]: closedDay }
   await update(ref(db), updates)
-  const readBack = await get(financialPath(`${settlementPath}/${key}`))
-  if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ التسوية.')
-  return { settlement: readBack.val(), day: closedDay, duplicate: false }
+  const [dayBack, settlementBack, cashboxBack, auditBack] = await Promise.all([
+    get(financialPath(`pos101_operational_days/${id}`)),
+    get(financialPath(`${settlementPath}/${key}`)),
+    get(financialPath(`${cashboxTransactionsPath}/${cashboxId}`)),
+    get(financialPath(`${auditPath}/${auditId}`)),
+  ])
+  const verifiedDay = dayBack.exists() ? { ...dayBack.val(), id } : null
+  if (!verifiedDay || verifiedDay.status !== 'closed' || !settlementBack.exists() || !cashboxBack.exists() || !auditBack.exists()) {
+    throw Object.assign(new Error('تعذر التحقق من اكتمال إغلاق اليوم في Firebase.'), { code: 'DAY_CLOSE_READBACK_FAILED' })
+  }
+  cacheOperationalDay(null)
+  return { settlement: settlementBack.val(), day: verifiedDay, duplicate: Boolean(existingSettlement), repaired: Boolean(existingSettlement) }
 }
 
 export const saveCashCount = async ({ businessDate, operationalDayId = '', systemBalance, actualBalance, reason = '' }) => {
@@ -915,7 +960,11 @@ export const saveCentralExpenseWithCashbox = async expense => {
   try {
     await update(ref(db), { [`pos101_expenses/${expenseId}`]: expensePayload, [`${cashboxTransactionsPath}/${transactionId}`]: transactionPayload, [`${auditPath}/${auditId}`]: audit })
   } catch (error) {
-    try { await saveFinancialAudit({ action: 'failed linked write', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: error?.message || 'atomic update failed', businessDate: expensePayload.businessDate }) } catch {}
+    try {
+      await saveFinancialAudit({ action: 'failed linked write', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: error?.message || 'atomic update failed', businessDate: expensePayload.businessDate })
+    } catch (auditError) {
+      console.error('FAILED_LINKED_WRITE_AUDIT_ERROR', auditError)
+    }
     throw error
   }
   const readBack = await get(ref(db, `pos101_expenses/${expenseId}`))

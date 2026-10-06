@@ -234,7 +234,10 @@ export default function App() {
       if (user) void refreshCentralAuthorizationRecord(user).then(record => {
         setStaffAuthorizationRecord(record)
         if (!record) setStaffAuthError(`AUTHORIZED_RECORD = MISSING\nUID = ${user.uid || '—'}\nEMAIL = ${user.email || '—'}`)
-      }).catch(() => setStaffAuthorizationRecord(null))
+      }).catch(error => {
+        console.error('STAFF_AUTHORIZATION_READ_ERROR', error)
+        setStaffAuthorizationRecord(null)
+      })
       else setStaffAuthorizationRecord(null)
       centralListener.current?.()
       centralListener.current = null
@@ -267,7 +270,8 @@ export default function App() {
           if (centralAuth()?.currentUser?.uid !== user.uid) return
           expenseListener.current?.()
           expenseListener.current = subscribeCentralExpenses(() => setLedgerVersion(value => value + 1))
-        }).catch(() => {
+        }).catch(error => {
+          console.error('EXPENSE_INITIAL_SYNC_ERROR', error)
           if (centralAuth()?.currentUser?.uid !== user.uid) return
           expenseListener.current?.()
           expenseListener.current = subscribeCentralExpenses(() => setLedgerVersion(value => value + 1))
@@ -283,7 +287,7 @@ export default function App() {
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
        if (isCentralCashierUser(user) && getCentralSyncState().initialSyncCompleted) {
-        void runCashierCentralSync().catch(() => {})
+        void runCashierCentralSync().catch(error => console.error('SALES_AUTO_SYNC_ERROR', error))
       }
     })
     return () => {
@@ -387,7 +391,8 @@ export default function App() {
     setOperationalDayError('')
     try {
       const result = await settleAndEndOperationalDay(operationalDay, { actualCash, endedBy: { name: session?.name || session?.shiftName || '' } })
-      setOperationalDay(result?.day?.status === 'open' ? result.day : null)
+      const reopened = await readOpenOperationalDay()
+      setOperationalDay(reopened)
       return result
     } catch (error) {
       setOperationalDayError(error?.message || 'تعذر إنهاء اليوم التشغيلي.')
@@ -499,7 +504,7 @@ export default function App() {
   useEffect(() => {
     const retry = () => {
       if (isCentralCashierUser(centralAuth()?.currentUser) && getCentralSyncState().initialSyncCompleted) {
-        void runCashierCentralSync().catch(() => {})
+        void runCashierCentralSync().catch(error => console.error('SALES_RETRY_SYNC_ERROR', error))
       }
     }
     window.addEventListener('pos101-sale-created', retry)
