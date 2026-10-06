@@ -726,6 +726,19 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   await set(ref(db, `pos101_expenses/${id}`), payload)
   const readBack = await get(ref(db, `pos101_expenses/${id}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف.')
+  const savedValue = readBack.val()
+  if (existing && (
+    Number(savedValue.amount) !== Number(payload.amount) ||
+    String(savedValue.description || '') !== String(payload.description || '') ||
+    String(savedValue.category || '') !== String(payload.category || '') ||
+    String(savedValue.employeeId || '') !== String(payload.employeeId || '') ||
+    String(savedValue.employeeNameSnapshot || '') !== String(payload.employeeNameSnapshot || '') ||
+    String(savedValue.person || '') !== String(payload.person || '') ||
+    String(savedValue.businessDate || '') !== String(payload.businessDate || '') ||
+    String(savedValue.operationalDayId || '') !== String(payload.operationalDayId || '') ||
+    String(savedValue.entryType || '') !== String(payload.entryType || '') ||
+    String(savedValue.paymentSource || '') !== String(payload.paymentSource || '')
+  )) throw Object.assign(new Error('تعذر التحقق من تعديل المصروف بعد الحفظ.'), { code: 'EXPENSE_EDIT_READBACK_FAILED' })
   const saved = normalizeExpense({ ...readBack.val(), id })
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), saved])
   authDebug('POS_EXPENSE_WRITE_SUCCESS', { existing: Boolean(existing) })
@@ -747,7 +760,10 @@ export const deleteCentralExpense = async expense => {
   if (!validExpenseId(id)) throw new Error('معرف المصروف غير صالح.')
   // RTDB delete is represented by a null set, keeping the operation atomic.
   await set(ref(db, `pos101_expenses/${id}`), null)
-  cacheCentralExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
+  const check = await get(ref(db, `pos101_expenses/${id}`))
+  if (check.exists()) throw Object.assign(new Error('تعذر التحقق من حذف المصروف.'), { code: 'DELETE_READBACK_FAILED' })
+  writeLocalExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
+  dispatchExpensesUpdated()
   return { id, deletedBy: user.uid }
 }
 
@@ -1031,10 +1047,6 @@ export const saveCashboxTransaction = async transaction => {
   const id = String(transaction?.id || `cash-${crypto.randomUUID()}`).trim()
   const existing = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
   if (existing.exists()) return existing.val()
-  if (transaction?.type === 'withdrawal') {
-    const current = objectValues(await get(financialPath(cashboxTransactionsPath)))
-    if (calculateCashboxBalance(current) < Number(transaction.amount)) throw Object.assign(new Error('الرصيد غير كافٍ.'), { code: 'CASHBOX_INSUFFICIENT_BALANCE' })
-  }
   const payload = { ...transaction, id, createdAt: transaction?.createdAt || Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '', status: transaction?.status || 'active' }
   if (!payload.businessDate || !Number.isFinite(Number(payload.amount)) || Number(payload.amount) <= 0) throw new Error('businessDate والمبلغ الصحيحان مطلوبان.')
   await set(financialPath(`${cashboxTransactionsPath}/${id}`), payload)
@@ -1043,6 +1055,21 @@ export const saveCashboxTransaction = async transaction => {
   await saveFinancialAudit({ action: 'create', entityType: 'cashbox_transaction', entityId: id, after: readBack.val(), reason: payload.reason || '' })
   return readBack.val()
 }
+export const updateCashboxTransaction = async transaction => {
+  const user = await financialUser(true)
+  const id = String(transaction?.id || '').trim()
+  if (!id) throw new Error('معرف حركة الصندوق غير صالح.')
+  const existingSnapshot = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
+  if (!existingSnapshot.exists()) throw new Error('حركة الصندوق غير موجودة.')
+  const existing = existingSnapshot.val()
+  const payload = { ...existing, ...transaction, id, createdAt: existing.createdAt || transaction.createdAt || Date.now(), updatedAt: Date.now(), updatedBy: user.uid, createdByUid: existing.createdByUid || user.uid, status: transaction.status || existing.status || 'active' }
+  await set(financialPath(`${cashboxTransactionsPath}/${id}`), payload)
+  const readBack = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
+  if (!readBack.exists()) throw Object.assign(new Error('تعذر التحقق من تعديل حركة الصندوق.'), { code: 'CASHBOX_EDIT_READBACK_FAILED' })
+  await saveFinancialAudit({ action: 'update', entityType: 'cashbox_transaction', entityId: id, before: existing, after: readBack.val(), reason: payload.reason || '' })
+  return readBack.val()
+}
+export const deleteCashboxTransaction = async (transaction, voidReason = 'حذف حركة الصندوق') => voidCashboxTransaction(transaction, voidReason)
 export const voidCashboxTransaction = async (transaction, voidReason) => {
   const user = await financialUser(true)
   const id = String(transaction?.id || '').trim()
