@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
 import { getLocalDateKey, normalizeDateKey } from '../services/expenseReporting.js'
-import { deleteCentralExpense, findOperationalDayByBusinessDate, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { deleteCentralExpense, findOperationalDayByBusinessDate, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveCashboxTransaction, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
 import { createExpenseRecoveryBackup, createMasterExpenseRecoveryHandler, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
-const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'راتب', 'أخرى']
+const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'راتب', 'سحوبات', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
 
 export function Expenses({ onNavigate, onBack, session, operationalDay = null, staff = [] }) {
@@ -206,6 +206,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !cleanDescription) return alert('يرجى إدخال مبلغ ووصف صحيحين')
     if (entryType === 'historical' && (!normalizeDateKey(historicalDate) || historicalDate > todayKey)) return alert('اختر تاريخًا سابقًا صحيحًا، ولا يمكن اختيار تاريخ مستقبلي.')
     if (editingId) {
+      if (category === 'سحوبات') return alert('لا يمكن تحويل مصروف محفوظ إلى سحب صندوق من شاشة المصاريف.')
       const current = expenses.find(row => row.id === editingId)
       let edited = current ? { ...current, amount: numericAmount, category, person, employeeId: personId || current.employeeId || '', notes: cleanNotes, description: cleanDescription } : null
       if (edited && entryType === 'historical') {
@@ -248,6 +249,28 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         operationalDayId = ''
         businessDate = historicalDate
       }
+    }
+    if (category === 'سحوبات') {
+      try {
+        await saveCashboxTransaction({
+          type: 'withdrawal',
+          category: 'سحوبات',
+          amount: numericAmount,
+          businessDate,
+          operationalDayId,
+          employeeId: personId || '',
+          employeeNameSnapshot: person,
+          cashierId: personId || '',
+          reason: cleanDescription,
+          description: cleanDescription,
+          notes: cleanNotes,
+          source: 'employee withdrawal',
+        })
+        resetForm(); setFormOpen(false); announceSuccess('تم حفظ السحب كحركة صندوق مرتبطة بالموظف')
+      } catch (error) {
+        alert(error?.message || 'تعذر حفظ حركة السحب. لم يتم إنشاء مصروف مكرر.')
+      }
+      return
     }
     const row = {
       id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
@@ -318,7 +341,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         <label>الموظف / الكاشير<select value={personId || person} onChange={e => { const value = e.target.value; const selected = staff.find(row => String(row.id) === value); setPersonId(selected?.id || ''); setPerson(selected?.name || value) }}>{(staff.length ? staff.filter(row => row.active !== false).map(row => <option key={row.id} value={row.id}>{row.name}{row.code ? ` · ${row.code}` : ''}</option>) : people.map(value => <option key={value} value={value}>{value}</option>))}</select></label>
         {entryType === 'current' ? <div className="expense-date-context"><span>تاريخ الأعمال</span><strong>{effectiveOperationalDay?.status === 'open' ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong><small>يرتبط المصروف باليوم التشغيلي المفتوح، حتى بعد منتصف الليل.</small></div> : <label>التاريخ السابق<input type="date" max={getLocalDateKey(Date.now())} value={historicalDate} onChange={e => setHistoricalDate(e.target.value)} required /></label>}
         <label className="expense-notes">ملاحظات (اختياري)<textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="أضف ملاحظة عند الحاجة" rows="3" /></label>
-        {entryType === 'current' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}
+        {entryType === 'current' && category !== 'سحوبات' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : category === 'سحوبات' ? <div className="expense-safe-note">سيُحفظ كسحب صندوق canonical مرتبط بالموظف، ولن يُنشأ له مصروف مكرر.</div> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}
       </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>}
       </section>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>

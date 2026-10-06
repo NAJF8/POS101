@@ -23,6 +23,7 @@ import {
 } from 'firebase/database'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
+import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 
@@ -841,6 +842,7 @@ export const normalizeStaff = (value, id) => ({
   code: String(value?.code || '').trim(),
   role: ['cashier', 'employee', 'manager'].includes(value?.role) ? value.role : 'employee',
   active: value?.active !== false,
+  canSell: normalizeStaffCanSell(value),
   deactivatedAt: value?.deactivatedAt || null,
 })
 

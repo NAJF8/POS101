@@ -1,4 +1,5 @@
 import React from 'react'
+import { sellerEligibleStaff } from '../services/staffEligibility.js'
 import { Icon } from './Icons'
 import { productNames } from '../data/menu'
 import { logoDataUri } from '../assets/logo'
@@ -544,7 +545,7 @@ export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogo
 
 /* ── Seller Selection ── */
 export function SellerSelection({ staff = [], onClose, onSelect }) {
-  const sellers = staff.filter(person => person.active !== false)
+  const sellers = sellerEligibleStaff(staff)
   const [busy, setBusy] = React.useState(false)
   const choose = async name => {
     if (busy) return

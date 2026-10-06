@@ -1,4 +1,5 @@
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
+import { sellerEligibleStaff } from './staffEligibility.js'
 
 const text = value => String(value ?? '').trim()
 const canonical = value => text(value).replace(/[\u200f\u200e\u061c]/g, '').replace(/[\s\u00a0]+/g, ' ').toLocaleLowerCase('ar-IQ')
@@ -34,7 +35,7 @@ export const matchCaptainRecord = (record, captain, staff = []) => {
 
 export const filterCaptainCandidates = (staff = [], query = '') => {
   const needle = canonical(query)
-  const people = (Array.isArray(staff) ? staff : []).filter(person => person?.id && person?.name)
+  const people = sellerEligibleStaff(staff).filter(person => person?.id && person?.name)
   if (!needle) return people
   return people.filter(person => [person.name, person.code, person.id].some(value => canonical(value).includes(needle)))
 }
