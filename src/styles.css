@@ -1644,8 +1644,8 @@ input, textarea, select { cursor: text; }
   .operational-day-card { width: min(460px, 100%); }
 }
 
-/* Thermal receipt print contract: 80mm paper, with the accepted 74mm content
-   width that preserves readable Arabic text and safe printer margins. */
+/* Thermal receipt print contract: 80mm paper, 72.1mm driver printable limit.
+   Keep receipt content at 70mm for a small physical margin on both sides. */
 @media print {
   @page { margin: 0; size: 80mm auto; }
   html, body, #root { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; box-sizing: border-box !important; }
@@ -1653,7 +1653,7 @@ input, textarea, select { cursor: text; }
   body > #root > .app-shell > :not(.receipt-sheet) { display: none !important; }
   body * { visibility: hidden !important; }
   body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
-  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box !important; width: 74mm !important; max-width: 74mm !important; height: auto !important; min-height: 0 !important; margin: 0 auto !important; padding: 1.5mm 0 4mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 10.5pt !important; font-weight: 600 !important; line-height: 1.3 !important; direction: rtl !important; break-after: avoid-page !important; page-break-after: avoid !important; transform: none !important; overflow: visible !important; }
+  body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box !important; width: 70mm !important; max-width: 70mm !important; height: auto !important; min-height: 0 !important; margin: 0 auto !important; padding: 1.5mm 0 4mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 10.5pt !important; font-weight: 600 !important; line-height: 1.3 !important; direction: rtl !important; break-after: avoid-page !important; page-break-after: avoid !important; transform: none !important; overflow: visible !important; }
   body .receipt-sheet, body .receipt-sheet * { box-sizing: border-box !important; min-width: 0 !important; max-width: 100% !important; }
   body .receipt-logo-wrap { display: block !important; margin: 0 0 1mm !important; padding: 0 !important; text-align: center !important; }
   body .receipt-logo { display: block !important; width: 26mm !important; height: 26mm !important; max-width: 100% !important; margin: 0 auto !important; object-fit: contain !important; object-position: center center !important; filter: brightness(0) !important; }

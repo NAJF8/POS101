@@ -25,7 +25,6 @@ import { calculateSettlement } from './services/financialCenter.js'
 import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
 import KioskActivation from './components/KioskActivation.jsx'
 import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
-import { openReceiptPrintWindow, printReceiptDocument } from './services/printDocument.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -133,7 +132,6 @@ export default function App() {
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
   const saleInFlight = useRef(false)
-  const receiptPrintRequest = useRef(null)
   const staffMigrationAttempted = useRef(false)
   const staffAuthInFlight = useRef(null)
 
@@ -586,21 +584,13 @@ export default function App() {
   const openOrder = useCallback(id => { const idx = orders.findIndex(o => o.id === id); if (idx >= 0) { setActive(idx); setOrders(v => v.map(o => o.id === id ? ({ ...o, held: false }) : o)); setModal(null) } }, [orders])
 
   const directThermalReady = Boolean(printerSettings.directThermal && thermalStatus?.ready)
-  const requestSalePrint = useCallback(async (sale, { reprint = false, printWindow = null, printWindowPrepared = false } = {}) => {
+  const requestSalePrint = useCallback(async (sale, { reprint = false } = {}) => {
     setPrintMessage(null)
     if (!directThermalReady) {
-      const receiptPrintWindow = printWindowPrepared ? printWindow : (printWindow || openReceiptPrintWindow())
-      if (import.meta.env.DEV) console.info('[POS101_PRINT]', { AUTO_PRINT_ENABLED: Boolean(autoPrint), DIRECT_THERMAL_READY: false, SALE_PRINT_REQUESTED: true, SALE_PRINT_WINDOW_OPENED: Boolean(receiptPrintWindow) })
-      if (!receiptPrintWindow) {
-        setPrintMessage({ sale, text: 'تعذر فتح الطباعة تلقائياً. اضغط إعادة الطباعة.' })
-        return false
-      }
-      receiptPrintRequest.current = { printWindow: receiptPrintWindow, requestKey: `${sale.saleId || sale.id || sale.orderNumber}:${reprint ? Date.now() : 'auto'}` }
       setPrintSale(sale)
       return true
     }
     const saleId = sale.saleId || sale.id || sale.orderNumber
-    if (import.meta.env.DEV) console.info('[POS101_PRINT]', { AUTO_PRINT_ENABLED: Boolean(autoPrint), DIRECT_THERMAL_READY: true, SALE_PRINT_REQUESTED: true, SALE_PRINT_WINDOW_OPENED: false })
     try {
       const result = await printThermalDocument({
         settings: printerSettings,
@@ -610,13 +600,10 @@ export default function App() {
       setPrintMessage({ sale, text: result.duplicate ? 'تم تجاهل إعادة الإرسال المكرر.' : 'تم إرسال الفاتورة للطابعة الحرارية مباشرة.' })
       return true
     } catch (error) {
-      if (import.meta.env.DEV) console.error('[POS101_PRINT] direct thermal failed', error)
-      const fallbackWindow = openReceiptPrintWindow()
-      if (fallbackWindow) return requestSalePrint(sale, { reprint, printWindow: fallbackWindow, printWindowPrepared: true })
-      setPrintMessage({ sale, text: 'تعذر إرسال الفاتورة للطابعة الحرارية. اضغط إعادة الطباعة.' })
+      setPrintMessage({ sale, text: `تعذر إرسال الفاتورة للطابعة الحرارية: ${error.message}` })
       return false
     }
-  }, [autoPrint, directThermalReady, printerSettings])
+  }, [directThermalReady, printerSettings])
 
   const printOpenOrder = useCallback(() => {
     if (!session || !activeOrder?.items?.length) return false
@@ -656,8 +643,6 @@ export default function App() {
   const finalizeSale = useCallback(async (sellerName) => {
     if (!session || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
 
-    const preparedReceiptPrintWindow = autoPrint && !directThermalReady ? openReceiptPrintWindow() : null
-    if (import.meta.env.DEV) console.info('[POS101_PRINT]', { AUTO_PRINT_ENABLED: Boolean(autoPrint), DIRECT_THERMAL_READY: directThermalReady, SALE_PRINT_WINDOW_OPENED: Boolean(preparedReceiptPrintWindow) })
     let currentOperationalDay = operationalDay || readLocalOperationalDay()
     try {
       currentOperationalDay = await readOpenOperationalDay()
@@ -704,7 +689,7 @@ export default function App() {
     // 1. Optimistic Local Save & Cart Clear (POS continues selling)
     setNextNumber(n => n + 1)
     setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-    if (autoPrint) void requestSalePrint(sale, { printWindow: preparedReceiptPrintWindow, printWindowPrepared: !directThermalReady })
+    if (autoPrint) void requestSalePrint(sale)
     setPendingPayment(null)
     window.setTimeout(() => setModal(null), 350)
 
@@ -713,7 +698,7 @@ export default function App() {
     enqueueSale(sale)
     window.setTimeout(() => { saleInFlight.current = false }, 350)
     return true
-  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay, directThermalReady])
+  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -767,9 +752,6 @@ export default function App() {
   // Auto-print trigger
   useEffect(() => {
     if (!printSale) return undefined
-    const printRequest = receiptPrintRequest.current
-    receiptPrintRequest.current = null
-    if (!printRequest) return undefined
     let cancelled = false
     const waitForReceiptAssets = async () => {
       const fontReady = document.fonts?.ready || Promise.resolve()
@@ -784,14 +766,8 @@ export default function App() {
             })
       await Promise.all([fontReady, imageReady])
       if (!cancelled) {
-        try {
-          if (import.meta.env.DEV) console.info('[POS101_PRINT]', { SALE_PRINT_DIALOG_CALLED: true, requestKey: printRequest.requestKey })
-          const printed = await printReceiptDocument(document.querySelector('.receipt-sheet'), { printWindow: printRequest.printWindow })
-          setPrintMessage({ sale: printSale, text: printed ? 'تم فتح الطباعة. إذا لم تخرج الفاتورة من الطابعة، استخدم إعادة الطباعة.' : 'تعذر تجهيز الفاتورة للطباعة. استخدم إعادة الطباعة مرة أخرى.' })
-        } catch (error) {
-          console.error('[POS101] receipt print failed', error)
-          setPrintMessage({ sale: printSale, text: 'تعذر تجهيز الفاتورة للطباعة. استخدم إعادة الطباعة مرة أخرى.' })
-        }
+        window.print()
+        setPrintMessage({ sale: printSale, text: 'تم فتح الطباعة. إذا لم تخرج الفاتورة من الطابعة، استخدم إعادة الطباعة.' })
         setPrintSale(null)
       }
     }
@@ -833,15 +809,10 @@ export default function App() {
     const reportDate = report.reportDate || report.dateFrom
     const datasetKey = (report.sales || []).map(sale => sale.saleId || sale.id || sale.orderNumber).join(',') || 'empty'
     const jobId = `report:${report.reportType}:${reportDate}:${datasetKey}`
-    return printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
-      .then(result => {
-        setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' })
-        return result
-      })
-      .catch(error => {
-        setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` })
-        throw error
-      })
+    void printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
+      .then(result => setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' }))
+      .catch(error => setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` }))
+    return true
   }, [directThermalReady, printerSettings])
   const login = useCallback(async cashier => {
     setSession({
@@ -1029,7 +1000,7 @@ export default function App() {
       {printSale && <Receipt sale={printSale} />}
       {printMessage && <div className="print-status" role="status">
         <span>{printMessage.text}</span>
-        <button type="button" onClick={() => { const sale = printMessage.sale; void requestSalePrint(sale, { reprint: true }) }}>إعادة طباعة</button>
+        <button type="button" onClick={() => { setPrintMessage(null); setPrintSale(printMessage.sale) }}>إعادة طباعة</button>
         <button type="button" aria-label="إغلاق رسالة الطباعة" onClick={() => setPrintMessage(null)}>×</button>
       </div>}
       {syncAuthStatus && (

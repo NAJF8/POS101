@@ -13,8 +13,8 @@ import { buildMaterialsReport } from '../services/materialsReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
-// Reports print in their own A4 or thermal 80mm document. Thermal content uses
-// the previously accepted 74mm width inside the 80mm paper.
+// Reports print in their own A4 or thermal 80mm document. Thermal content is
+// intentionally narrower than the Windows driver's confirmed 72.1mm limit.
 const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
 
 const formatDate = value => formatDateTime(value)
@@ -63,7 +63,7 @@ const thermalComprehensiveStyles = `
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; unicode-bidi: plaintext; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; direction: rtl; width: 74mm; max-width: 74mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; direction: rtl; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; color: #000; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; color: #000; break-inside: avoid; page-break-inside: avoid; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
   h2 { margin: 0 0 1.5mm; color: #000; font-size: 16pt; font-weight: 800; line-height: 1.2; }
@@ -110,7 +110,7 @@ const thermalMaterialsStyles = `
   * { box-sizing: border-box; }
   html, body { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff; color: #000; }
   body { direction: rtl; font-family: Tahoma, 'Arial Unicode MS', Arial, sans-serif; font-size: 10.5pt; font-weight: 600; line-height: 1.3; }
-  .report-paper { display: block; width: 74mm; max-width: 74mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
+  .report-paper { display: block; width: 70mm; max-width: 70mm; min-width: 0; margin: 0 auto; padding: 1.5mm 0 4mm; background: #fff; box-sizing: border-box; overflow: visible; }
   .report-paper-header { text-align: center; padding: 0 0 1.5mm; margin: 0 0 1.5mm; border-bottom: .35mm solid #000; break-inside: avoid; }
   .materials-brand { margin-bottom: 1mm; font-size: 13pt; font-weight: 900; }
   .report-logo { display: block; width: 24mm; height: 24mm; max-width: 100%; object-fit: contain; margin: 0 auto 1.5mm; filter: brightness(0); }
@@ -144,8 +144,6 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
   const [periodTo, setPeriodTo] = useState(() => defaultBusinessDate)
   const [periodError, setPeriodError] = useState('')
-  const [printError, setPrintError] = useState('')
-  const pendingPrintRef = useRef(null)
 
   // Reports always open on the active business date and use one shared range.
   useEffect(() => {
@@ -255,111 +253,57 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     return { valid, sales: rangeSales, expenses: rangeExpenses, transactions: rangeTransactions, daily, employees: [...employeeMap.values()], summary: { grossSales, cashSales, electronicSales, expensesTotal, withdrawals, deposits, adjustments, orderCount: rangeSales.length, averageOrder: rangeSales.length ? grossSales / rangeSales.length : 0, netCash: cashSales - expensesTotal - withdrawals + deposits + adjustments, beforeBalance, endBalance } }
   }, [periodFrom, periodTo, sales, expenses, cashboxTransactions, expenseOperationalDayDates])
 
-  const openPeriodReport = ({ print = false } = {}) => {
+  const openPeriodReport = () => {
     if (!isValidDateRange(periodFrom, periodTo)) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
     setPeriodError('')
-    setPrintError('')
-    if (!print) {
-      setReportType('period')
-      return
-    }
-
-    // A popup must be created while the original button click is still active.
-    // React needs a render pass before the period report markup exists, so keep
-    // this already-open window and fill it from the committed report below.
-    let printWindow
-    try { printWindow = window.open('', '_blank') } catch (error) {
-      console.error('[POS101] period print window open failed', error)
-    }
-    if (!printWindow) {
-      setPrintError('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
-      return
-    }
-    pendingPrintRef.current = { printWindow, reportType: 'period', format: 'a4' }
     setReportType('period')
   }
 
-  const writePrintDocument = async (printWindow, paper, format, reportTypeForPrint) => {
-    const isA4 = format === 'a4'
-    const isMaterials = reportTypeForPrint === 'materials'
-    const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
-    if (!printWindow) {
-      throw new Error('نافذة الطباعة غير متاحة.')
-    }
-    printWindow.document.open()
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title></title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
-    printWindow.document.close()
-    const images = [...printWindow.document.images]
-    await Promise.all(images.map(image => {
-      if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
-      return new Promise(resolve => {
-        image.addEventListener('load', () => resolve(image.decode ? image.decode().catch(() => {}) : undefined), { once: true })
-        image.addEventListener('error', resolve, { once: true })
-      })
-    }))
-    await (printWindow.document.fonts?.ready || Promise.resolve())
-    await new Promise(resolve => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
-    printWindow.focus()
-    printWindow.print()
-  }
-
   const printReport = (format) => {
-    setPrintError('')
     const paper = document.querySelector('.report-paper')
-    if (!paper) {
-      const message = 'تعذر تجهيز التقرير للطباعة.'
-      setPrintError(message)
-      if (import.meta.env.DEV) console.error('[POS101] report paper missing')
-      return
-    }
+    if (!paper) return
 
-    // Opening the window here is synchronous with the report button click.
-    let printWindow
-    try { printWindow = window.open('', '_blank') } catch (error) {
-      if (import.meta.env.DEV) console.error('[POS101] report print window open failed', error)
-    }
+    // Opening the window in the click handler avoids popup blocking.  Copying
+    // already-rendered markup preserves React's escaped local data safely.
+    const printWindow = window.open('', '_blank')
     if (!printWindow) {
-      setPrintError('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
+      window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
       return
     }
-    writePrintDocument(printWindow, paper, format, reportType).catch(error => {
-      if (import.meta.env.DEV) console.error('[POS101] report print failed', error)
-      setPrintError('تعذر تجهيز التقرير للطباعة.')
-      try { printWindow.close() } catch {}
-    })
-  }
+    let written = false
+    const writePrintDocument = () => {
+      if (written) return
+      written = true
+      // Keep the print document same-origin and give Chrome a meaningful URL.
+      // If Headers and footers are accidentally enabled, this avoids printing
+      // `about:blank` while the user can still disable them in the dialog.
+      try { printWindow.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}#print-report`) } catch {}
+      printWindow.document.open()
+      const isA4 = format === 'a4'
+      const isMaterials = reportType === 'materials'
+      const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
+      printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
+      printWindow.document.close()
 
-  useEffect(() => {
-    const pending = pendingPrintRef.current
-    if (!pending || reportType !== pending.reportType) return
-    pendingPrintRef.current = null
-    const paper = document.querySelector('.report-paper')
-    if (!paper) {
-      setPrintError('تعذر تجهيز التقرير للطباعة.')
-      if (import.meta.env.DEV) console.error('[POS101] period report paper missing after render')
-      try { pending.printWindow.close() } catch {}
-      return
+      const waitForAssetsAndPrint = async () => {
+        const images = [...printWindow.document.images]
+        await Promise.all(images.map(image => {
+          if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
+          return new Promise(resolve => {
+            image.addEventListener('load', () => resolve(image.decode ? image.decode().catch(() => {}) : undefined), { once: true })
+            image.addEventListener('error', resolve, { once: true })
+          })
+        }))
+        await (printWindow.document.fonts?.ready || Promise.resolve())
+        await new Promise(resolve => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
+        printWindow.focus()
+        printWindow.print()
+      }
+      waitForAssetsAndPrint()
     }
-    writePrintDocument(pending.printWindow, paper, pending.format, reportType).catch(error => {
-      if (import.meta.env.DEV) console.error('[POS101] period report print failed', error)
-      setPrintError('تعذر تجهيز التقرير للطباعة.')
-      try { pending.printWindow.close() } catch {}
-    })
-  }, [reportType])
-
-  const printThermal = () => {
-    setPrintError('')
-    if (directThermalReady && onDirectThermalPrint) {
-      Promise.resolve(printReportDirect())
-        .catch(error => {
-          if (import.meta.env.DEV) console.error('[POS101] direct thermal print failed', error)
-          printReport('thermal')
-          setPrintError('تعذرت الطباعة الحرارية المباشرة؛ تم فتح طباعة Chrome كبديل.')
-        })
-      return
-    }
-    printReport('thermal')
-    setPrintError('خدمة الطباعة الحرارية المباشرة غير متاحة؛ تم فتح طباعة Chrome كبديل.')
+    printWindow.addEventListener('load', writePrintDocument, { once: true })
+    try { printWindow.location.replace(`${window.location.origin}${window.location.pathname}#print-report`) } catch { writePrintDocument() }
+    window.setTimeout(writePrintDocument, 500)
   }
 
   const printReportDirect = () => {
@@ -383,9 +327,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <label>من تاريخ<input aria-label="من تاريخ" type="date" value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} /></label>
           <label>إلى تاريخ<input aria-label="إلى تاريخ" type="date" value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></label>
           <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
-          <button className="outline-btn" type="button" onClick={() => openPeriodReport({ print: true })}>طباعة تقرير الفترة</button>
+          <button className="outline-btn" type="button" onClick={openPeriodReport}>طباعة تقرير الفترة</button>
         </div>
-        {printError && <p className="settings-notice" role="alert">{printError}</p>}
         <div className="reports-shortcuts" aria-label="اختصارات الفترة">
           <button type="button" onClick={() => { const today = defaultBusinessDate; setPeriodFrom(today); setPeriodTo(today) }}>اليوم</button>
           <button type="button" onClick={() => { const yesterday = shiftDate(defaultBusinessDate, -1); setPeriodFrom(yesterday); setPeriodTo(yesterday) }}>أمس</button>
@@ -732,10 +675,9 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
           <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>
             <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button>
-            <button className="outline-btn" type="button" onClick={printThermal}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
+            <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
           </div>
         </div>
-        {printError && <p className="settings-notice non-printable" role="alert">{printError}</p>}
         
         <div className={`report-paper${reportType === 'comprehensive' ? ' comprehensive-report' : reportType === 'materials' ? ' materials-report' : ''}`}>
           <div className="report-paper-header">
