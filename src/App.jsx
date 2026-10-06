@@ -25,7 +25,7 @@ import { calculateSettlement } from './services/financialCenter.js'
 import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
 import KioskActivation from './components/KioskActivation.jsx'
 import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
-import { isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
+import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -834,6 +834,7 @@ export default function App() {
       const shifts = read('pos101.shifts', [])
       localStorage.setItem('pos101.shifts', JSON.stringify([...shifts, { ...session, closedAt: Date.now(), status: 'closed' }]))
     }
+    clearFinancialPinUnlock()
     setSession(null); setModal(null)
   }, [session])
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
@@ -850,18 +851,21 @@ export default function App() {
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
   const requestView = useCallback(view => {
-    if ((view === 'expenses' || view === 'reports') && !adminReady && !isFinancialPinUnlocked()) {
+    const protectedView = view === 'expenses' || view === 'reports' ? view : null
+    const leavingProtectedView = (currentView === 'expenses' || currentView === 'reports') && currentView !== view
+    if (leavingProtectedView) clearFinancialPinUnlock()
+    if (protectedView && !adminReady && !isFinancialPinUnlocked(protectedView)) {
       setFinancialPinTarget(view)
       setModal('financial-pin')
       return
     }
     setCurrentView(view)
-  }, [adminReady])
+  }, [adminReady, currentView])
   const unlockFinancialView = useCallback(async ({ staffId, pin }) => {
     const cashier = staff.find(row => String(row.id) === String(staffId))
     if (!cashier || !await verifyCashierPin(pin, cashier)) return false
-    saveFinancialPinUnlock(cashier.id)
     const target = financialPinTarget || 'reports'
+    saveFinancialPinUnlock(target)
     setFinancialPinTarget(null)
     setModal(null)
     setCurrentView(target)
@@ -872,18 +876,6 @@ export default function App() {
     setStaff(current => current.map(row => String(row.id) === String(saved.id) ? saved : row))
     return saved
   }, [])
-  useEffect(() => {
-    if (adminReady || !['expenses', 'reports'].includes(currentView)) return undefined
-    const check = () => {
-      if (!isFinancialPinUnlocked()) {
-        setFinancialPinTarget(currentView)
-        setCurrentView('dashboard')
-        setModal('financial-pin')
-      }
-    }
-    const timer = window.setInterval(check, 1000)
-    return () => window.clearInterval(timer)
-  }, [adminReady, currentView])
   const saveProduct = useCallback(async product => {
     const saved = await saveCentralProduct(product)
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])

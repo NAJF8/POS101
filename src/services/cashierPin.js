@@ -1,7 +1,6 @@
-const UNLOCK_KEY = 'pos101.financialPinUnlock'
-export const CASHIER_PIN_TTL_MS = 15 * 60 * 1000
-
-const storage = () => typeof sessionStorage === 'undefined' ? null : sessionStorage
+export const CASHIER_PIN_TTL_MS = 60 * 1000
+const PROTECTED_SCOPES = new Set(['expenses', 'reports'])
+let financialPinUnlock = null
 const toBase64Url = bytes => String.fromCharCode(...bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 const fromBase64Url = value => Uint8Array.from(atob(String(value).replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((String(value).length + 3) % 4)), char => char.charCodeAt(0))
 
@@ -25,29 +24,23 @@ export const verifyCashierPin = async (pin, staff = {}) => {
 }
 
 export const readFinancialPinUnlock = () => {
-  try {
-    const value = JSON.parse(storage()?.getItem(UNLOCK_KEY) || 'null')
-    if (!value || Number(value.expiresAt) <= Date.now() || !value.cashierId) {
-      storage()?.removeItem(UNLOCK_KEY)
-      return null
-    }
-    return { cashierId: String(value.cashierId), unlockedAt: Number(value.unlockedAt), expiresAt: Number(value.expiresAt) }
-  } catch {
-    storage()?.removeItem(UNLOCK_KEY)
+  if (!financialPinUnlock || Number(financialPinUnlock.expiresAt) <= Date.now()) {
+    financialPinUnlock = null
     return null
   }
+  return { ...financialPinUnlock }
 }
 
-export const saveFinancialPinUnlock = cashierId => {
+export const saveFinancialPinUnlock = scope => {
+  if (!PROTECTED_SCOPES.has(scope)) return null
   const unlockedAt = Date.now()
-  const value = { cashierId: String(cashierId || ''), unlockedAt, expiresAt: unlockedAt + CASHIER_PIN_TTL_MS }
-  if (!value.cashierId) return null
-  storage()?.setItem(UNLOCK_KEY, JSON.stringify(value))
+  const value = { scope, authorizedAt: unlockedAt, expiresAt: unlockedAt + CASHIER_PIN_TTL_MS }
+  financialPinUnlock = value
   return value
 }
 
-export const clearFinancialPinUnlock = () => storage()?.removeItem(UNLOCK_KEY)
-export const isFinancialPinUnlocked = () => Boolean(readFinancialPinUnlock())
+export const clearFinancialPinUnlock = () => { financialPinUnlock = null }
+export const isFinancialPinUnlocked = scope => readFinancialPinUnlock()?.scope === scope
 
 // Kept for tests and for environments without atob; PIN verification never stores this value.
 export const decodePinSalt = value => fromBase64Url(value)
