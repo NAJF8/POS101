@@ -107,6 +107,7 @@ export default function App() {
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
   const [centralAuthUser, setCentralAuthUser] = useState(null)
+  const [centralAuthReady, setCentralAuthReady] = useState(() => !isCentralConfigured())
   const [staffAuthorizationRecord, setStaffAuthorizationRecord] = useState(null)
   const [staffAuthBusy, setStaffAuthBusy] = useState(false)
   const [staffAuthError, setStaffAuthError] = useState('')
@@ -232,6 +233,7 @@ export default function App() {
 
   useEffect(() => {
     const stopAuth = subscribeCentralAuth(user => {
+      setCentralAuthReady(true)
       setCentralAuthUser(user)
       setStaffAuthError('')
       if (user && !isCentralCashierUser(user)) void refreshCentralAuthorizationRecord(user).then(record => {
@@ -843,7 +845,9 @@ export default function App() {
     return saved
   }, [])
 
-  if (isCentralConfigured() && !centralAuthUser) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
+  const kioskAuthReady = Boolean(centralAuthUser && isCentralCashierUser(centralAuthUser))
+  if (isCentralConfigured() && !centralAuthReady) return null
+  if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''}`}>
