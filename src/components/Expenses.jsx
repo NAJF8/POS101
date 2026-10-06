@@ -53,7 +53,14 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [masterRecoveryBusy, setMasterRecoveryBusy] = useState(false)
   const [masterRecoveryStatus, setMasterRecoveryStatus] = useState('')
   const [masterRecoveryResult, setMasterRecoveryResult] = useState(null)
+  const [formOpen, setFormOpen] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
   const masterRecoveryHandler = useMemo(() => createMasterExpenseRecoveryHandler({ onStatus: setMasterRecoveryStatus }), [])
+
+  const announceSuccess = message => {
+    setSuccessMessage(message)
+    window.setTimeout(() => setSuccessMessage(''), 3200)
+  }
 
   const runMasterRecovery = async () => {
     if (masterRecoveryBusy) return
@@ -213,12 +220,11 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       } else if (edited) edited = { ...edited, entryType: 'current', businessDate: current?.businessDate || effectiveOperationalDay?.businessDate || '' }
       try {
         await saveCentralExpense(edited, { existing: true })
-        resetForm(); alert('تم تعديل المصروف بنجاح')
+        resetForm(); setFormOpen(false); announceSuccess('تم تعديل المصروف بنجاح')
       } catch (error) {
         if (error?.code === 'AUTH_REQUIRED' && edited) {
           saveLocalExpensePending(edited)
-          resetForm()
-          alert('تم حفظ التعديل محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
+          resetForm(); setFormOpen(false); announceSuccess('تم حفظ التعديل محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
         } else alert(error?.message || 'تعذر مزامنة تعديل المصروف.')
       }
       return
@@ -254,16 +260,15 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     }
     try {
       await (entryType === 'current' && payFromCashbox ? saveCentralExpenseWithCashbox(row) : saveCentralExpense(row))
-      resetForm()
+      resetForm(); setFormOpen(false); announceSuccess('تم حفظ المصروف بنجاح')
     } catch (error) {
       if (['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) {
         saveLocalExpensePending(row)
-        resetForm()
-        alert('تم حفظ المصروف محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
+        resetForm(); setFormOpen(false); announceSuccess('تم حفظ المصروف محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
       } else alert(error?.message || 'تعذر مزامنة المصروف.')
     }
   }
-  const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || expense.employeeNameSnapshot || 'علي'); setDescription(expense.description || expense.notes || ''); setNotes(expense.notes && expense.notes !== expense.description ? expense.notes : ''); setEntryType(expense.entryType === 'historical' ? 'historical' : 'current'); setHistoricalDate(expense.businessDate || ''); setPayFromCashbox(expense.paymentSource === 'cashbox'); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || expense.employeeNameSnapshot || 'علي'); setDescription(expense.description || expense.notes || ''); setNotes(expense.notes && expense.notes !== expense.description ? expense.notes : ''); setEntryType(expense.entryType === 'historical' ? 'historical' : 'current'); setHistoricalDate(expense.businessDate || ''); setPayFromCashbox(expense.paymentSource === 'cashbox'); setFormOpen(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const confirmDelete = async () => {
     if (!deleting) return
     try { await deleteCentralExpense(deleting); setDeleting(null) } catch (error) { alert(error?.message || 'تعذر مزامنة حذف المصروف.') }
@@ -283,6 +288,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     .sort((a, b) => String(b.businessDate || '').localeCompare(String(a.businessDate || '')) || Number(b.createdAt || b.date || 0) - Number(a.createdAt || a.date || 0)), [expenses, dateFrom, dateTo])
   const setQuickFilter = days => { const today = getLocalDateKey(Date.now()); const from = days === 0 ? today : getLocalDateKey(Date.now() - days * 86400000); setDateFrom(from); setDateTo(today) }
   const goBack = onNavigate || onBack
+  const selectedPerson = person || staff.find(row => row.active)?.name || 'غير محدد'
 
   return (
     <div className="expenses-container" dir="rtl">
@@ -295,7 +301,14 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       </div>
       {syncMessage && <div className="report-card" style={{ marginBottom: '1rem' }}><strong>{syncMessage}</strong></div>}
       {masterRecoveryStatus && <div className="report-card" style={{ marginBottom: '1rem' }} role="status"><strong>{masterRecoveryStatus}</strong></div>}
-      <form onSubmit={submit} className="expense-form"><div className="expense-form-grid">
+      {successMessage && <div className="expense-success" role="status" aria-live="polite">{successMessage}</div>}
+      <section className={`expense-entry-card${formOpen ? ' is-open' : ''}`}>
+        <button type="button" className="expense-entry-toggle" aria-expanded={formOpen} onClick={() => setFormOpen(open => !open)}>
+          <span className="expense-entry-toggle-copy"><strong>{formOpen ? 'إضافة مصروف' : '+ إضافة مصروف جديد'}</strong><small>اضغط لإظهار تفاصيل التسجيل</small></span>
+          <span className="expense-entry-summary"><span>{entryType === 'historical' ? 'مصروف سابق' : 'مصروف اليوم الحالي'}</span><span>{selectedPerson}</span></span>
+          <span className="expense-entry-chevron" aria-hidden="true">{formOpen ? '⌃' : '⌄'}</span>
+        </button>
+        {formOpen && <form onSubmit={submit} className="expense-form"><div className="expense-form-grid">
         <fieldset className="expense-mode-field"><legend>نوع التسجيل</legend><div className="expense-mode-toggle"><label><input type="radio" name="entryType" value="current" checked={entryType === 'current'} onChange={() => setEntryType('current')} /> مصروف اليوم الحالي</label><label><input type="radio" name="entryType" value="historical" checked={entryType === 'historical'} onChange={() => setEntryType('historical')} /> مصروف سابق</label></div></fieldset>
         <label>المبلغ (د.ع)<input autoFocus inputMode="decimal" dir="ltr" type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label>
         <label>الوصف<input type="text" value={description} onChange={e => setDescription(e.target.value)} required placeholder="مثال: شراء حليب أو مواد تنظيف" /></label>
@@ -304,7 +317,8 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         {entryType === 'current' ? <div className="expense-date-context"><span>تاريخ الأعمال</span><strong>{effectiveOperationalDay?.status === 'open' ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong><small>يرتبط المصروف باليوم التشغيلي المفتوح، حتى بعد منتصف الليل.</small></div> : <label>التاريخ السابق<input type="date" max={getLocalDateKey(Date.now())} value={historicalDate} onChange={e => setHistoricalDate(e.target.value)} required /></label>}
         <label className="expense-notes">ملاحظات (اختياري)<textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="أضف ملاحظة عند الحاجة" rows="3" /></label>
         {entryType === 'current' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}
-      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
+      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>}
+      </section>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <section className="report-card expense-diagnostic" aria-label="كل المصاريف"><h3>كل المصاريف</h3><p>المصدر المركزي للتقارير هو Firebase RTDB؛ المحلي وPending يُدمجان محافظًا ولا يستبدلان المركزي.</p><div className="recovery-stats"><span>Firebase: <b>{centralCount === null ? 'غير متاح' : centralCount}</b> سجل</span><span>Local: <b>{localCount}</b></span><span>Pending: <b>{allExpenseDiagnostic.pending}</b></span><span>Merged: <b>{expenses.length}</b></span><span>الإجمالي: <b>{format(total)}</b></span></div><div className="diagnostic-groups">{Object.entries(allExpenseDiagnostic.grouped).sort(([a], [b]) => b.localeCompare(a)).map(([date, amount]) => <span key={date}>{date}: <b>{format(amount)}</b></span>)}</div>{centralCount !== null && !centralExpenses.some(expense => expense.businessDate === '2026-09-27') && <small>لا يوجد سجل مركزي بتاريخ 2026-09-27؛ السجل موجود محليًا على جهاز آخر أو غير موجود في Firebase.</small>}</section>
       <section className="expense-list-card"><div className="expense-list-heading"><div><h3>قائمة المصاريف</h3><p>الأحدث أولًا — الفلتر يؤثر على العرض فقط.</p></div><div className="expense-date-filters"><label>من تاريخ<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} /></label><label>إلى تاريخ<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} /></label><div className="quick-filters"><button type="button" onClick={() => setQuickFilter(0)}>اليوم</button><button type="button" onClick={() => setQuickFilter(1)}>أمس</button><button type="button" onClick={() => setQuickFilter(7)}>آخر 7 أيام</button><button type="button" onClick={() => { setDateFrom(''); setDateTo('') }}>الكل</button></div></div></div><div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>الوصف</th><th>المبلغ</th><th>الموظف</th><th>الحالة / المصدر</th><th>إجراءات</th></tr></thead><tbody>
