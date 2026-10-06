@@ -52,6 +52,7 @@ const a4PrintStyles = `
   .materials-section h3 { break-after: avoid; page-break-after: avoid; }
   .number-cell { direction: ltr; text-align: left; white-space: nowrap; }
   .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; }
+  .employee-summary-thermal { display: none; }
   thead { display: table-header-group; }
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
 `
@@ -98,6 +99,17 @@ const thermalComprehensiveStyles = `
   .thermal-product-table th:nth-child(2), .thermal-product-table td:nth-child(2) { text-align: right; }
   .thermal-product-table td:last-child, .thermal-captain-table td:last-child { white-space: nowrap; }
   .report-paper-footer { display: flex; flex-direction: column; align-items: center; gap: 1mm; padding-top: 2mm; margin-top: 3mm; border-top: .35mm solid #000; color: #000; font-size: 9pt; font-weight: 800; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+  .report-logo, .materials-brand, .report-paper-footer { display: none !important; }
+  .employee-summary-thermal { display: block; margin: 0 0 3mm; }
+  .employee-summary-a4 { display: none; }
+  .employee-thermal-card { border: .3mm solid #000; padding: 1.2mm; margin: 0 0 1.5mm; break-inside: avoid; page-break-inside: avoid; }
+  .employee-thermal-card-head { display: flex; justify-content: space-between; gap: 2mm; border-bottom: .2mm dashed #555; padding-bottom: .8mm; margin-bottom: .8mm; font-size: 9.5pt; }
+  .employee-thermal-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6mm 2mm; font-size: 8.5pt; line-height: 1.25; }
+  .employee-thermal-metrics span { display: flex; justify-content: space-between; gap: 1mm; min-width: 0; }
+  .employee-thermal-metrics b { white-space: nowrap; }
+  .employee-thermal-net { border-top: .3mm solid #000; padding-top: .6mm; font-weight: 900; }
+  .employee-thermal-total { border-width: .5mm; }
+  .employee-thermal-empty { border: .3mm solid #000; padding: 2mm; text-align: center; }
   .report-paper > *, .report-paper h2, .report-paper h3, .report-paper p, .report-paper td, .report-paper th, .report-paper .thermal-card-body > *, .report-paper .thermal-card-foot > *, .report-paper .thermal-cards-total > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; page-break-inside: avoid; }
@@ -125,6 +137,17 @@ const thermalMaterialsStyles = `
   .print-table th:nth-child(4), .print-table td:nth-child(4) { width: 21mm; }
   .print-table tbody tr { break-inside: avoid; }
   .report-paper-footer { display: flex; flex-direction: column; align-items: center; gap: 1mm; padding-top: 2mm; margin-top: 3mm; border-top: .35mm solid #000; text-align: center; font-size: 9pt; font-weight: 800; }
+  .report-logo, .materials-brand, .report-paper-footer { display: none !important; }
+  .employee-summary-thermal { display: block; margin: 0 0 3mm; }
+  .employee-summary-a4 { display: none; }
+  .employee-thermal-card { border: .3mm solid #000; padding: 1.2mm; margin: 0 0 1.5mm; break-inside: avoid; page-break-inside: avoid; }
+  .employee-thermal-card-head { display: flex; justify-content: space-between; gap: 2mm; border-bottom: .2mm dashed #555; padding-bottom: .8mm; margin-bottom: .8mm; font-size: 9.5pt; }
+  .employee-thermal-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6mm 2mm; font-size: 8.5pt; line-height: 1.25; }
+  .employee-thermal-metrics span { display: flex; justify-content: space-between; gap: 1mm; min-width: 0; }
+  .employee-thermal-metrics b { white-space: nowrap; }
+  .employee-thermal-net { border-top: .3mm solid #000; padding-top: .6mm; font-weight: 900; }
+  .employee-thermal-total { border-width: .5mm; }
+  .employee-thermal-empty { border: .3mm solid #000; padding: 2mm; text-align: center; }
   .summary-row td, tr.summary-row td { font-weight: 900 !important; border-top: .4mm solid #000 !important; }
   img { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 `
@@ -290,15 +313,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const writePrintDocument = () => {
       if (written) return
       written = true
-      // Keep the print document same-origin and give Chrome a meaningful URL.
-      // If Headers and footers are accidentally enabled, this avoids printing
-      // `about:blank` while the user can still disable them in the dialog.
-      try { printWindow.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}#print-report`) } catch {}
       printWindow.document.open()
       const isA4 = format === 'a4'
       const isMaterials = reportType === 'materials'
       const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
-      printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${window.location.href}"><link rel="icon" href="data:,"><title>معاينة التقرير</title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
+      printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title></title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
       printWindow.document.close()
 
       const waitForAssetsAndPrint = async () => {
@@ -392,13 +411,23 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const renderEmployeeReport = () => {
     const summary = selectedEmployee
     const money = value => format(value)
-    const employeeTable = (rows = visibleEmployeeSummaries) => <table className="print-table employee-report-table" data-testid="employee-summary-table">
+    const employeeTable = (rows = visibleEmployeeSummaries) => <>
+      <table className="print-table employee-report-table employee-summary-a4" data-testid="employee-summary-table">
       <thead><tr><th>الموظف</th><th>الكود</th><th>عدد الطلبات</th><th>المبيعات</th><th>المصاريف</th><th>السحوبات</th><th>الصافي</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.employee.id} onClick={() => setSelectedEmployeeId(String(row.employee.id))} className="employee-report-row" tabIndex="0" onKeyDown={event => { if (event.key === 'Enter') setSelectedEmployeeId(String(row.employee.id)) }}>
         <td>{row.employee.name}</td><td>{row.employee.code || '—'}</td><td className="number-cell">{formatNumber(row.ordersCount)}</td><td className="number-cell">{money(row.salesTotal)}</td><td className="number-cell">{money(row.expensesTotal)}</td><td className="number-cell">{money(row.withdrawalsTotal)}</td><td className="number-cell">{money(row.netTotal)}</td>
       </tr>)}{!rows.length && <tr><td colSpan="7">لا توجد بيانات موظفين ضمن الفترة المحددة</td></tr>}
       <tr className="summary-highlight"><td colSpan="2">الإجمالي</td><td className="number-cell">{formatNumber(employeeDataset.total.ordersCount)}</td><td className="number-cell">{money(employeeDataset.total.salesTotal)}</td><td className="number-cell">{money(employeeDataset.total.expensesTotal)}</td><td className="number-cell">{money(employeeDataset.total.withdrawalsTotal)}</td><td className="number-cell">{money(employeeDataset.total.netTotal)}</td></tr></tbody>
-    </table>
+      </table>
+      <div className="employee-summary-thermal" aria-label="ملخص الموظفين الحراري">
+        {rows.map(row => <article className="employee-thermal-card" key={`thermal-${row.employee.id}`}>
+          <div className="employee-thermal-card-head"><b>{row.employee.name}</b><span>{row.employee.code || '—'}</span></div>
+          <div className="employee-thermal-metrics"><span>مبيعات <b dir="ltr">{money(row.salesTotal)}</b></span><span>نقدي <b dir="ltr">{money(row.cashSales)}</b></span><span>إلكتروني <b dir="ltr">{money(row.electronicSales)}</b></span><span>مصاريف <b dir="ltr">{money(row.expensesTotal)}</b></span><span>سحوبات <b dir="ltr">{money(row.withdrawalsTotal)}</b></span><span className="employee-thermal-net">صافي <b dir="ltr">{money(row.netTotal)}</b></span></div>
+        </article>)}
+        {!rows.length && <p className="employee-thermal-empty">لا توجد بيانات موظفين ضمن الفترة المحددة</p>}
+        <article className="employee-thermal-card employee-thermal-total"><div className="employee-thermal-card-head"><b>الإجمالي</b></div><div className="employee-thermal-metrics"><span>مبيعات <b dir="ltr">{money(employeeDataset.total.salesTotal)}</b></span><span>نقدي <b dir="ltr">{money(employeeDataset.total.cashSales)}</b></span><span>إلكتروني <b dir="ltr">{money(employeeDataset.total.electronicSales)}</b></span><span>مصاريف <b dir="ltr">{money(employeeDataset.total.expensesTotal)}</b></span><span>سحوبات <b dir="ltr">{money(employeeDataset.total.withdrawalsTotal)}</b></span><span className="employee-thermal-net">صافي <b dir="ltr">{money(employeeDataset.total.netTotal)}</b></span></div></article>
+      </div>
+    </>
     const detailRows = (rows, columns, empty) => <table className="print-table"><thead><tr>{columns.map(column => <th key={column.label}>{column.label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.id || `${row.businessDate}-${index}`}>{columns.map(column => <td key={column.label} className={column.number ? 'number-cell' : ''}>{column.value(row, index)}</td>)}</tr>)}{!rows.length && <tr><td colSpan={columns.length}>{empty}</td></tr>}<tr className="summary-row"><td colSpan={Math.max(1, columns.length - 1)}>الإجمالي</td><td className="number-cell">{money(rows.reduce((total, row) => total + Number(row.amount ?? row.total ?? row.subtotal ?? 0), 0))}</td></tr></tbody></table>
     const printContent = summary ? <>
       <h3>ملخص الموظف: {summary.employee.name}</h3>
@@ -408,9 +437,9 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       <h3>السحوبات</h3>{detailRows(summary.withdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }, { label: 'الموظف', value: row => row.employeeNameSnapshot || row.cashierNameSnapshot || row.person || summary.employee.name }], 'لا توجد سحوبات')}
     </> : employeeTable()
     return <div className="report-view-container employee-report-view" dir="rtl">
-      <div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button></div></div>
+      <div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button><button className="outline-btn" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button></div></div>
       <section className="employee-report-controls non-printable" aria-label="فلترة تقرير الموظفين"><label>ابحث باسم الموظف أو الكود<input value={employeeQuery} onChange={event => setEmployeeQuery(event.target.value)} placeholder="ابحث باسم الموظف أو الكود" /></label><label>اختيار الموظف<select value={selectedEmployeeId} onChange={event => setSelectedEmployeeId(event.target.value)}><option value="">كل الموظفين / تصفية نهاية الشهر</option>{visibleEmployeeSummaries.map(row => <option key={row.employee.id} value={row.employee.id}>{row.employee.name}{row.employee.code ? ` · ${row.employee.code}` : ''}</option>)}</select></label><div className="reports-shortcuts"><button type="button" onClick={() => { setPeriodFrom(`${defaultBusinessDate.slice(0, 7)}-01`); setPeriodTo(defaultBusinessDate) }}>هذا الشهر</button><button type="button" onClick={() => { const previous = shiftDate(`${defaultBusinessDate.slice(0, 7)}-01`, -1); setPeriodFrom(`${previous.slice(0, 7)}-01`); setPeriodTo(previous) }}>الشهر السابق</button><button type="button" onClick={() => { setPeriodFrom(shiftDate(defaultBusinessDate, -29)); setPeriodTo(defaultBusinessDate) }}>آخر 30 يوم</button></div><div className="employee-report-date-range"><label>من تاريخ<input type="date" value={periodFrom} onChange={event => setPeriodFrom(event.target.value)} /></label><label>إلى تاريخ<input type="date" value={periodTo} onChange={event => setPeriodTo(event.target.value)} /></label></div></section>
-      <div className="report-paper"><div className="report-paper-header"><img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" /><h2>{summary ? `تقرير موظف: ${summary.employee.name}` : 'تصفية نهاية الشهر - الموظفين'}</h2><p>من {periodFrom} إلى {periodTo}</p><p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || 'الإدارة'}</p></div>{printContent}<div className="report-paper-footer"><p>101 COFFEE HOUSE ❤</p><p dir="ltr">GOOD COFFEE \ GOOD PEOPLE \ BETTER DAYS</p></div></div>
+       <div className="report-paper"><div className="report-paper-header"><img src={logoUrl} alt="" className="report-logo" /><h2>{summary ? `تقرير موظف: ${summary.employee.name}` : 'تصفية نهاية الشهر - الموظفين'}</h2>{summary && <p>الكود: {summary.employee.code || '—'}</p>}<p>من {periodFrom} إلى {periodTo}</p><p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || 'الإدارة'}</p></div>{printContent}</div>
     </div>
   }
 
@@ -727,8 +756,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         
         <div className={`report-paper${reportType === 'comprehensive' ? ' comprehensive-report' : reportType === 'materials' ? ' materials-report' : ''}`}>
           <div className="report-paper-header">
-            <img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" />
-            {reportType === 'materials' && <div className="materials-brand">101 COFFEE HOUSE</div>}
+            <img src={logoUrl} alt="" className="report-logo" />
             <h2>{title}</h2>
             <p>من {periodFrom} إلى {periodTo}</p>
             <p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || session?.shiftName || 'الإدارة'}</p>
@@ -738,8 +766,6 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           
           <div className="report-paper-footer">
             <p>شكراً لكم</p>
-            <p>101 COFFEE HOUSE ❤</p>
-            <p dir="ltr">GOOD COFFEE \ GOOD PEOPLE \ BETTER DAYS</p>
           </div>
         </div>
       </div>
