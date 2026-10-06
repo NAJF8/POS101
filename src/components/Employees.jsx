@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import { Icon } from './Icons'
-import { StaffPinDialog } from './Dialogs'
+import { StaffPinDialog, SystemAdminCodeDialog } from './Dialogs'
+import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 
 const ROLE_LABELS = { cashier: 'كاشير', employee: 'موظف', manager: 'مدير' }
 
 const emptyForm = { id: '', name: '', code: '', role: 'employee', active: true, canSell: true }
 
-export default function Employees({ staff = [], canWrite = false, canManagePins = false, onSaveStaff, onSaveStaffPin, onNavigate, onStaffSignIn, staffAuthBusy = false, staffAuthError = '' }) {
+export default function Employees({ staff = [], canWrite = false, onSaveStaff, onSaveStaffPin, onNavigate, onStaffSignIn, staffAuthBusy = false, staffAuthError = '' }) {
   const [form, setForm] = useState(emptyForm)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [pinStaff, setPinStaff] = useState(null)
+  const [systemCodeStaff, setSystemCodeStaff] = useState(null)
+  const [systemCode, setSystemCode] = useState('')
   const currentStaff = useMemo(() => staff.filter(row => row.active !== false), [staff])
   const previousStaff = useMemo(() => staff.filter(row => row.active === false), [staff])
 
@@ -53,7 +56,7 @@ export default function Employees({ staff = [], canWrite = false, canManagePins 
   const row = person => <article className={`employee-management-row ${person.active === false ? 'is-disabled' : ''}`} key={person.id}>
     <div className="employee-management-info"><strong>{person.name}</strong><span>الكود: {person.code || 'بدون كود'}</span><span>الدور: {ROLE_LABELS[person.role] || ROLE_LABELS.employee}</span><span>البيع: {person.canSell === false ? 'لا يظهر ككابتن' : 'يظهر ككابتن'}</span></div>
     <span className={`employee-management-status ${person.active === false ? 'is-disabled' : ''}`}>{person.active === false ? 'سابق' : 'حالي'}</span>
-    <div className="employee-management-actions"><button type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={() => edit(person)}>تعديل</button><button type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={() => toggle(person)}>{person.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button>{canManagePins && person.active !== false && <button type="button" className="pin-action" onClick={() => setPinStaff(person)}>رمز الدخول</button>}</div>
+    <div className="employee-management-actions"><button type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={() => edit(person)}>تعديل</button><button type="button" disabled={!canAttemptWrite || staffAuthBusy || busy} onClick={() => toggle(person)}>{person.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button><button type="button" className="pin-action" onClick={() => setSystemCodeStaff(person)}>رمز الدخول</button></div>
   </article>
 
   return <section className="employees-page" dir="rtl">
@@ -67,6 +70,7 @@ export default function Employees({ staff = [], canWrite = false, canManagePins 
     {notice && <p className="settings-notice" role="status">{notice}</p>}
     <section className="settings-card"><div className="settings-card-heading"><div><h2>الموظفون الحاليون</h2><p>{currentStaff.length} موظف</p></div></div><div className="employee-management-list">{currentStaff.length ? currentStaff.map(row) : <p className="settings-readonly">لا يوجد موظفون حاليون.</p>}</div></section>
     <section className="settings-card"><div className="settings-card-heading"><div><h2>الموظفون السابقون</h2><p>{previousStaff.length} موظف — التعطيل لا يحذف المبيعات أو المصاريف التاريخية.</p></div></div><div className="employee-management-list">{previousStaff.length ? previousStaff.map(row) : <p className="settings-readonly">لا يوجد موظفون سابقون.</p>}</div></section>
-    {pinStaff && <StaffPinDialog staff={pinStaff} onClose={() => setPinStaff(null)} onSave={onSaveStaffPin} />}
+    {systemCodeStaff && <SystemAdminCodeDialog staff={systemCodeStaff} onClose={() => { setSystemCodeStaff(null); setSystemCode('') }} onVerify={async ({ staff: target, code }) => { if (!verifySystemAdminCode(code)) return false; setSystemCode(code); setSystemCodeStaff(null); setPinStaff(target); return true }} />}
+    {pinStaff && <StaffPinDialog staff={pinStaff} systemCode={systemCode} onClose={() => { setPinStaff(null); setSystemCode('') }} onSave={onSaveStaffPin} />}
   </section>
 }

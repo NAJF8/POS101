@@ -27,6 +27,7 @@ import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
+import { verifySystemAdminCode } from './systemAdminCode.js'
 import { isSaleSyncEligible, markSaleSynced, readSaleQueue, retainQueuedSale } from './salesSyncQueue.js'
 
 const env = import.meta.env || {}
@@ -943,8 +944,8 @@ export const saveCentralStaff = async (staff, { actor = {} } = {}) => {
   return normalizeStaff(readBack.val(), id)
 }
 
-export const saveCashierPin = async ({ staffId, action = 'set', pin = '' } = {}) => {
-  if (!isCentralAdminUser(auth?.currentUser)) throw Object.assign(new Error('إدارة رمز الدخول متاحة لحساب Super Admin فقط.'), { code: 'SUPER_ADMIN_REQUIRED' })
+export const saveCashierPin = async ({ staffId, action = 'set', pin = '', systemCode = '' } = {}) => {
+  if (!verifySystemAdminCode(systemCode)) throw Object.assign(new Error('رمز النظام غير صحيح.'), { code: 'SYSTEM_ADMIN_CODE_REQUIRED' })
   const user = await staffUser(true)
   const id = String(staffId || '').trim()
   if (!id) throw new Error('معرف الموظف مطلوب.')

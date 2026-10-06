@@ -916,7 +916,7 @@ export default function App() {
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
         <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
-      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} canManagePins={adminReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
+      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (

@@ -575,7 +575,35 @@ export function FinancialPinDialog({ staff = [], onClose, onUnlock }) {
   </Dialog>
 }
 
-export function StaffPinDialog({ staff, onClose, onSave }) {
+export function SystemAdminCodeDialog({ staff, onClose, onVerify }) {
+  const [code, setCode] = React.useState('')
+  const [error, setError] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+  const codeRef = React.useRef(null)
+  React.useEffect(() => { codeRef.current?.focus() }, [])
+  const submit = async event => {
+    event.preventDefault()
+    if (busy) return
+    setError('')
+    setBusy(true)
+    try {
+      const ok = await onVerify?.({ staff, code })
+      if (!ok) setError('رمز النظام غير صحيح')
+    } catch (cause) {
+      setError(cause?.message || 'رمز النظام غير صحيح')
+    } finally { setBusy(false); setCode('') }
+  }
+  return <Dialog onClose={onClose} className="system-code-dialog financial-pin-dialog">
+    <h2>رمز النظام</h2>
+    <form onSubmit={submit}>
+      <label>أدخل رمز النظام<input ref={codeRef} type="password" inputMode="numeric" autoComplete="off" value={code} onChange={event => setCode(event.target.value.replace(/\D/g, '').slice(0, 4))} /></label>
+      {error && <p className="financial-pin-error" role="alert">{error}</p>}
+      <div className="dialog-actions"><button type="button" className="secondary-action" onClick={onClose}>إلغاء</button><button className="primary-action" type="submit" disabled={busy || code.length !== 4}>{busy ? 'جارٍ التحقق…' : 'متابعة'}</button></div>
+    </form>
+  </Dialog>
+}
+
+export function StaffPinDialog({ staff, systemCode, onClose, onSave }) {
   const [pin, setPin] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
@@ -583,7 +611,7 @@ export function StaffPinDialog({ staff, onClose, onSave }) {
   const save = async action => {
     setError('')
     setBusy(true)
-    try { await onSave?.({ staffId: staff.id, action, pin }); onClose() } catch (cause) { setError(cause?.message || 'تعذر تحديث رمز الدخول.') } finally { setBusy(false); setPin('') }
+    try { await onSave?.({ staffId: staff.id, action, pin, systemCode }); onClose() } catch (cause) { setError(cause?.message || 'تعذر تحديث رمز الدخول.') } finally { setBusy(false); setPin('') }
   }
   return <Dialog onClose={onClose} className="financial-pin-dialog staff-pin-dialog">
     <h2>رمز الدخول</h2>
