@@ -51,6 +51,7 @@ const a4PrintStyles = `
   .materials-section { break-inside: auto; page-break-inside: auto; }
   .materials-section h3 { break-after: avoid; page-break-after: avoid; }
   .number-cell { direction: ltr; text-align: left; white-space: nowrap; }
+  .report-logo { display: none; }
   .report-paper-footer { display: flex; justify-content: space-between; gap: 6mm; padding-top: 4mm; margin-top: 7mm; border-top: .35mm solid #000; color: #000; font-weight: 800; }
   .employee-summary-thermal { display: none; }
   thead { display: table-header-group; }
