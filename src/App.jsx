@@ -767,8 +767,13 @@ export default function App() {
             })
       await Promise.all([fontReady, imageReady])
       if (!cancelled) {
-        await printReceiptDocument(document.querySelector('.receipt-sheet'))
-        setPrintMessage({ sale: printSale, text: 'تم فتح الطباعة. إذا لم تخرج الفاتورة من الطابعة، استخدم إعادة الطباعة.' })
+        try {
+          const printed = await printReceiptDocument(document.querySelector('.receipt-sheet'))
+          setPrintMessage({ sale: printSale, text: printed ? 'تم فتح الطباعة. إذا لم تخرج الفاتورة من الطابعة، استخدم إعادة الطباعة.' : 'تعذر تجهيز الفاتورة للطباعة. استخدم إعادة الطباعة مرة أخرى.' })
+        } catch (error) {
+          console.error('[POS101] receipt print failed', error)
+          setPrintMessage({ sale: printSale, text: 'تعذر تجهيز الفاتورة للطباعة. استخدم إعادة الطباعة مرة أخرى.' })
+        }
         setPrintSale(null)
       }
     }
@@ -810,10 +815,15 @@ export default function App() {
     const reportDate = report.reportDate || report.dateFrom
     const datasetKey = (report.sales || []).map(sale => sale.saleId || sale.id || sale.orderNumber).join(',') || 'empty'
     const jobId = `report:${report.reportType}:${reportDate}:${datasetKey}`
-    void printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
-      .then(result => setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' }))
-      .catch(error => setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` }))
-    return true
+    return printThermalDocument({ settings: printerSettings, jobId, document: { kind: 'report', report } })
+      .then(result => {
+        setPrintMessage({ text: result.duplicate ? 'تم تجاهل إعادة إرسال التقرير المكرر.' : 'تم إرسال التقرير للطابعة الحرارية مباشرة.' })
+        return result
+      })
+      .catch(error => {
+        setPrintMessage({ text: `تعذر إرسال التقرير للطابعة الحرارية: ${error.message}` })
+        throw error
+      })
   }, [directThermalReady, printerSettings])
   const login = useCallback(async cashier => {
     setSession({

@@ -144,6 +144,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
   const [periodTo, setPeriodTo] = useState(() => defaultBusinessDate)
   const [periodError, setPeriodError] = useState('')
+  const [printError, setPrintError] = useState('')
+  const pendingPrintRef = useRef(null)
 
   // Reports always open on the active business date and use one shared range.
   useEffect(() => {
@@ -256,43 +258,108 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const openPeriodReport = ({ print = false } = {}) => {
     if (!isValidDateRange(periodFrom, periodTo)) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
     setPeriodError('')
-    setReportType('comprehensive')
-    if (print) window.requestAnimationFrame(() => window.requestAnimationFrame(() => printReport('a4')))
+    setPrintError('')
+    if (!print) {
+      setReportType('period')
+      return
+    }
+
+    // A popup must be created while the original button click is still active.
+    // React needs a render pass before the period report markup exists, so keep
+    // this already-open window and fill it from the committed report below.
+    let printWindow
+    try { printWindow = window.open('', '_blank') } catch (error) {
+      console.error('[POS101] period print window open failed', error)
+    }
+    if (!printWindow) {
+      setPrintError('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
+      return
+    }
+    pendingPrintRef.current = { printWindow, reportType: 'period', format: 'a4' }
+    setReportType('period')
+  }
+
+  const writePrintDocument = async (printWindow, paper, format, reportTypeForPrint) => {
+    const isA4 = format === 'a4'
+    const isMaterials = reportTypeForPrint === 'materials'
+    const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
+    if (!printWindow) {
+      throw new Error('نافذة الطباعة غير متاحة.')
+    }
+    printWindow.document.open()
+    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title></title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
+    printWindow.document.close()
+    const images = [...printWindow.document.images]
+    await Promise.all(images.map(image => {
+      if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
+      return new Promise(resolve => {
+        image.addEventListener('load', () => resolve(image.decode ? image.decode().catch(() => {}) : undefined), { once: true })
+        image.addEventListener('error', resolve, { once: true })
+      })
+    }))
+    await (printWindow.document.fonts?.ready || Promise.resolve())
+    await new Promise(resolve => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
+    printWindow.focus()
+    printWindow.print()
   }
 
   const printReport = (format) => {
+    setPrintError('')
     const paper = document.querySelector('.report-paper')
-    if (!paper) return
-
-    // Opening the window in the click handler avoids popup blocking.  Copying
-    // already-rendered markup preserves React's escaped local data safely.
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
+    if (!paper) {
+      const message = 'تعذر تجهيز التقرير للطباعة.'
+      setPrintError(message)
+      if (import.meta.env.DEV) console.error('[POS101] report paper missing')
       return
     }
-    printWindow.document.open()
-    const isA4 = format === 'a4'
-    const isMaterials = reportType === 'materials'
-    const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
-    printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title></title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
-    printWindow.document.close()
 
-    const waitForAssetsAndPrint = async () => {
-      const images = [...printWindow.document.images]
-      await Promise.all(images.map(image => {
-        if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
-        return new Promise(resolve => {
-          image.addEventListener('load', () => resolve(image.decode ? image.decode().catch(() => {}) : undefined), { once: true })
-          image.addEventListener('error', resolve, { once: true })
-        })
-      }))
-      await (printWindow.document.fonts?.ready || Promise.resolve())
-      await new Promise(resolve => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
-      printWindow.focus()
-      printWindow.print()
+    // Opening the window here is synchronous with the report button click.
+    let printWindow
+    try { printWindow = window.open('', '_blank') } catch (error) {
+      if (import.meta.env.DEV) console.error('[POS101] report print window open failed', error)
     }
-    waitForAssetsAndPrint()
+    if (!printWindow) {
+      setPrintError('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
+      return
+    }
+    writePrintDocument(printWindow, paper, format, reportType).catch(error => {
+      if (import.meta.env.DEV) console.error('[POS101] report print failed', error)
+      setPrintError('تعذر تجهيز التقرير للطباعة.')
+      try { printWindow.close() } catch {}
+    })
+  }
+
+  useEffect(() => {
+    const pending = pendingPrintRef.current
+    if (!pending || reportType !== pending.reportType) return
+    pendingPrintRef.current = null
+    const paper = document.querySelector('.report-paper')
+    if (!paper) {
+      setPrintError('تعذر تجهيز التقرير للطباعة.')
+      if (import.meta.env.DEV) console.error('[POS101] period report paper missing after render')
+      try { pending.printWindow.close() } catch {}
+      return
+    }
+    writePrintDocument(pending.printWindow, paper, pending.format, reportType).catch(error => {
+      if (import.meta.env.DEV) console.error('[POS101] period report print failed', error)
+      setPrintError('تعذر تجهيز التقرير للطباعة.')
+      try { pending.printWindow.close() } catch {}
+    })
+  }, [reportType])
+
+  const printThermal = () => {
+    setPrintError('')
+    if (directThermalReady && onDirectThermalPrint) {
+      Promise.resolve(printReportDirect())
+        .catch(error => {
+          if (import.meta.env.DEV) console.error('[POS101] direct thermal print failed', error)
+          printReport('thermal')
+          setPrintError('تعذرت الطباعة الحرارية المباشرة؛ تم فتح طباعة Chrome كبديل.')
+        })
+      return
+    }
+    printReport('thermal')
+    setPrintError('خدمة الطباعة الحرارية المباشرة غير متاحة؛ تم فتح طباعة Chrome كبديل.')
   }
 
   const printReportDirect = () => {
@@ -318,6 +385,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
           <button className="outline-btn" type="button" onClick={() => openPeriodReport({ print: true })}>طباعة تقرير الفترة</button>
         </div>
+        {printError && <p className="settings-notice" role="alert">{printError}</p>}
         <div className="reports-shortcuts" aria-label="اختصارات الفترة">
           <button type="button" onClick={() => { const today = defaultBusinessDate; setPeriodFrom(today); setPeriodTo(today) }}>اليوم</button>
           <button type="button" onClick={() => { const yesterday = shiftDate(defaultBusinessDate, -1); setPeriodFrom(yesterday); setPeriodTo(yesterday) }}>أمس</button>
@@ -664,9 +732,10 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
           <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>
             <button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button>
-            <button className="outline-btn" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
+            <button className="outline-btn" type="button" onClick={printThermal}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button>
           </div>
         </div>
+        {printError && <p className="settings-notice non-printable" role="alert">{printError}</p>}
         
         <div className={`report-paper${reportType === 'comprehensive' ? ' comprehensive-report' : reportType === 'materials' ? ' materials-report' : ''}`}>
           <div className="report-paper-header">
