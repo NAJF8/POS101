@@ -11,6 +11,7 @@ import { readCentralExpensesForReports, readLocalExpenses } from '../services/po
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
 import { buildEmployeeReport, filterEmployeeSummaries } from '../services/employeeReport.js'
+import { buildCaptainReport, filterCaptainCandidates } from '../services/captainReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -163,10 +164,14 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [], staff = [], products = [], categories = [] }) {
-  const [reportType, setReportType] = useState(null)
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
+  const [reportType, setReportType] = useState(initialReportType)
   const [employeeQuery, setEmployeeQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
+  const [captainQuery, setCaptainQuery] = useState('')
+  const [selectedCaptainId, setSelectedCaptainId] = useState('')
+  const [captainStage, setCaptainStage] = useState('selection')
+  const [captainSections, setCaptainSections] = useState(['sales', 'expenses', 'withdrawals', 'salary'])
   const defaultBusinessDate = operationalDay?.businessDate || getDefaultReportDate()
   const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
   const [periodTo, setPeriodTo] = useState(() => defaultBusinessDate)
@@ -248,6 +253,9 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, sales, expenses, cashboxTransactions, periodFrom, periodTo])
   const visibleEmployeeSummaries = useMemo(() => filterEmployeeSummaries(employeeDataset.summaries, employeeQuery), [employeeDataset.summaries, employeeQuery])
   const selectedEmployee = useMemo(() => employeeDataset.summaries.find(row => String(row.employee?.id) === String(selectedEmployeeId)) || null, [employeeDataset.summaries, selectedEmployeeId])
+  const captainCandidates = useMemo(() => filterCaptainCandidates(staff, captainQuery), [staff, captainQuery])
+  const selectedCaptain = useMemo(() => (Array.isArray(staff) ? staff : []).find(row => String(row.id) === String(selectedCaptainId)) || null, [staff, selectedCaptainId])
+  const captainDataset = useMemo(() => buildCaptainReport({ captain: selectedCaptain, staff, sales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo, sections: captainSections }), [selectedCaptain, staff, sales, expenses, cashboxTransactions, periodFrom, periodTo, captainSections])
 
   const periodDataset = useMemo(() => {
     if (reportType !== 'period') return EMPTY_PERIOD_DATASET
@@ -394,7 +402,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <b>تقرير المصاريف</b>
             <small>المصاريف ضمن الفترة المختارة</small>
           </button>
-          <button className="report-card-btn" onClick={() => setReportType('captain')}>
+          <button className="report-card-btn" onClick={() => { setReportType('captain'); setCaptainStage('selection'); setCaptainQuery(''); setSelectedCaptainId(''); setCaptainSections(['sales', 'expenses', 'withdrawals', 'salary']) }}>
             <Icon name="user" size={40} />
             <b>تقرير مبيعات الكابتن</b>
             <small>مبيعات الكباتن ضمن الفترة المختارة</small>
@@ -442,6 +450,33 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       <section className="employee-report-controls non-printable" aria-label="فلترة تقرير الموظفين"><label>ابحث باسم الموظف أو الكود<input value={employeeQuery} onChange={event => setEmployeeQuery(event.target.value)} placeholder="ابحث باسم الموظف أو الكود" /></label><label>اختيار الموظف<select value={selectedEmployeeId} onChange={event => setSelectedEmployeeId(event.target.value)}><option value="">كل الموظفين / تصفية نهاية الشهر</option>{visibleEmployeeSummaries.map(row => <option key={row.employee.id} value={row.employee.id}>{row.employee.name}{row.employee.code ? ` · ${row.employee.code}` : ''}</option>)}</select></label><div className="reports-shortcuts"><button type="button" onClick={() => { setPeriodFrom(`${defaultBusinessDate.slice(0, 7)}-01`); setPeriodTo(defaultBusinessDate) }}>هذا الشهر</button><button type="button" onClick={() => { const previous = shiftDate(`${defaultBusinessDate.slice(0, 7)}-01`, -1); setPeriodFrom(`${previous.slice(0, 7)}-01`); setPeriodTo(previous) }}>الشهر السابق</button><button type="button" onClick={() => { setPeriodFrom(shiftDate(defaultBusinessDate, -29)); setPeriodTo(defaultBusinessDate) }}>آخر 30 يوم</button></div><div className="employee-report-date-range"><label>من تاريخ<input type="date" value={periodFrom} onChange={event => setPeriodFrom(event.target.value)} /></label><label>إلى تاريخ<input type="date" value={periodTo} onChange={event => setPeriodTo(event.target.value)} /></label></div></section>
        <div className="report-paper"><div className="report-paper-header"><img src={logoUrl} alt="" className="report-logo" /><h2>{summary ? `تقرير موظف: ${summary.employee.name}` : 'تصفية نهاية الشهر - الموظفين'}</h2>{summary && <p>الكود: {summary.employee.code || '—'}</p>}<p>من {periodFrom} إلى {periodTo}</p><p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || 'الإدارة'}</p></div>{printContent}</div>
     </div>
+  }
+
+  const captainSectionLabels = { sales: 'المبيعات', expenses: 'المصاريف', withdrawals: 'السحوبات', salary: 'الرواتب' }
+  const allCaptainSections = Object.keys(captainSectionLabels)
+  const setCaptainDateRange = preset => {
+    if (preset === 'today') { setPeriodFrom(defaultBusinessDate); setPeriodTo(defaultBusinessDate) }
+    if (preset === 'month') { setPeriodFrom(`${defaultBusinessDate.slice(0, 7)}-01`); setPeriodTo(defaultBusinessDate) }
+    if (preset === 'previous') { const previous = shiftDate(`${defaultBusinessDate.slice(0, 7)}-01`, -1); setPeriodFrom(`${previous.slice(0, 7)}-01`); setPeriodTo(previous) }
+  }
+  const renderCaptainSelection = () => (
+    <div className="report-view-container captain-report-view" dir="rtl">
+      <div className="report-view-header"><button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button><h2>تقرير الكابتن</h2></div>
+      <section className="captain-report-selection" aria-label="اختيار تقرير الكابتن">
+        <label>ابحث باسم الكابتن أو الكود<input placeholder="ابحث باسم الكابتن أو الكود" value={captainQuery} onChange={event => setCaptainQuery(event.target.value)} /></label>
+        <label>اختيار الكابتن<select aria-label="اختيار الكابتن" value={selectedCaptainId} onChange={event => setSelectedCaptainId(event.target.value)}><option value="">اختر الكابتن</option>{captainCandidates.map(person => <option key={person.id} value={person.id}>{person.name}{person.code ? ` · ${person.code}` : ''}</option>)}</select></label>
+        <div className="captain-period-controls"><b>الفترة</b><div className="reports-shortcuts"><button type="button" onClick={() => setCaptainDateRange('today')}>اليوم</button><button type="button" onClick={() => setCaptainDateRange('month')}>هذا الشهر</button><button type="button" onClick={() => setCaptainDateRange('previous')}>الشهر السابق</button></div><div className="employee-report-date-range"><label>من تاريخ<input type="date" value={periodFrom} onChange={event => setPeriodFrom(event.target.value)} /></label><label>إلى تاريخ<input type="date" value={periodTo} onChange={event => setPeriodTo(event.target.value)} /></label></div></div>
+        <fieldset className="captain-section-selector"><legend>شنو تريد تعرض؟</legend><label><input type="checkbox" checked={captainSections.length === allCaptainSections.length} onChange={() => setCaptainSections(captainSections.length === allCaptainSections.length ? [] : allCaptainSections)} /> الكل</label>{Object.entries(captainSectionLabels).map(([key, label]) => <label key={key}><input type="checkbox" checked={captainSections.includes(key)} onChange={() => setCaptainSections(current => current.includes(key) ? current.filter(value => value !== key) : [...current, key])} /> {label}</label>)}</fieldset>
+        <button className="primary-action" type="button" disabled={!selectedCaptainId || !isValidDateRange(periodFrom, periodTo)} onClick={() => setCaptainStage('report')}>عرض التقرير</button>
+      </section>
+    </div>
+  )
+
+  const renderCaptainReport = () => {
+    const detailRows = (rows, columns, empty) => <table className="print-table"><thead><tr>{columns.map(column => <th key={column.label}>{column.label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.id || `${row.businessDate}-${index}`}>{columns.map(column => <td key={column.label} className={column.number ? 'number-cell' : ''}>{column.value(row, index)}</td>)}</tr>)}{!rows.length && <tr><td colSpan={columns.length}>{empty}</td></tr>}<tr className="summary-row"><td colSpan={Math.max(1, columns.length - 1)}>الإجمالي</td><td className="number-cell">{format(rows.reduce((total, row) => total + Number(row.amount ?? row.total ?? row.subtotal ?? 0), 0))}</td></tr></tbody></table>
+    const summary = <><h3>ملخص</h3><table className="print-table report-summary"><tbody><tr><td>إجمالي المبيعات</td><td className="number-cell">{format(captainDataset.salesTotal)}</td></tr><tr><td>إجمالي المصاريف</td><td className="number-cell">{format(captainDataset.expensesTotal)}</td></tr><tr><td>إجمالي السحوبات</td><td className="number-cell">{format(captainDataset.withdrawalsTotal)}</td></tr><tr><td>إجمالي الرواتب</td><td className="number-cell">{format(captainDataset.salaryTotal)}</td></tr><tr><td>النقدي</td><td className="number-cell">{format(captainDataset.cashSales)}</td></tr><tr><td>الإلكتروني</td><td className="number-cell">{format(captainDataset.electronicSales)}</td></tr><tr className="summary-highlight"><td>الصافي</td><td className="number-cell">{format(captainDataset.netTotal)}</td></tr></tbody></table></>
+    const content = <>{captainSections.includes('sales') && <><h3>المبيعات</h3>{detailRows(captainDataset.sales, [{ label: 'رقم الطلب', value: row => row.orderNumber || row.id || '—' }, { label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الوقت', value: row => formatTime(row.createdAt || row.timestamp) }, { label: 'الدفع', value: row => row.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي' }, { label: 'المبلغ', value: row => format(row.total ?? row.subtotal), number: true }], 'لا توجد مبيعات')}{<p className="captain-sales-kpis">الطلبات: {formatNumber(captainDataset.sales.length)} · نقدي: {format(captainDataset.cashSales)} · إلكتروني: {format(captainDataset.electronicSales)}</p>}</>}{captainSections.includes('expenses') && <><h3>المصاريف</h3>{detailRows(captainDataset.expenses, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الفئة', value: row => row.category || '—' }, { label: 'الوصف', value: row => row.description || row.notes || '—' }, { label: 'المبلغ', value: row => format(row.amount), number: true }], 'لا توجد مصاريف مرتبطة')}</>}{captainSections.includes('withdrawals') && <><h3>السحوبات</h3>{detailRows(captainDataset.withdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => format(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }], 'لا توجد سحوبات مرتبطة')}</>}{captainSections.includes('salary') && <><h3>الرواتب</h3>{detailRows(captainDataset.salary, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => format(row.amount), number: true }, { label: 'الملاحظات', value: row => row.notes || row.description || '—' }, { label: 'businessDate', value: row => row.businessDate || businessDateOf(row) }], 'لا توجد رواتب مرتبطة')}</>}</>
+    return <div className="report-view-container captain-report-view" dir="rtl"><div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setCaptainStage('selection')}>تعديل الاختيار</button><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => printReport('thermal')}>طباعة حرارية 80mm</button><button className="outline-btn" type="button" onClick={() => printReport('a4')}>طباعة A4 / PDF</button></div></div><div className="report-paper"><div className="report-paper-header"><h2>تقرير الكابتن: {selectedCaptain?.name || '—'}</h2><p>الكود: {selectedCaptain?.code || '—'}</p><p>من {periodFrom} إلى {periodTo}</p></div>{captainSections.length === allCaptainSections.length && summary}{content}</div></div>
   }
 
   const renderPrintableReport = () => {
@@ -774,6 +809,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   }
 
   if (reportType === 'employees') return renderEmployeeReport()
+  if (reportType === 'captain') return captainStage === 'selection' ? renderCaptainSelection() : renderCaptainReport()
   return reportType ? renderPrintableReport() : renderReportCards()
 }
 

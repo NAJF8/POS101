@@ -1441,6 +1441,15 @@ input, textarea, select { cursor: text; }
 }
 
 .employee-report-view { width: 100%; }
+.captain-report-view { width: 100%; }
+.captain-report-selection { width: min(100%, 760px); display: grid; gap: 14px; margin: 0 auto 20px; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.captain-report-selection > label, .captain-period-controls > b { display: grid; gap: 6px; font-weight: 700; }
+.captain-report-selection input[type='text'], .captain-report-selection input:not([type]), .captain-report-selection select { min-height: 42px; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--text); }
+.captain-period-controls { display: grid; gap: 10px; }
+.captain-section-selector { display: flex; flex-wrap: wrap; gap: 10px 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.captain-section-selector legend { padding: 0 6px; font-weight: 800; }
+.captain-section-selector label { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.captain-sales-kpis { margin: 0 0 3mm; font-weight: 800; text-align: center; }
 .employee-report-controls { width: min(100%, 1180px); display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(220px, .8fr); gap: 12px; align-items: end; margin-bottom: 16px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .employee-report-controls > label, .employee-report-date-range label { display: grid; gap: 5px; font-weight: 700; }
 .employee-report-controls input, .employee-report-controls select { min-height: 42px; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--text); }

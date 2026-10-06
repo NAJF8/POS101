@@ -6,7 +6,7 @@ import { createExpenseRecoveryBackup, createMasterExpenseRecoveryHandler, parseM
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
-const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'أخرى']
+const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'راتب', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
 
 export function Expenses({ onNavigate, onBack, session, operationalDay = null, staff = [] }) {
@@ -36,6 +36,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('مشتريات')
   const [person, setPerson] = useState('علي')
+  const [personId, setPersonId] = useState('')
   const [description, setDescription] = useState('')
   const [notes, setNotes] = useState('')
   const [entryType, setEntryType] = useState('current')
@@ -94,7 +95,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     } finally { setCentralRefreshing(false) }
   }
 
-  const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(staff.find(row => row.active)?.name || 'علي'); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setPayFromCashbox(false) }
+  const resetForm = () => { const activePerson = staff.find(row => row.active) || null; setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(activePerson?.name || 'علي'); setPersonId(activePerson?.id || ''); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setPayFromCashbox(false) }
   const syncNow = async () => {
     if (syncing) return
     setSyncing(true)
@@ -206,7 +207,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     if (entryType === 'historical' && (!normalizeDateKey(historicalDate) || historicalDate > todayKey)) return alert('اختر تاريخًا سابقًا صحيحًا، ولا يمكن اختيار تاريخ مستقبلي.')
     if (editingId) {
       const current = expenses.find(row => row.id === editingId)
-      let edited = current ? { ...current, amount: numericAmount, category, person, notes: cleanNotes, description: cleanDescription } : null
+      let edited = current ? { ...current, amount: numericAmount, category, person, employeeId: personId || current.employeeId || '', notes: cleanNotes, description: cleanDescription } : null
       if (edited && entryType === 'historical') {
         if (historicalDate !== current?.businessDate && !window.confirm('سيتم نقل المصروف إلى تاريخ أعمال مختلف. هل تريد المتابعة؟')) return
         try {
@@ -250,6 +251,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     }
     const row = {
       id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
+      employeeId: personId || '',
       shift: session?.name || 'وردية غير محددة', shiftId: session?.shiftId || session?.cashierId || '', cashierId: session?.cashierId || session?.shiftId || '', person,
       notes: cleanNotes, description: cleanDescription, status: 'disabled',
       operationalDayId, businessDate,
@@ -268,7 +270,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       } else alert(error?.message || 'تعذر مزامنة المصروف.')
     }
   }
-  const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || expense.employeeNameSnapshot || 'علي'); setDescription(expense.description || expense.notes || ''); setNotes(expense.notes && expense.notes !== expense.description ? expense.notes : ''); setEntryType(expense.entryType === 'historical' ? 'historical' : 'current'); setHistoricalDate(expense.businessDate || ''); setPayFromCashbox(expense.paymentSource === 'cashbox'); setFormOpen(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const beginEdit = expense => { const matchedPerson = staff.find(row => String(row.id) === String(expense.employeeId || expense.staffId || expense.cashierId) || row.name === (expense.person || expense.employeeNameSnapshot || '')); setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(matchedPerson?.name || expense.person || expense.employeeNameSnapshot || 'علي'); setPersonId(matchedPerson?.id || expense.employeeId || expense.staffId || expense.cashierId || ''); setDescription(expense.description || expense.notes || ''); setNotes(expense.notes && expense.notes !== expense.description ? expense.notes : ''); setEntryType(expense.entryType === 'historical' ? 'historical' : 'current'); setHistoricalDate(expense.businessDate || ''); setPayFromCashbox(expense.paymentSource === 'cashbox'); setFormOpen(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const confirmDelete = async () => {
     if (!deleting) return
     try { await deleteCentralExpense(deleting); setDeleting(null) } catch (error) { alert(error?.message || 'تعذر مزامنة حذف المصروف.') }
@@ -313,7 +315,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         <label>المبلغ (د.ع)<input autoFocus inputMode="decimal" dir="ltr" type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label>
         <label>الوصف<input type="text" value={description} onChange={e => setDescription(e.target.value)} required placeholder="مثال: شراء حليب أو مواد تنظيف" /></label>
         <label>نوع المصروف<select value={category} onChange={e => setCategory(e.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select></label>
-        <label>الموظف / الكاشير<select value={person} onChange={e => setPerson(e.target.value)}>{(staff.length ? staff.filter(row => row.active !== false).map(row => row.name) : people).map(value => <option key={value}>{value}</option>)}</select></label>
+        <label>الموظف / الكاشير<select value={personId || person} onChange={e => { const value = e.target.value; const selected = staff.find(row => String(row.id) === value); setPersonId(selected?.id || ''); setPerson(selected?.name || value) }}>{(staff.length ? staff.filter(row => row.active !== false).map(row => <option key={row.id} value={row.id}>{row.name}{row.code ? ` · ${row.code}` : ''}</option>) : people.map(value => <option key={value} value={value}>{value}</option>))}</select></label>
         {entryType === 'current' ? <div className="expense-date-context"><span>تاريخ الأعمال</span><strong>{effectiveOperationalDay?.status === 'open' ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong><small>يرتبط المصروف باليوم التشغيلي المفتوح، حتى بعد منتصف الليل.</small></div> : <label>التاريخ السابق<input type="date" max={getLocalDateKey(Date.now())} value={historicalDate} onChange={e => setHistoricalDate(e.target.value)} required /></label>}
         <label className="expense-notes">ملاحظات (اختياري)<textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="أضف ملاحظة عند الحاجة" rows="3" /></label>
         {entryType === 'current' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}

@@ -943,7 +943,7 @@ export default function App() {
       {currentView === 'expense-entry' && session && (
         <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={setCurrentView} />
       )}
-      {currentView === 'reports-captain' && session && <Reports session={session} products={catalogProducts} categories={catalogCategories} onNavigate={setCurrentView} />}
+      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={setCurrentView} />}
 
       {adminReady && !session && currentView === 'dashboard' && (
         <section className="admin-central-readonly" dir="rtl" aria-label="مركز مبيعات الإدارة">
