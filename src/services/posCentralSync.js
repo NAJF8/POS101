@@ -22,7 +22,7 @@ import {
   update,
 } from 'firebase/database'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
-import { areExpenseDuplicates, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
+import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 
@@ -417,6 +417,12 @@ export const readLocalOperationalDay = readCachedOperationalDay
 export const readOpenOperationalDay = async () => {
   await requireOperationalDayRole()
   return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef()))))
+}
+
+export const findOperationalDayByBusinessDate = async businessDate => {
+  await requireOperationalDayRole()
+  const days = operationalDayValues(await get(operationalDaysRef()))
+  return { ...matchOperationalDayByBusinessDate(days, businessDate), days }
 }
 
 export const runFullRecoverySync = async () => {

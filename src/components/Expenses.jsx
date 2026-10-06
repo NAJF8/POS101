@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
-import { deleteCentralExpense, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { getLocalDateKey, normalizeDateKey } from '../services/expenseReporting.js'
+import { deleteCentralExpense, findOperationalDayByBusinessDate, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
 import { createExpenseRecoveryBackup, createMasterExpenseRecoveryHandler, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
 
 const format = formatMoney
@@ -35,8 +36,13 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('مشتريات')
   const [person, setPerson] = useState('علي')
+  const [description, setDescription] = useState('')
   const [notes, setNotes] = useState('')
+  const [entryType, setEntryType] = useState('current')
+  const [historicalDate, setHistoricalDate] = useState('')
   const [payFromCashbox, setPayFromCashbox] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [recovering, setRecovering] = useState(false)
@@ -81,7 +87,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     } finally { setCentralRefreshing(false) }
   }
 
-  const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(staff.find(row => row.active)?.name || 'علي'); setNotes(''); setPayFromCashbox(false) }
+  const resetForm = () => { setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(staff.find(row => row.active)?.name || 'علي'); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setPayFromCashbox(false) }
   const syncNow = async () => {
     if (syncing) return
     setSyncing(true)
@@ -186,10 +192,25 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !notes.trim()) return alert('يرجى إدخال مبلغ ووصف صحيحين')
+    const cleanDescription = description.trim()
+    const cleanNotes = notes.trim()
+    const todayKey = getLocalDateKey(Date.now())
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !cleanDescription) return alert('يرجى إدخال مبلغ ووصف صحيحين')
+    if (entryType === 'historical' && (!normalizeDateKey(historicalDate) || historicalDate > todayKey)) return alert('اختر تاريخًا سابقًا صحيحًا، ولا يمكن اختيار تاريخ مستقبلي.')
     if (editingId) {
       const current = expenses.find(row => row.id === editingId)
-      const edited = current ? { ...current, amount: numericAmount, category, person, notes: notes.trim(), description: notes.trim() } : null
+      let edited = current ? { ...current, amount: numericAmount, category, person, notes: cleanNotes, description: cleanDescription } : null
+      if (edited && entryType === 'historical') {
+        if (historicalDate !== current?.businessDate && !window.confirm('سيتم نقل المصروف إلى تاريخ أعمال مختلف. هل تريد المتابعة؟')) return
+        try {
+          const match = await findOperationalDayByBusinessDate(historicalDate)
+          edited = { ...edited, businessDate: historicalDate, operationalDayId: match.operationalDayId, entryType: 'historical', source: 'manual' }
+          if (match.ambiguous) console.warn('HISTORICAL_OPERATIONAL_DAY_AMBIGUOUS', { businessDate: historicalDate, matchCount: match.matches.length })
+        } catch (error) {
+          if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) return alert(error?.message || 'تعذر مطابقة اليوم التشغيلي التاريخي.')
+          edited = { ...edited, businessDate: historicalDate, operationalDayId: '', entryType: 'historical', source: 'manual' }
+        }
+      } else if (edited) edited = { ...edited, entryType: 'current', businessDate: current?.businessDate || effectiveOperationalDay?.businessDate || '' }
       try {
         await saveCentralExpense(edited, { existing: true })
         resetForm(); alert('تم تعديل المصروف بنجاح')
@@ -202,23 +223,37 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       }
       return
     }
-    if (effectiveOperationalDay?.status !== 'open' || !effectiveOperationalDay?.id || !effectiveOperationalDay?.businessDate) {
+    if (entryType === 'current' && (effectiveOperationalDay?.status !== 'open' || !effectiveOperationalDay?.id || !effectiveOperationalDay?.businessDate)) {
       alert('يجب بدء يوم تشغيلي قبل تسجيل مصروف جديد حتى يُحسب المصروف ضمن نفس فترة العمل.')
       return
     }
     const createdAt = Date.now()
+    let businessDate = effectiveOperationalDay?.businessDate || ''
+    let operationalDayId = effectiveOperationalDay?.id || ''
+    if (entryType === 'historical') {
+      try {
+        const match = await findOperationalDayByBusinessDate(historicalDate)
+        operationalDayId = match.operationalDayId
+        businessDate = historicalDate
+        if (match.ambiguous) console.warn('HISTORICAL_OPERATIONAL_DAY_AMBIGUOUS', { businessDate, matchCount: match.matches.length })
+      } catch (error) {
+        if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) return alert(error?.message || 'تعذر مطابقة اليوم التشغيلي التاريخي.')
+        operationalDayId = ''
+        businessDate = historicalDate
+      }
+    }
     const row = {
       id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
       shift: session?.name || 'وردية غير محددة', shiftId: session?.shiftId || session?.cashierId || '', cashierId: session?.cashierId || session?.shiftId || '', person,
-      notes: notes.trim(), description: notes.trim(), status: 'disabled',
-      operationalDayId: effectiveOperationalDay.id,
-      businessDate: effectiveOperationalDay.businessDate,
+      notes: cleanNotes, description: cleanDescription, status: 'disabled',
+      operationalDayId, businessDate,
+      entryType, source: 'manual',
       employeeId: staff.find(row => row.name === person)?.id || session?.cashierId || '',
       employeeNameSnapshot: person,
-      paymentSource: payFromCashbox ? 'cashbox' : 'other',
+      paymentSource: entryType === 'current' && payFromCashbox ? 'cashbox' : 'other',
     }
     try {
-      await (payFromCashbox ? saveCentralExpenseWithCashbox(row) : saveCentralExpense(row))
+      await (entryType === 'current' && payFromCashbox ? saveCentralExpenseWithCashbox(row) : saveCentralExpense(row))
       resetForm()
     } catch (error) {
       if (['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) {
@@ -228,7 +263,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       } else alert(error?.message || 'تعذر مزامنة المصروف.')
     }
   }
-  const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || expense.employeeNameSnapshot || 'علي'); setNotes(expense.notes || ''); setPayFromCashbox(expense.paymentSource === 'cashbox'); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const beginEdit = expense => { setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(expense.person || expense.employeeNameSnapshot || 'علي'); setDescription(expense.description || expense.notes || ''); setNotes(expense.notes && expense.notes !== expense.description ? expense.notes : ''); setEntryType(expense.entryType === 'historical' ? 'historical' : 'current'); setHistoricalDate(expense.businessDate || ''); setPayFromCashbox(expense.paymentSource === 'cashbox'); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const confirmDelete = async () => {
     if (!deleting) return
     try { await deleteCentralExpense(deleting); setDeleting(null) } catch (error) { alert(error?.message || 'تعذر مزامنة حذف المصروف.') }
@@ -242,37 +277,40 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     }, {})
     return { pending: expenses.filter(row => row.syncStatus === 'pending').length, grouped }
   }, [expenses])
+  const displayedExpenses = useMemo(() => expenses
+    .filter(row => (!dateFrom || row.businessDate >= dateFrom) && (!dateTo || row.businessDate <= dateTo))
+    .slice()
+    .sort((a, b) => String(b.businessDate || '').localeCompare(String(a.businessDate || '')) || Number(b.createdAt || b.date || 0) - Number(a.createdAt || a.date || 0)), [expenses, dateFrom, dateTo])
+  const setQuickFilter = days => { const today = getLocalDateKey(Date.now()); const from = days === 0 ? today : getLocalDateKey(Date.now() - days * 86400000); setDateFrom(from); setDateTo(today) }
   const goBack = onNavigate || onBack
 
   return (
     <div className="expenses-container" dir="rtl">
       <div className="expenses-header">
-        <h2>المصاريف</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div><h2>المصاريف</h2><p>سجّل مصروف اليوم أو أضف مصروفًا سابقًا مع الحفاظ على تاريخ الأعمال.</p></div>
+        <div className="expenses-header-actions">
           <button className="primary-action" type="button" onClick={runMasterRecovery} disabled={syncing || recovering || masterRecoveryBusy}>{masterRecoveryBusy ? 'جاري مزامنة واسترجاع المصاريف...' : 'مزامنة واسترجاع كل المصاريف'}</button>
-          <button className="primary-action" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
+          <button className="outline-btn" type="button" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
         </div>
       </div>
       {syncMessage && <div className="report-card" style={{ marginBottom: '1rem' }}><strong>{syncMessage}</strong></div>}
       {masterRecoveryStatus && <div className="report-card" style={{ marginBottom: '1rem' }} role="status"><strong>{masterRecoveryStatus}</strong></div>}
-      <div className="report-card" style={{ marginBottom: '1rem' }}>
-        <strong>اليوم التشغيلي للمصروف: {effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.businessDate ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong>
-        <div style={{ marginTop: '0.35rem' }}>
-          <small>{effectiveOperationalDay?.status === 'open' ? 'أي مصروف جديد يُربط بهذا اليوم حتى لو تجاوز الوقت منتصف الليل.' : 'ابدأ اليوم التشغيلي قبل تسجيل مصروف جديد.'}</small>
-        </div>
-      </div>
       <form onSubmit={submit} className="expense-form"><div className="expense-form-grid">
-        <label>المبلغ (د.ع)<input autoFocus type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required /></label>
+        <fieldset className="expense-mode-field"><legend>نوع التسجيل</legend><div className="expense-mode-toggle"><label><input type="radio" name="entryType" value="current" checked={entryType === 'current'} onChange={() => setEntryType('current')} /> مصروف اليوم الحالي</label><label><input type="radio" name="entryType" value="historical" checked={entryType === 'historical'} onChange={() => setEntryType('historical')} /> مصروف سابق</label></div></fieldset>
+        <label>المبلغ (د.ع)<input autoFocus inputMode="decimal" dir="ltr" type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label>
+        <label>الوصف<input type="text" value={description} onChange={e => setDescription(e.target.value)} required placeholder="مثال: شراء حليب أو مواد تنظيف" /></label>
         <label>نوع المصروف<select value={category} onChange={e => setCategory(e.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select></label>
-        <label className="expense-notes">صرفته على شنو؟ (الوصف)<input type="text" value={notes} onChange={e => setNotes(e.target.value)} required placeholder="مثال: شراء حليب أو مواد تنظيف..." /></label>
-        <label>الموظف<select value={person} onChange={e => setPerson(e.target.value)}>{(staff.length ? staff.filter(row => row.active !== false).map(row => row.name) : people).map(value => <option key={value}>{value}</option>)}</select></label>
-        <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label>
-      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
+        <label>الموظف / الكاشير<select value={person} onChange={e => setPerson(e.target.value)}>{(staff.length ? staff.filter(row => row.active !== false).map(row => row.name) : people).map(value => <option key={value}>{value}</option>)}</select></label>
+        {entryType === 'current' ? <div className="expense-date-context"><span>تاريخ الأعمال</span><strong>{effectiveOperationalDay?.status === 'open' ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong><small>يرتبط المصروف باليوم التشغيلي المفتوح، حتى بعد منتصف الليل.</small></div> : <label>التاريخ السابق<input type="date" max={getLocalDateKey(Date.now())} value={historicalDate} onChange={e => setHistoricalDate(e.target.value)} required /></label>}
+        <label className="expense-notes">ملاحظات (اختياري)<textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="أضف ملاحظة عند الحاجة" rows="3" /></label>
+        {entryType === 'current' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}
+      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>
       <section className="report-card expense-diagnostic" aria-label="كل المصاريف"><h3>كل المصاريف</h3><p>المصدر المركزي للتقارير هو Firebase RTDB؛ المحلي وPending يُدمجان محافظًا ولا يستبدلان المركزي.</p><div className="recovery-stats"><span>Firebase: <b>{centralCount === null ? 'غير متاح' : centralCount}</b> سجل</span><span>Local: <b>{localCount}</b></span><span>Pending: <b>{allExpenseDiagnostic.pending}</b></span><span>Merged: <b>{expenses.length}</b></span><span>الإجمالي: <b>{format(total)}</b></span></div><div className="diagnostic-groups">{Object.entries(allExpenseDiagnostic.grouped).sort(([a], [b]) => b.localeCompare(a)).map(([date, amount]) => <span key={date}>{date}: <b>{format(amount)}</b></span>)}</div>{centralCount !== null && !centralExpenses.some(expense => expense.businessDate === '2026-09-27') && <small>لا يوجد سجل مركزي بتاريخ 2026-09-27؛ السجل موجود محليًا على جهاز آخر أو غير موجود في Firebase.</small>}</section>
-      <div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوردية</th><th>الموظف</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>
-        {expenses.length === 0 ? <tr><td colSpan="7" className="empty-cell">لا توجد مصاريف مسجلة</td></tr> : expenses.slice().reverse().map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td>{expense.category}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.shift || '—'}</td><td>{expense.person || '—'}</td><td>{expense.notes || '—'}</td><td className="expense-actions"><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'Firebase مباشر'}</span><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
+      <section className="expense-list-card"><div className="expense-list-heading"><div><h3>قائمة المصاريف</h3><p>الأحدث أولًا — الفلتر يؤثر على العرض فقط.</p></div><div className="expense-date-filters"><label>من تاريخ<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} /></label><label>إلى تاريخ<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} /></label><div className="quick-filters"><button type="button" onClick={() => setQuickFilter(0)}>اليوم</button><button type="button" onClick={() => setQuickFilter(1)}>أمس</button><button type="button" onClick={() => setQuickFilter(7)}>آخر 7 أيام</button><button type="button" onClick={() => { setDateFrom(''); setDateTo('') }}>الكل</button></div></div></div><div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>الوصف</th><th>المبلغ</th><th>الموظف</th><th>الحالة / المصدر</th><th>إجراءات</th></tr></thead><tbody>
+        {displayedExpenses.length === 0 ? <tr><td colSpan="6" className="empty-cell">لا توجد مصاريف ضمن الفترة المختارة</td></tr> : displayedExpenses.map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td><strong>{expense.description || expense.notes || '—'}</strong>{expense.notes && expense.notes !== expense.description && <small className="expense-row-note">{expense.notes}</small>}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.person || expense.employeeNameSnapshot || '—'}</td><td><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'محفوظ مركزيًا'}</span><small className="expense-entry-type">{expense.entryType === 'historical' ? 'مصروف سابق' : 'مصروف حالي'}</small></td><td className="expense-actions"><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" onClick={() => setDeleting(expense)}>حذف</button></td></tr>)}
       </tbody></table></div>
+      </section>
       {deleting && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog expense-delete-dialog"><h2>تأكيد حذف المصروف</h2><p>سيتم حذف هذا السجل فقط:</p><dl><div><dt>المبلغ</dt><dd>{format(deleting.amount)}</dd></div><div><dt>النوع</dt><dd>{deleting.category}</dd></div><div><dt>الوصف</dt><dd>{deleting.notes || '—'}</dd></div><div><dt>التاريخ</dt><dd>{formatDateTime(deleting.date)}</dd></div></dl><div className="dialog-actions"><button className="secondary-action" onClick={() => setDeleting(null)}>إلغاء</button><button className="delete-expense" onClick={confirmDelete}>تأكيد الحذف</button></div></div></div>}
       {masterRecoveryResult && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog master-recovery-dialog" dir="rtl"><h2>اكتملت مزامنة المصاريف</h2><p>{masterRecoveryResult.message}</p><dl><div><dt>Local قبل</dt><dd>{masterRecoveryResult.localBefore}</dd></div><div><dt>المرشحون</dt><dd>{masterRecoveryResult.candidatesFound}</dd></div><div><dt>Unique</dt><dd>{masterRecoveryResult.uniqueCandidates}</dd></div><div><dt>Duplicates</dt><dd>{masterRecoveryResult.duplicateCandidates}</dd></div><div><dt>Invalid</dt><dd>{masterRecoveryResult.invalidCandidates}</dd></div><div><dt>Firebase قبل</dt><dd>{masterRecoveryResult.firebaseBefore}</dd></div><div><dt>المرفوع بعد read-back</dt><dd>{masterRecoveryResult.uploaded}</dd></div><div><dt>Pending محفوظ</dt><dd>{masterRecoveryResult.pendingRetained}</dd></div><div><dt>Firebase بعد</dt><dd>{masterRecoveryResult.firebaseAfter}</dd></div><div><dt>الدمج النهائي</dt><dd>{masterRecoveryResult.finalMergedCount}</dd></div><div><dt>الإجمالي</dt><dd>{format(masterRecoveryResult.totalAmount)}</dd></div><div><dt>أيام businessDate</dt><dd>{masterRecoveryResult.businessDateCount}</dd></div></dl><section className="recovery-diagnostics"><h3>السجلات المحلية حسب التاريخ</h3>{Object.entries(masterRecoveryResult.dateDiagnostics || {}).map(([date, row]) => <div key={`local-${date}`}>{date}: {row.local}</div>)}<h3>Firebase حسب التاريخ</h3>{Object.entries(masterRecoveryResult.dateDiagnostics || {}).map(([date, row]) => <div key={`firebase-${date}`}>{date}: قبل {row.firebaseBefore} · رفع {row.uploaded} · بعد {row.firebaseAfter}</div>)}<h3>تحقق التقرير 2026-09-27</h3><div>Local 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.local || 0} · Firebase before 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.firebaseBefore || 0} · Uploaded 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.uploaded || 0} · Firebase after 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.firebaseAfter || 0} · التقرير: {masterRecoveryResult.reportVerification?.pass ? 'PASS' : 'FAIL'}</div><h3>تشخيص المرشحين</h3>{(masterRecoveryResult.candidateDiagnostics || []).map(row => <div key={`${row.id}-${row.recoverySource}`}><strong>{row.id}</strong> · {row.businessDate || 'بدون تاريخ'} · {format(row.amount)} · {row.source || row.recoverySource} · {row.candidateStatus} / {row.decision}: {row.reason}</div>)}</section><div className="dialog-actions"><button className="primary-action" type="button" onClick={() => setMasterRecoveryResult(null)}>إغلاق</button></div></div></div>}
     </div>

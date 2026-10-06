@@ -1503,15 +1503,28 @@ input, textarea, select { cursor: text; }
   gap: 1rem;
 }
 
-/* Expenses: one-page management surface */
-.expenses-container { width: min(1100px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 48px; overflow: auto; }
-.expenses-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; }
-.expenses-header h2 { color: var(--coffee); font-size: 26px; }
-.expense-form { display: grid; gap: 18px; padding: 22px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-color); }
-.expense-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+/* Expenses: focused, readable RTL management surface */
+.expenses-container { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 48px; overflow: auto; color: var(--coffee); }
+.expenses-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 22px; }
+.expenses-header h2 { margin: 0 0 6px; color: var(--coffee); font-size: clamp(28px, 4vw, 38px); }
+.expenses-header p { margin: 0; color: var(--muted); }
+.expenses-header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.expense-form { display: grid; gap: 20px; padding: clamp(18px, 3vw, 28px); margin-bottom: 18px; border: 1px solid #e8e3d9; border-radius: 18px; background: #fff; box-shadow: 0 12px 35px rgba(45, 54, 43, .06); }
+.expense-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .expense-form label { display: grid; gap: 7px; min-width: 0; color: var(--coffee); font-weight: 700; }
-.expense-form input, .expense-form select { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--coffee); }
+.expense-form input, .expense-form select, .expense-form textarea { width: 100%; min-height: 46px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; color: var(--coffee); font: inherit; }
+.expense-form textarea { min-height: 84px; resize: vertical; }
+.expense-form input:focus, .expense-form select:focus, .expense-form textarea:focus { outline: 3px solid rgba(64, 83, 59, .16); border-color: var(--green); }
 .expense-notes { grid-column: span 2; }
+.expense-mode-field { grid-column: span 2; margin: 0; padding: 0; border: 0; }
+.expense-mode-field legend { margin-bottom: 8px; font-weight: 700; }
+.expense-mode-toggle { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.expense-mode-toggle label { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fbfaf8; cursor: pointer; }
+.expense-mode-toggle input, .expense-cashbox-toggle input { width: auto; min-height: auto; accent-color: var(--green); }
+.expense-date-context, .expense-safe-note { display: grid; gap: 4px; min-height: 46px; padding: 10px 12px; border-radius: 10px; background: #f4f7f1; color: var(--green); }
+.expense-date-context small { color: var(--muted); font-weight: 400; }
+.expense-safe-note { align-content: center; color: #80601b; background: #fff8e7; }
+.expense-cashbox-toggle { display: flex !important; align-items: center; gap: 8px; min-height: 46px; }
 .expense-form-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .expense-total { padding: 16px 20px; margin-bottom: 18px; background: var(--surface-color); }
 .expense-total h3 { color: var(--green); font-size: 20px; }
@@ -1532,12 +1545,22 @@ input, textarea, select { cursor: text; }
 .manual-preview { display: grid; gap: 6px; padding: 12px; background: #f7faf5; border-radius: 8px; }
 .valid-row { color: var(--green); }
 .invalid-row { color: #a33; }
+.expense-list-card { margin-bottom: 18px; padding: clamp(16px, 2.5vw, 24px); border: 1px solid #e8e3d9; border-radius: 18px; background: #fff; box-shadow: 0 12px 35px rgba(45, 54, 43, .05); }
+.expense-list-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.expense-list-heading h3 { margin: 0 0 4px; }
+.expense-list-heading p { margin: 0; color: var(--muted); }
+.expense-date-filters { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.expense-date-filters label { display: grid; gap: 5px; font-size: 13px; font-weight: 700; }
+.expense-date-filters input { min-height: 38px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; font: inherit; }
+.quick-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.quick-filters button { min-height: 38px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fbfaf8; color: var(--coffee); cursor: pointer; font: inherit; }
 .expenses-table-wrap { overflow-x: auto; background: #fff; border-radius: 10px; }
 .expenses-table { width: 100%; min-width: 850px; border-collapse: collapse; color: #111; }
 .expenses-table th, .expenses-table td { padding: 11px 10px; border: 1px solid #c8c8c8; text-align: right; vertical-align: top; }
 .expenses-table th { background: #eef3eb; font-weight: 800; }
 .expense-amount { color: #000; font-weight: 800; white-space: nowrap; }
 .expense-actions { display: flex; gap: 7px; white-space: nowrap; }
+.expense-row-note, .expense-entry-type { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 .sync-state { display: inline-block; padding: 5px 7px; border-radius: 6px; font-size: 12px; font-weight: 700; }
 .sync-state.synced { color: #175b27; background: #e1f2e3; }
 .sync-state.pending_sync { color: #7a4a00; background: #fff0c2; }
@@ -1557,7 +1580,9 @@ input, textarea, select { cursor: text; }
 @media (max-width: 700px) {
   .expenses-container { width: min(100% - 24px, 1100px); padding-top: 18px; }
   .expense-form-grid { grid-template-columns: 1fr; }
-  .expense-notes { grid-column: auto; }
+  .expense-notes, .expense-mode-field { grid-column: auto; }
+  .expense-mode-toggle { grid-template-columns: 1fr; }
+  .expense-list-heading { align-items: stretch; flex-direction: column; }
   .expenses-header { align-items: stretch; flex-direction: column; }
 }
 

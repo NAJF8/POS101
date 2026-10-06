@@ -146,3 +146,16 @@ export const filterExpensesByOperationalDay = (expenses = [], operationalDayId) 
   (Array.isArray(expenses) ? expenses : [])
     .map(expense => normalizeExpense(expense))
     .filter(expense => String(expense.operationalDayId || '') === String(operationalDayId || ''))
+
+// Historical entry must only inherit an operational day when the business
+// date identifies exactly one day. Empty and duplicate matches are deliberate
+// safe outcomes: neither may be attached to today's open day.
+export const matchOperationalDayByBusinessDate = (days = [], businessDate) => {
+  const selected = normalizeDateKey(businessDate)
+  const matches = (Array.isArray(days) ? days : []).filter(day => normalizeDateKey(day?.businessDate) === selected && day?.id)
+  return {
+    matches,
+    operationalDayId: matches.length === 1 ? String(matches[0].id) : '',
+    ambiguous: matches.length > 1,
+  }
+}
