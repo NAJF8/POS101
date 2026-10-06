@@ -149,6 +149,7 @@ html, body { height: 100%; overflow: hidden; }
 html.settings-route, body.settings-route { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 html.cashbox-route, body.cashbox-route { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 html.employees-route, body.employees-route, body.employees-route #root { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
+html.reports-route, body.reports-route, body.reports-route #root { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 body {
   background: var(--bg-dark);
   color: var(--coffee);
@@ -170,6 +171,7 @@ input, textarea, select { cursor: text; }
 .app-shell.settings-app-shell { height: auto; min-height: 100vh; overflow: visible; }
 .app-shell.cashbox-app-shell { height: auto; min-height: 100vh; overflow: visible; }
 .app-shell.employees-app-shell { height: auto; min-height: 100vh; overflow: visible; }
+.app-shell.reports-app-shell { height: auto; min-height: 100vh; overflow: visible; }
 
 /* ============================================================
    HEADER

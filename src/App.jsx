@@ -206,9 +206,12 @@ export default function App() {
     document.documentElement.classList.toggle('cashbox-route', cashboxRoute)
     const employeesRoute = currentView === 'employees'
     document.documentElement.classList.toggle('employees-route', employeesRoute)
+    const reportsRoute = currentView === 'reports' || currentView === 'reports-captain'
+    document.documentElement.classList.toggle('reports-route', reportsRoute)
     document.body.classList.toggle('settings-route', settingsRoute)
     document.body.classList.toggle('cashbox-route', cashboxRoute)
     document.body.classList.toggle('employees-route', employeesRoute)
+    document.body.classList.toggle('reports-route', reportsRoute)
     return () => {
       document.documentElement.classList.remove('settings-route')
       document.body.classList.remove('settings-route')
@@ -216,6 +219,8 @@ export default function App() {
       document.body.classList.remove('cashbox-route')
       document.documentElement.classList.remove('employees-route')
       document.body.classList.remove('employees-route')
+      document.documentElement.classList.remove('reports-route')
+      document.body.classList.remove('reports-route')
     }
   }, [currentView])
 
@@ -851,7 +856,7 @@ export default function App() {
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 
   return (
-    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''}`}>
+    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''}`}>
       {session && (
         <Header
           session={session}

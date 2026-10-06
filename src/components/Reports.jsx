@@ -253,10 +253,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     return { valid, sales: rangeSales, expenses: rangeExpenses, transactions: rangeTransactions, daily, employees: [...employeeMap.values()], summary: { grossSales, cashSales, electronicSales, expensesTotal, withdrawals, deposits, adjustments, orderCount: rangeSales.length, averageOrder: rangeSales.length ? grossSales / rangeSales.length : 0, netCash: cashSales - expensesTotal - withdrawals + deposits + adjustments, beforeBalance, endBalance } }
   }, [periodFrom, periodTo, sales, expenses, cashboxTransactions, expenseOperationalDayDates])
 
-  const openPeriodReport = () => {
-    if (!periodFrom || !periodTo || periodFrom > periodTo) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
+  const openPeriodReport = ({ print = false } = {}) => {
+    if (!isValidDateRange(periodFrom, periodTo)) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
     setPeriodError('')
-    setReportType('period')
+    setReportType('comprehensive')
+    if (print) window.requestAnimationFrame(() => window.requestAnimationFrame(() => printReport('a4')))
   }
 
   const printReport = (format) => {
@@ -315,7 +316,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <label>من تاريخ<input aria-label="من تاريخ" type="date" value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} /></label>
           <label>إلى تاريخ<input aria-label="إلى تاريخ" type="date" value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></label>
           <button className="primary-action" type="button" onClick={openPeriodReport}>عرض التقرير</button>
-          <button className="outline-btn" type="button" onClick={openPeriodReport}>طباعة تقرير الفترة</button>
+          <button className="outline-btn" type="button" onClick={() => openPeriodReport({ print: true })}>طباعة تقرير الفترة</button>
         </div>
         <div className="reports-shortcuts" aria-label="اختصارات الفترة">
           <button type="button" onClick={() => { const today = defaultBusinessDate; setPeriodFrom(today); setPeriodTo(today) }}>اليوم</button>
