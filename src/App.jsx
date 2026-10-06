@@ -843,7 +843,10 @@ export default function App() {
     try { await activateKioskWithCode(code) } catch (error) { setKioskActivationError(error?.message || 'تعذر تفعيل جهاز POS.') } finally { setKioskActivationBusy(false) }
   }, [])
 
-  const adminReady = isCentralAdminUser(adminAuthUser)
+  // The Google admin session is also the canonical staff-management session.
+  // Use the hydrated current user here: adminAuthUser was captured before the
+  // async authorization record loaded, so it could permanently miss admin-viewer.
+  const adminReady = isCentralAdminUser(adminAuthUser) || isCentralAdminUser(centralAuthUser)
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
   const requestView = useCallback(view => {
