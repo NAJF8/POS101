@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -845,7 +845,7 @@ export default function App() {
     return saved
   }, [])
 
-  const kioskAuthReady = Boolean(centralAuthUser && isCentralCashierUser(centralAuthUser))
+  const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
   if (isCentralConfigured() && !centralAuthReady) return null
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 

@@ -283,10 +283,11 @@ const hydrateKioskClaims = async user => {
     return null
   }
 }
-const isKioskUser = user => {
+export const isKioskAuthenticatedUser = user => {
   const claims = user?.uid ? tokenClaimsCache.get(user.uid) : null
   return Boolean(claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId)
 }
+const isKioskUser = isKioskAuthenticatedUser
 const requireKioskUser = async user => {
   const claims = await hydrateKioskClaims(user)
   if (!user?.uid || claims?.pos101_kiosk !== true || claims?.scope !== 'cashier' || !claims?.kioskId) throw Object.assign(new Error('تفعيل جهاز POS موثوق مطلوب.'), { code: 'KIOSK_AUTH_REQUIRED' })
