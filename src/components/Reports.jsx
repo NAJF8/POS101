@@ -10,6 +10,7 @@ import { calculateCashboxBalance } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
+import { buildEmployeeReport, filterEmployeeSummaries } from '../services/employeeReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -138,8 +139,10 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [], products = [], categories = [] }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [], staff = [], products = [], categories = [] }) {
   const [reportType, setReportType] = useState(null)
+  const [employeeQuery, setEmployeeQuery] = useState('')
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
   const defaultBusinessDate = operationalDay?.businessDate || getDefaultReportDate()
   const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
   const [periodTo, setPeriodTo] = useState(() => defaultBusinessDate)
@@ -218,6 +221,10 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     periodTo,
   ), [expenses, periodFrom, periodTo, expenseOperationalDayDates])
 
+  const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, sales, expenses, cashboxTransactions, periodFrom, periodTo])
+  const visibleEmployeeSummaries = useMemo(() => filterEmployeeSummaries(employeeDataset.summaries, employeeQuery), [employeeDataset.summaries, employeeQuery])
+  const selectedEmployee = useMemo(() => employeeDataset.summaries.find(row => String(row.employee?.id) === String(selectedEmployeeId)) || null, [employeeDataset.summaries, selectedEmployeeId])
+
   const periodDataset = useMemo(() => {
     if (reportType !== 'period') return EMPTY_PERIOD_DATASET
     const valid = isValidDateRange(periodFrom, periodTo)
@@ -257,6 +264,15 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     if (!isValidDateRange(periodFrom, periodTo)) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
     setPeriodError('')
     setReportType('period')
+  }
+
+  const openEmployeeReport = () => {
+    const monthStart = `${defaultBusinessDate.slice(0, 7)}-01`
+    setPeriodFrom(monthStart)
+    setPeriodTo(defaultBusinessDate)
+    setEmployeeQuery('')
+    setSelectedEmployeeId('')
+    setReportType('employees')
   }
 
   const printReport = (format) => {
@@ -363,10 +379,40 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <b>تقرير مبيعات الكابتن</b>
             <small>مبيعات الكباتن ضمن الفترة المختارة</small>
           </button>
+          <button className="report-card-btn" onClick={openEmployeeReport} data-testid="employee-report-card">
+            <Icon name="user" size={40} />
+            <b>تقرير الموظفين</b>
+            <small>المبيعات والمصاريف والسحوبات والصافي</small>
+          </button>
         </div>
       </div>
     </div>
   )
+
+  const renderEmployeeReport = () => {
+    const summary = selectedEmployee
+    const money = value => format(value)
+    const employeeTable = (rows = visibleEmployeeSummaries) => <table className="print-table employee-report-table" data-testid="employee-summary-table">
+      <thead><tr><th>الموظف</th><th>الكود</th><th>عدد الطلبات</th><th>المبيعات</th><th>المصاريف</th><th>السحوبات</th><th>الصافي</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row.employee.id} onClick={() => setSelectedEmployeeId(String(row.employee.id))} className="employee-report-row" tabIndex="0" onKeyDown={event => { if (event.key === 'Enter') setSelectedEmployeeId(String(row.employee.id)) }}>
+        <td>{row.employee.name}</td><td>{row.employee.code || '—'}</td><td className="number-cell">{formatNumber(row.ordersCount)}</td><td className="number-cell">{money(row.salesTotal)}</td><td className="number-cell">{money(row.expensesTotal)}</td><td className="number-cell">{money(row.withdrawalsTotal)}</td><td className="number-cell">{money(row.netTotal)}</td>
+      </tr>)}{!rows.length && <tr><td colSpan="7">لا توجد بيانات موظفين ضمن الفترة المحددة</td></tr>}
+      <tr className="summary-highlight"><td colSpan="2">الإجمالي</td><td className="number-cell">{formatNumber(employeeDataset.total.ordersCount)}</td><td className="number-cell">{money(employeeDataset.total.salesTotal)}</td><td className="number-cell">{money(employeeDataset.total.expensesTotal)}</td><td className="number-cell">{money(employeeDataset.total.withdrawalsTotal)}</td><td className="number-cell">{money(employeeDataset.total.netTotal)}</td></tr></tbody>
+    </table>
+    const detailRows = (rows, columns, empty) => <table className="print-table"><thead><tr>{columns.map(column => <th key={column.label}>{column.label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.id || `${row.businessDate}-${index}`}>{columns.map(column => <td key={column.label} className={column.number ? 'number-cell' : ''}>{column.value(row, index)}</td>)}</tr>)}{!rows.length && <tr><td colSpan={columns.length}>{empty}</td></tr>}<tr className="summary-row"><td colSpan={Math.max(1, columns.length - 1)}>الإجمالي</td><td className="number-cell">{money(rows.reduce((total, row) => total + Number(row.amount ?? row.total ?? row.subtotal ?? 0), 0))}</td></tr></tbody></table>
+    const printContent = summary ? <>
+      <h3>ملخص الموظف: {summary.employee.name}</h3>
+      <table className="print-table report-summary"><tbody><tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(summary.ordersCount)}</td></tr><tr><td>المبيعات</td><td className="number-cell">{money(summary.salesTotal)}</td></tr><tr><td>النقدي</td><td className="number-cell">{money(summary.cashSales)}</td></tr><tr><td>الإلكتروني</td><td className="number-cell">{money(summary.electronicSales)}</td></tr><tr><td>المصاريف</td><td className="number-cell">{money(summary.expensesTotal)}</td></tr><tr><td>السحوبات</td><td className="number-cell">{money(summary.withdrawalsTotal)}</td></tr><tr className="summary-highlight"><td>الصافي</td><td className="number-cell">{money(summary.netTotal)}</td></tr></tbody></table>
+      <h3>المبيعات</h3>{detailRows(summary.sales, [{ label: 'رقم الطلب', value: row => row.orderNumber || row.saleId || row.id || '—' }, { label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الوقت', value: row => formatTime(row.createdAt || row.timestamp) }, { label: 'الدفع', value: row => row.paymentMethod || row.payment?.method || '—' }, { label: 'الإجمالي', value: row => money(row.total ?? row.subtotal), number: true }], 'لا توجد مبيعات')}
+      <h3>المصاريف</h3>{detailRows(summary.expenses, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الفئة', value: row => row.category || '—' }, { label: 'الوصف', value: row => row.description || row.notes || '—' }, { label: 'المبلغ', value: row => money(row.amount), number: true }], 'لا توجد مصاريف')}
+      <h3>السحوبات</h3>{detailRows(summary.withdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }, { label: 'الموظف', value: row => row.employeeNameSnapshot || row.cashierNameSnapshot || row.person || summary.employee.name }], 'لا توجد سحوبات')}
+    </> : employeeTable()
+    return <div className="report-view-container employee-report-view" dir="rtl">
+      <div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button></div></div>
+      <section className="employee-report-controls non-printable" aria-label="فلترة تقرير الموظفين"><label>ابحث باسم الموظف أو الكود<input value={employeeQuery} onChange={event => setEmployeeQuery(event.target.value)} placeholder="ابحث باسم الموظف أو الكود" /></label><label>اختيار الموظف<select value={selectedEmployeeId} onChange={event => setSelectedEmployeeId(event.target.value)}><option value="">كل الموظفين / تصفية نهاية الشهر</option>{visibleEmployeeSummaries.map(row => <option key={row.employee.id} value={row.employee.id}>{row.employee.name}{row.employee.code ? ` · ${row.employee.code}` : ''}</option>)}</select></label><div className="reports-shortcuts"><button type="button" onClick={() => { setPeriodFrom(`${defaultBusinessDate.slice(0, 7)}-01`); setPeriodTo(defaultBusinessDate) }}>هذا الشهر</button><button type="button" onClick={() => { const previous = shiftDate(`${defaultBusinessDate.slice(0, 7)}-01`, -1); setPeriodFrom(`${previous.slice(0, 7)}-01`); setPeriodTo(previous) }}>الشهر السابق</button><button type="button" onClick={() => { setPeriodFrom(shiftDate(defaultBusinessDate, -29)); setPeriodTo(defaultBusinessDate) }}>آخر 30 يوم</button></div><div className="employee-report-date-range"><label>من تاريخ<input type="date" value={periodFrom} onChange={event => setPeriodFrom(event.target.value)} /></label><label>إلى تاريخ<input type="date" value={periodTo} onChange={event => setPeriodTo(event.target.value)} /></label></div></section>
+      <div className="report-paper"><div className="report-paper-header"><img src={logoUrl} alt="101 COFFEE HOUSE" className="report-logo" /><h2>{summary ? `تقرير موظف: ${summary.employee.name}` : 'تصفية نهاية الشهر - الموظفين'}</h2><p>من {periodFrom} إلى {periodTo}</p><p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || 'الإدارة'}</p></div>{printContent}<div className="report-paper-footer"><p>101 COFFEE HOUSE ❤</p><p dir="ltr">GOOD COFFEE \ GOOD PEOPLE \ BETTER DAYS</p></div></div>
+    </div>
+  }
 
   const renderPrintableReport = () => {
     let title = ''
@@ -700,6 +746,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     )
   }
 
+  if (reportType === 'employees') return renderEmployeeReport()
   return reportType ? renderPrintableReport() : renderReportCards()
 }
 
