@@ -12,6 +12,7 @@ import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../s
 import { buildMaterialsReport } from '../services/materialsReport.js'
 import { buildEmployeeReport, filterEmployeeSummaries } from '../services/employeeReport.js'
 import { buildCaptainReport, filterCaptainCandidates } from '../services/captainReport.js'
+import { filterCashOutflowReport, normalizeCashOutflowReport, sumCashOutflowReport } from '../services/cashOutflowReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -176,6 +177,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const [periodFrom, setPeriodFrom] = useState(() => defaultBusinessDate)
   const [periodTo, setPeriodTo] = useState(() => defaultBusinessDate)
   const [periodError, setPeriodError] = useState('')
+  const [expenseTypeFilter, setExpenseTypeFilter] = useState('all')
 
   // Reports always open on the active business date and use one shared range.
   useEffect(() => {
@@ -249,6 +251,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     periodFrom,
     periodTo,
   ), [expenses, periodFrom, periodTo, expenseOperationalDayDates])
+  const normalizedCashOutflows = useMemo(() => normalizeCashOutflowReport({ expenses, transactions: cashboxTransactions, staff, operationalDayDates: expenseOperationalDayDates }), [expenses, cashboxTransactions, staff, expenseOperationalDayDates])
+  const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
 
   const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, sales, expenses, cashboxTransactions, periodFrom, periodTo])
   const visibleEmployeeSummaries = useMemo(() => filterEmployeeSummaries(employeeDataset.summaries, employeeQuery), [employeeDataset.summaries, employeeQuery])
@@ -356,7 +360,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
       : undefined
-    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: filteredExpenses, ...(reportType === 'materials' ? { products, categories, materials: buildMaterialsReport({ sales: filteredSales, products, categories }) } : {}), ...(summary ? { summary } : {}) })
+    onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: reportType === 'expenses' ? filteredCashOutflows : filteredExpenses, cashOutflows: filteredCashOutflows, ...(reportType === 'materials' ? { products, categories, materials: buildMaterialsReport({ sales: filteredSales, products, categories }) } : {}), ...(summary ? { summary } : {}) })
   }
 
   const renderReportCards = () => (
@@ -728,23 +732,26 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     } else if (reportType === 'expenses') {
       title = 'تقرير المصاريف'
       content = (
-        <table className="print-table">
-          <thead><tr><th>#</th><th>نوع المصروف</th><th>المبلغ</th></tr></thead>
+        <>
+        <div className="reports-range-toolbar non-printable" aria-label="فلتر نوع حركة المصاريف">
+          <label>نوع الحركة<select aria-label="نوع الحركة" value={expenseTypeFilter} onChange={event => setExpenseTypeFilter(event.target.value)}><option value="all">الكل</option><option value="expenses">مصاريف</option><option value="salary">رواتب</option><option value="withdrawals">سحوبات</option><option value="other">أخرى</option></select></label>
+        </div>
+        <table className="print-table" data-testid="cash-outflow-report">
+          <thead><tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>الموظف</th><th>الكود</th><th>المبلغ</th><th>المصدر</th></tr></thead>
           <tbody>
-            {filteredExpenses.map((e, idx) => (
-              <tr key={e.id}>
-                <td>{formatNumber(idx + 1)}</td>
-                <td>{e.category} - {e.notes}</td>
-                <td>{format(e.amount)}</td>
+            {filteredCashOutflows.map((row, idx) => (
+              <tr key={`${row.source}:${row.id}`}>
+                <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || '—'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.source === 'cashbox_transaction' ? 'الصندوق' : 'المصاريف'}</td>
               </tr>
             ))}
-            {filteredExpenses.length === 0 && <tr><td colSpan="3">لا توجد مصاريف مسجلة</td></tr>}
+            {filteredCashOutflows.length === 0 && <tr><td colSpan="7">لا توجد مصاريف أو سحوبات نقدية مسجلة</td></tr>}
             <tr style={{ fontWeight: 'bold' }}>
-              <td colSpan="2">إجمالي المصاريف</td>
-              <td>{format(sumExpenses(filteredExpenses))}</td>
+              <td colSpan="5">إجمالي التدفقات النقدية الخارجة</td>
+              <td>{format(sumCashOutflowReport(filteredCashOutflows))}</td><td>—</td>
             </tr>
           </tbody>
         </table>
+        </>
       )
     } else if (reportType === 'captain') {
       title = 'تقرير مبيعات الكابتن'
