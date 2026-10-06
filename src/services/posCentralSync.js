@@ -26,6 +26,7 @@ import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesC
 import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
+import { isSaleSyncEligible, markSaleSynced, readSaleQueue, retainQueuedSale } from './salesSyncQueue.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -220,9 +221,23 @@ export const mergeBySaleId = (localSales, centralSales) => {
 const readInitialSyncCompleted = () => localStorage.getItem(INITIAL_SYNC_COMPLETED_KEY) === 'true'
 const markInitialSyncCompleted = () => localStorage.setItem(INITIAL_SYNC_COMPLETED_KEY, 'true')
 const validSaleId = saleId => Boolean(saleId && !/[.#$\[\]/]/.test(saleId))
-export const isSaleEligibleForCentralUpload = sale => validSaleId(saleIdOf(sale))
+export const isSaleEligibleForCentralUpload = sale => validSaleId(saleIdOf(sale)) && isSaleSyncEligible(sale)
 
 const serializeSale = sale => ({ ...sale, saleId: saleIdOf(sale), id: saleIdOf(sale) })
+const saleReadbackMatches = (expected, actual) => {
+  const expectedId = saleIdOf(expected)
+  const actualId = saleIdOf(actual)
+  const expectedOperationKey = String(expected?.operationKey || expected?.operation_key || '')
+  const actualOperationKey = String(actual?.operationKey || actual?.operation_key || '')
+  return Boolean(actual
+    && expectedId
+    && actualId === expectedId
+    && (!expectedOperationKey || actualOperationKey === expectedOperationKey)
+    && String(actual?.orderNumber ?? actual?.order_number ?? '') === String(expected?.orderNumber ?? '')
+    && String(actual?.businessDate || '') === String(expected?.businessDate || '')
+    && String(actual?.operationalDayId || '') === String(expected?.operationalDayId || '')
+    && Number(actual?.total ?? actual?.subtotal) === Number(expected?.total ?? expected?.subtotal))
+}
 
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
@@ -520,16 +535,31 @@ export const runCashierCentralSync = async ({ initial = false } = {}) => {
   let updated = 0
   for (const sale of uploadable) {
     const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
+    const queueEntry = readSaleQueue().find(entry => {
+      const queued = entry.sale
+      return saleIdOf(queued) === saleIdOf(sale)
+        || String(queued?.operationKey || queued?.operation_key || '') === String(sale?.operationKey || sale?.operation_key || '')
+    })
     try {
       await set(saleRef, serializeSale(sale))
-      if (centralIds.has(saleIdOf(sale))) updated += 1
-      else uploaded += 1
     } catch (error) {
       // Another authorized device may have created the same sale concurrently.
-      // A successful read-back of the same saleId is an idempotent retry.
-      const readBack = await get(saleRef)
-      if (!readBack.exists() || saleIdOf(readBack.val()) !== saleIdOf(sale)) throw error
+      // Continue only when the complete sale identity and business fields read back.
+      const readBack = await get(saleRef).catch(() => null)
+      if (!readBack?.exists() || !saleReadbackMatches(sale, readBack.val())) {
+        if (queueEntry) retainQueuedSale(queueEntry, error)
+        throw Object.assign(error, { code: error?.code || 'SALE_READBACK_FAILED' })
+      }
     }
+    const readBack = await get(saleRef).catch(() => null)
+    if (!readBack?.exists() || !saleReadbackMatches(sale, readBack.val())) {
+      const error = Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
+      if (queueEntry) retainQueuedSale(queueEntry, error)
+      throw error
+    }
+    if (centralIds.has(saleIdOf(sale))) updated += 1
+    else uploaded += 1
+    markSaleSynced(sale)
   }
 
   const after = await get(salesRef())

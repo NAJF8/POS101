@@ -22,9 +22,47 @@ const sameSaleIdentity = (left, right) => {
   return Boolean((leftId && rightId && leftId === rightId)
     || (leftOperationKey && rightOperationKey && leftOperationKey === rightOperationKey))
 }
-const isSaleEntry = entry => Boolean(entry?.sale && saleIdOf(entry.sale))
+const cancelledStatuses = new Set(['cancelled', 'canceled', 'voided', 'abandoned'])
+const saleItems = sale => Array.isArray(sale?.items)
+  ? sale.items
+  : Array.isArray(sale?.order?.items) ? sale.order.items : []
 
-export const readSaleQueue = () => readJson(QUEUE_KEY, []).filter(entry => entry?.sale && saleIdOf(entry.sale))
+export const isSaleSyncEligible = sale => {
+  const id = String(saleIdOf(sale) || '').trim()
+  const status = String(sale?.status || '').trim().toLowerCase()
+  const total = Number(sale?.total ?? sale?.subtotal)
+  return Boolean(id
+    && !cancelledStatuses.has(status)
+    && saleItems(sale).length > 0
+    && Number.isFinite(total)
+    && total >= 0)
+}
+
+const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale))
+const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
+  const pending = pendingSale(sale, error)
+  const attempts = Number(existing?.attempts)
+  return {
+    kind: 'sale',
+    queueKey: String(saleIdOf(sale)),
+    sale: pending,
+    saleId: saleIdOf(sale),
+    operationKey: operationKeyOf(sale) || '',
+    orderNumber: sale?.orderNumber ?? '',
+    businessDate: sale?.businessDate || '',
+    operationalDayId: sale?.operationalDayId || '',
+    createdAt: sale?.createdAt || 0,
+    total: Number(sale?.total ?? sale?.subtotal ?? 0),
+    paymentType: sale?.paymentMethod || sale?.payment?.method || '',
+    status: 'pending',
+    queuedAt: existing?.queuedAt || queuedAt,
+    attempts: Number.isFinite(attempts) && attempts >= 0 ? attempts : 0,
+    lastAttemptAt: existing?.lastAttemptAt || null,
+    lastError: error ? String(error?.message || error) : (existing?.lastError || ''),
+  }
+}
+
+export const readSaleQueue = () => readJson(QUEUE_KEY, []).filter(isSaleEntry)
 
 export const readSalesCount = () => readJson(SALES_KEY, []).filter(sale => saleIdOf(sale)).length
 
@@ -34,7 +72,7 @@ export const readPendingSaleCount = () => {
   return readJson(SALES_KEY, []).reduce((count, sale) => {
     const saleId = saleIdOf(sale)
     const operationKey = operationKeyOf(sale)
-    if (!saleId || seenIds.has(saleId) || (operationKey && seenOperationKeys.has(operationKey)) || sale.status === 'synced' || sale.syncConfirmedAt) return count
+    if (!isSaleSyncEligible(sale) || seenIds.has(saleId) || (operationKey && seenOperationKeys.has(operationKey)) || sale.status === 'synced' || sale.syncConfirmedAt) return count
     seenIds.add(saleId)
     if (operationKey) seenOperationKeys.add(operationKey)
     return count + 1
@@ -60,6 +98,7 @@ export const reconcileSalesAgainstCentral = centralSales => {
   const queue = readJson(QUEUE_KEY, [])
   const reconciledIds = new Set()
   for (const sale of sales) {
+    if (!isSaleSyncEligible(sale)) continue
     const identity = centralIdentity(sale)
     if ((identity.saleId && central.has(`id:${identity.saleId}`)) || (identity.operationKey && central.has(`op:${identity.operationKey}`))) {
       reconciledIds.add(identity.saleId)
@@ -75,19 +114,43 @@ export const reconcileSalesAgainstCentral = centralSales => {
 
 export const pendingSale = (sale, error) => ({
   ...sale,
-  status: 'pending_sync',
+  syncStatus: 'pending',
   ...(error ? { syncError: String(error?.message || error) } : {}),
 })
 
-// The local ledger is authoritative for the POS. Queueing must never rewrite
-// it: a cashier may already have real historic sales in this browser.
+// The local ledger is authoritative for the POS. A completed sale is committed
+// to both the ledger and the durable queue before this function returns.
 export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
   const saleId = saleIdOf(sale)
   if (!saleId) throw new Error('Cannot queue a sale without saleId.')
   const sales = readJson(SALES_KEY, [])
-  if (!sales.some(row => sameSaleIdentity(row, sale))) writeJson(SALES_KEY, [...sales, sale])
+  if (!isSaleSyncEligible(sale)) {
+    if (!sales.some(row => sameSaleIdentity(row, sale))) writeJson(SALES_KEY, [...sales, sale])
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
+    return sale
+  }
+  const localSale = pendingSale(sale, error)
+  const nextSales = sales.some(row => sameSaleIdentity(row, sale))
+    ? sales.map(row => sameSaleIdentity(row, sale) ? { ...row, ...localSale } : row)
+    : [...sales, localSale]
+  const queue = readJson(QUEUE_KEY, [])
+  const existing = queue.find(entry => entry?.sale && sameSaleIdentity(entry.sale, sale))
+  const nextQueue = existing
+    ? queue.map(entry => entry === existing ? queueEntryForSale(localSale, { existing, error, queuedAt }) : entry)
+    : [...queue, queueEntryForSale(localSale, { error, queuedAt })]
+  writeJson(SALES_KEY, nextSales)
+  writeJson(QUEUE_KEY, nextQueue)
+  const persistedSales = readJson(SALES_KEY, [])
+  const persistedQueue = readSaleQueue()
+  const ledgerSaved = persistedSales.some(row => sameSaleIdentity(row, sale))
+  const queueSaved = persistedQueue.some(entry => sameSaleIdentity(entry.sale, sale))
+  if (!ledgerSaved || !queueSaved) {
+    const persisted = pendingSale(sale, 'local queue persistence failed')
+    writeJson(SALES_KEY, persistedSales.map(row => sameSaleIdentity(row, sale) ? { ...row, ...persisted } : row))
+    throw Object.assign(new Error('تعذر حفظ المبيعة في طابور المزامنة المحلي.'), { code: 'SALE_QUEUE_PERSISTENCE_FAILED' })
+  }
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
-  return sale
+  return persistedSales.find(row => sameSaleIdentity(row, sale)) || localSale
 }
 
 // Older builds wrote the authoritative sale ledger without adding a queue row.
@@ -99,9 +162,9 @@ export const reconcileSalesQueue = () => {
   const queue = readJson(QUEUE_KEY, [])
   let added = 0
   for (const sale of sales) {
-    if (!saleIdOf(sale) || sale.status === 'synced' || sale.syncConfirmedAt) continue
+    if (!isSaleSyncEligible(sale) || sale.status === 'synced' || sale.syncConfirmedAt) continue
     if (queue.some(entry => isSaleEntry(entry) && sameSaleIdentity(entry.sale, sale))) continue
-    queue.push({ kind: 'sale', sale: pendingSale(sale), queuedAt: Date.now() })
+    queue.push(queueEntryForSale(sale))
     added += 1
   }
   if (added) writeJson(QUEUE_KEY, queue)
@@ -117,16 +180,16 @@ export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
   const saleId = saleIdOf(sale)
   const sales = readJson(SALES_KEY, [])
   writeJson(SALES_KEY, sales.map(row => sameSale(row, saleId)
-    ? { ...row, status: 'synced', syncConfirmedAt }
+    ? { ...row, status: 'synced', syncStatus: 'synced', syncConfirmedAt }
     : row))
-  writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => !isSaleEntry(entry) || !sameSale(entry.sale, saleId)))
+  writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => !entry?.sale || !sameSaleIdentity(entry.sale, sale)))
 }
 
 export const retainQueuedSale = (entry, error) => {
   const sale = pendingSale(entry.sale, error)
   const saleId = saleIdOf(sale)
   const queue = readJson(QUEUE_KEY, []).map(row => isSaleEntry(row) && sameSale(row.sale, saleId)
-    ? { ...row, kind: 'sale', sale }
+    ? queueEntryForSale(sale, { existing: row, error, queuedAt: row.queuedAt })
     : row)
   writeJson(QUEUE_KEY, queue)
   const sales = readJson(SALES_KEY, [])
