@@ -22,13 +22,13 @@ import {
   update,
 } from 'firebase/database'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
-import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
+import { areExpenseDuplicates, expenseFingerprint, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrection, getEffectiveSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, readRawSaleQueue, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, readRawSaleQueue, readSaleQueue, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
@@ -557,13 +557,60 @@ export const readCentralSalesForOperationalDay = async day => {
   return getReportSalesForOperationalDay({ centralSales: rows, operationalDayId: day?.id || day?.operationalDayId, businessDate: day?.businessDate })
 }
 
+const readPreCloseFinancialReconciliation = async operationalDay => {
+  const dayId = String(operationalDay?.id || operationalDay?.operationalDayId || '').trim()
+  const businessDate = String(operationalDay?.businessDate || '').trim()
+  const [expensesSnapshot, transactionsSnapshot] = await Promise.all([
+    get(expensesRef()),
+    get(financialPath(cashboxTransactionsPath)),
+  ])
+  const centralExpenses = expenseValues(expensesSnapshot)
+  const localPendingExpenses = readCachedExpenses().filter(expense => {
+    if (expense.syncStatus !== 'pending') return false
+    return String(expense.operationalDayId || '') === dayId
+      || (!expense.operationalDayId && String(expense.businessDate || '') === businessDate)
+  })
+  const centralExpenseIds = new Set(centralExpenses.map(expenseIdOf))
+  const centralExpenseFingerprints = new Set(centralExpenses.map(expenseFingerprint))
+  const unresolvedExpenses = localPendingExpenses.filter(expense => {
+    const id = expenseIdOf(expense)
+    return !(id && centralExpenseIds.has(id)) && !centralExpenseFingerprints.has(expenseFingerprint(expense))
+  })
+  const centralTransactions = objectValues(transactionsSnapshot)
+    .filter(row => String(row?.operationalDayId || '') === dayId
+      || (!row?.operationalDayId && String(row?.businessDate || '') === businessDate))
+  // Cashbox transactions are written directly to Firebase and read back by
+  // saveCashboxTransaction. There is intentionally no local withdrawal queue;
+  // keeping this count explicit prevents a false "all synced" claim if that
+  // storage model changes later.
+  const pendingWithdrawals = 0
+  return {
+    allowed: unresolvedExpenses.length === 0 && pendingWithdrawals === 0,
+    pendingExpenses: unresolvedExpenses,
+    pendingExpenseCount: unresolvedExpenses.length,
+    pendingWithdrawals,
+    centralExpenseCount: centralExpenses.length,
+    centralTransactionCount: centralTransactions.length,
+    message: unresolvedExpenses.length
+      ? 'توجد مصاريف محلية غير متزامنة. أكمل المزامنة قبل إنهاء اليوم.'
+      : '',
+  }
+}
+
 export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0 } = {}) => {
   await financialUser(false)
   const centralSales = centralValues(await get(salesRef()))
   // Readback is also the restart repair path. Persist only sync metadata after
   // exact payload verification; never resend or rewrite the central sale.
   reconcileSalesAgainstCentral(centralSales)
-  return reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay, openOrderCount })
+  const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay, openOrderCount })
+  const financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
+  return {
+    ...salesReconciliation,
+    financialReconciliation,
+    allowed: salesReconciliation.allowed && financialReconciliation.allowed,
+    message: salesReconciliation.message || financialReconciliation.message,
+  }
 }
 
 // Read-only diagnostic path. Unlike readPreCloseReconciliation, this deliberately
@@ -729,13 +776,20 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   // treating that sale as nonexistent.
   const rawQueue = readRawSaleQueue()
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
+  const before = await get(salesRef())
+  const beforeCentral = centralValues(before)
+  // Legacy/malformed queue cleanup is local-only. The central snapshot above
+  // is read once; reconciliation itself performs zero Firebase writes and
+  // removes only entries proven against that snapshot.
+  const queueCleanup = reconcileLocalQueueAgainstCentral(beforeCentral)
+  const activeQueueAfterCleanup = readRawSaleQueue()
   const queuedSales = []
-  for (const rawEntry of rawQueue) {
+  for (const rawEntry of activeQueueAfterCleanup) {
     const rawSale = rawEntry?.sale
-    if (!rawSale) { logQueueDecision(null, 'missing:sale', 'missing sale payload', { queueLength: rawQueue.length }); continue }
+    if (!rawSale) { logQueueDecision(null, 'missing:sale', 'missing sale payload', { queueLength: activeQueueAfterCleanup.length }); continue }
     const normalized = normalizeQueuedSaleForCurrentDay(rawSale)
     if (normalized.missing.length) {
-      logQueueDecision(normalized.sale, `missing:${normalized.missing.join(',')}`, 'queue entry is not recoverable', { queueLength: rawQueue.length, eligible: false })
+      logQueueDecision(normalized.sale, `missing:${normalized.missing.join(',')}`, 'queue entry is not recoverable', { queueLength: activeQueueAfterCleanup.length, eligible: false })
       if (manualReport) manualReport.salesToProcess.push({ orderNumber: normalized.sale?.orderNumber ?? null, saleId: saleIdOf(normalized.sale), operationKey: normalized.sale?.operationKey || '', centralBefore: false, writeAttempted: false, writeResult: 'SKIPPED', readbackResult: 'SKIPPED', localUpdateResult: 'RETAINED', error: `missing:${normalized.missing.join(',')}` })
       continue
     }
@@ -746,8 +800,6 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     const identity = String(saleIdOf(sale) || sale?.operationKey || sale?.operation_key || '')
     if (identity && !candidateByIdentity.has(identity)) candidateByIdentity.set(identity, sale)
   }
-  const before = await get(salesRef())
-  const beforeCentral = centralValues(before)
   const centralIds = new Set(beforeCentral.map(saleIdOf))
   const candidates = [...candidateByIdentity.values()].filter(sale => {
     if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'missing:validSalePayload', 'queue entry is not recoverable', { queueLength: rawQueue.length, eligible: false }); return false }
@@ -842,7 +894,8 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     updated,
     initialSyncCompleted: readInitialSyncCompleted(),
     uploadBlocked: false,
-    skipped: rawQueue.length - uploaded - updated,
+    skipped: activeQueueAfterCleanup.length - uploaded - updated,
+    queueCleanup,
   }
 }
 
@@ -942,6 +995,14 @@ export const manualCurrentTabQueueRecovery = async () => {
       console.info('[POS101_MANUAL_QUEUE_FINAL]', JSON.stringify(report))
       throw error
     })
+}
+
+// Explicit local-only operator tool. It reads the central sales snapshot for
+// verification, then changes only this tab's localStorage queue/ledger.
+export const runLocalQueueCleanup = async () => {
+  await requireRole('cashier-sync')
+  const centralSales = centralValues(await get(salesRef()))
+  return reconcileLocalQueueAgainstCentral(centralSales)
 }
 
 // Compatibility export retained for existing UI callers; the button uses the
@@ -1482,6 +1543,9 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const financialReconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales: centralBeforeWrite, operationalDay: day })
   if (!financialReconciliation.allowed) {
     throw Object.assign(new Error('تعذر مطابقة المبيعات المحلية والمركزية؛ تم تعطيل إنهاء اليوم دون أي كتابة.'), { code: 'FINANCIAL_RECONCILIATION_BLOCKED', financialReconciliation })
+  }
+  if (!preClose.financialReconciliation?.allowed) {
+    throw Object.assign(new Error(preClose.financialReconciliation.message || 'توجد بيانات مالية غير متزامنة؛ تم تعطيل إنهاء اليوم دون أي كتابة.'), { code: 'FINANCIAL_QUEUE_BLOCKED', preClose })
   }
   const user = await financialUser(true)
   const id = String(day?.id || day?.operationalDayId || '').trim()

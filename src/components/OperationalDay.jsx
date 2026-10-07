@@ -103,7 +103,8 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   }
   const diagnosticText = report => {
     if (!report) return ''
-    const lines = ['END_DAY_DIAGNOSTIC', `pendingQueue=${report.pendingQueue}`, `openOrderFlag=${report.openOrderFlag}`, `reconciliationState=${report.reconciliationState}`, `status=${report.status}`, `message=${report.message || ''}`]
+    const ready = report.reconciliationState === 'completed' && report.pendingQueue === 0 && !report.openOrderFlag && (report.blockers || []).length === 0
+    const lines = ['END_DAY_DIAGNOSTIC', `pendingQueue=${report.pendingQueue}`, `openOrderFlag=${report.openOrderFlag}`, `END_DAY_READY=${ready ? 'YES' : 'NO'}`, `reconciliationState=${report.reconciliationState}`, `status=${report.status}`, `message=${report.message || ''}`]
     for (const blocker of report.blockers || []) {
       lines.push('', `ORDER=${blocker.orderNumber}`, `saleId=${blocker.saleId}`, `source=${blocker.source}`, `businessDate=${blocker.businessDate}`, `operationalDayId=${blocker.operationalDayId}`, `operationKey=${blocker.operationKey}`, `localStatus=${blocker.localStatus}`, `localSyncStatus=${blocker.localSyncStatus}`, `centralExists=${blocker.centralExists}`, `centralStatus=${blocker.centralStatus}`, `centralSyncStatus=${blocker.centralSyncStatus}`, `salePayloadMatches=${blocker.salePayloadMatches}`, `mismatchFields=${blocker.mismatchFields.join(',')}`, `queueEntryExists=${blocker.queueEntryExists}`)
       for (const entry of blocker.queueEntries || []) lines.push(`queueOperationType=${entry.operationType}`, `queueId=${entry.id}`, `queueBusinessDate=${entry.businessDate}`, `queueOperationalDayId=${entry.operationalDayId}`)
@@ -168,6 +169,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
           <span>preCloseGuard.message <b>{diagnosticReport.message || '—'}</b></span>
           <span>pendingQueue <b>{diagnosticReport.pendingQueue}</b></span>
           <span>openOrderFlag <b>{String(diagnosticReport.openOrderFlag)}</b></span>
+          <span>END_DAY_READY <b>{diagnosticReport.reconciliationState === 'completed' && diagnosticReport.pendingQueue === 0 && !diagnosticReport.openOrderFlag && (diagnosticReport.blockers || []).length === 0 ? 'YES' : 'NO'}</b></span>
           <span>reconciliation <b>{diagnosticReport.reconciliationState}</b></span>
         </div>
         {(diagnosticReport.blockers || []).map(blocker => <article className="diagnostic-blocker" key={`${blocker.saleId}|${blocker.operationKey}`}>

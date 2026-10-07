@@ -1,6 +1,7 @@
 const SALES_KEY = 'pos101.sales'
 const QUEUE_KEY = 'pos101.syncQueue'
 export const QUARANTINE_BUCKET = 'pos101.salesQuarantine'
+export const SYNC_QUEUE_QUARANTINE_BUCKET = 'pos101.syncQueue.quarantine'
 
 const readJson = (key, fallback) => {
   try {
@@ -81,6 +82,115 @@ export const salePayloadMatches = (expected, actual) => Boolean(expected && actu
   && number(expected?.net ?? expected?.total ?? expected?.subtotal) === number(actual?.net ?? actual?.total ?? actual?.subtotal)
   && text(expected?.paymentMethod || expected?.payment?.method) === text(actual?.paymentMethod || actual?.payment?.method)
   && financialFingerprint(expected) === financialFingerprint(actual))
+
+const localStorageSnapshot = () => {
+  const snapshot = {}
+  if (typeof localStorage === 'undefined') return snapshot
+  for (let index = 0; index < (Number(localStorage.length) || 0); index += 1) {
+    const key = localStorage.key(index)
+    if (key !== null) snapshot[key] = localStorage.getItem(key)
+  }
+  return snapshot
+}
+
+const exportLocalStorageBackup = (snapshot, now = new Date()) => {
+  const stamp = now.toISOString().replace(/[:.]/g, '-')
+  const filename = `POS101-localStorage-before-queue-cleanup-${stamp}.json`
+  const payload = JSON.stringify({ exportedAt: now.toISOString(), localStorage: snapshot }, null, 2)
+  // Keep an in-memory copy for diagnostics/tests, while the browser download
+  // is the durable operator backup. This never writes to Firebase.
+  if (typeof window !== 'undefined') window.__POS101_LAST_QUEUE_CLEANUP_BACKUP__ = { filename, payload }
+  if (typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined') {
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([payload], { type: 'application/json' }))
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
+  return { filename, payload }
+}
+
+const queueIdentity = row => row?.sale || row || {}
+const comparable = value => String(value ?? '').trim()
+const centralMatchForQueueEntry = (rawEntry, centralSales) => {
+  const local = queueIdentity(rawEntry)
+  const localSaleId = comparable(local?.saleId || local?.id || rawEntry?.saleId)
+  const localOrderNumber = comparable(local?.orderNumber || rawEntry?.orderNumber)
+  if (!localSaleId && !localOrderNumber) return null
+  return (centralSales || []).find(remote => {
+    const sameIdentity = (localSaleId && comparable(remote?.saleId || remote?.id) === localSaleId)
+      || (localOrderNumber && comparable(remote?.orderNumber) === localOrderNumber)
+    if (!sameIdentity) return false
+    const fields = [
+      ['orderNumber', local?.orderNumber ?? rawEntry?.orderNumber, remote?.orderNumber],
+      ['total', local?.total ?? local?.subtotal ?? rawEntry?.total, remote?.total ?? remote?.subtotal],
+      ['businessDate', local?.businessDate ?? rawEntry?.businessDate, remote?.businessDate],
+      ['operationalDayId', local?.operationalDayId || local?.operational_day_id || rawEntry?.operationalDayId, remote?.operationalDayId || remote?.operational_day_id],
+      ['operationKey', local?.operationKey || local?.operation_key || rawEntry?.operationKey, remote?.operationKey || remote?.operation_key],
+    ]
+    return fields.every(([, left, right]) => left === undefined || left === null || left === '' || comparable(left) === comparable(right))
+  }) || null
+}
+
+// Read-only central reconciliation for legacy queue rows. The caller must
+// supply a snapshot already read from Firebase; this function never performs
+// a Firebase operation and never creates or updates a sale.
+export const reconcileLocalQueueAgainstCentral = (centralSales = [], { now = new Date() } = {}) => {
+  const queue = readRawSaleQueue()
+  const quarantine = readJson(SYNC_QUEUE_QUARANTINE_BUCKET, [])
+  const removals = []
+  const quarantined = []
+  const retained = []
+  for (const [index, rawEntry] of queue.entries()) {
+    const central = centralMatchForQueueEntry(rawEntry, centralSales)
+    const sale = queueIdentity(rawEntry)
+    const valid = Boolean(rawEntry?.sale && isSaleSyncEligible(rawEntry?.sale) && isSaleIdentityComplete(rawEntry?.sale))
+    if (central) {
+      removals.push({ index, rawEntry, sale, central, action: valid ? 'mark-synced-and-remove' : 'remove-verified-malformed', reason: valid ? 'CENTRAL_PAYLOAD_VERIFIED' : 'CENTRAL_IDENTITY_VERIFIED_MALFORMED' })
+    } else if (!valid) {
+      quarantined.push({ index, rawEntry, sale, action: 'quarantine-and-remove', reason: 'MALFORMED_UNMATCHED_QUEUE_ENTRY' })
+    } else retained.push(rawEntry)
+  }
+  const changed = removals.length + quarantined.length > 0
+  const backup = changed ? exportLocalStorageBackup(localStorageSnapshot(), now) : null
+  const removalIndexes = new Set([...removals, ...quarantined].map(row => row.index))
+  if (changed) {
+    const syncedIds = new Set(removals.filter(row => row.action === 'mark-synced-and-remove').map(row => saleIdOf(row.sale)))
+    const sales = readJson(SALES_KEY, [])
+    writeJson(SALES_KEY, sales.map(sale => syncedIds.has(saleIdOf(sale))
+      ? { ...sale, status: 'synced', syncStatus: 'synced', centralVerified: true, centralVerifiedAt: now.getTime(), syncConfirmedAt: now.getTime(), syncSource: 'firebase-readback-queue-cleanup' }
+      : sale))
+    writeJson(QUEUE_KEY, queue.filter((_, index) => !removalIndexes.has(index)))
+    const nextQuarantine = [...quarantine, ...quarantined.map(row => ({
+      quarantineReason: row.reason,
+      action: row.action,
+      quarantinedAt: now.getTime(),
+      saleId: saleIdOf(row.sale) || '',
+      orderNumber: row.sale?.orderNumber ?? row.rawEntry?.orderNumber ?? '',
+      operationKey: operationKeyOf(row.sale) || row.rawEntry?.operationKey || '',
+      rawQueuePayload: row.rawEntry,
+      centralMatch: row.central || null,
+      backupFilename: backup.filename,
+    }))]
+    writeJson(SYNC_QUEUE_QUARANTINE_BUCKET, nextQuarantine)
+    for (const row of [...removals, ...quarantined]) {
+      console.info('[POS101_QUEUE_CLEANUP]', JSON.stringify({ action: row.action, reason: row.reason, saleId: saleIdOf(row.sale), orderNumber: row.sale?.orderNumber ?? row.rawEntry?.orderNumber ?? '', backupFilename: backup.filename }))
+    }
+  }
+  return {
+    backupBeforeCleanup: changed ? 'PASS' : 'NOT_REQUIRED',
+    backupFilename: backup?.filename || null,
+    centralReadOnly: true,
+    firebaseWritesPerformed: 0,
+    removedVerified: removals.length,
+    quarantinedMalformed: quarantined.length,
+    retainedValidUnresolved: retained.length,
+    queueLengthBefore: queue.length,
+    queueLengthAfter: changed ? readRawSaleQueue().length : queue.length,
+    quarantineLength: readJson(SYNC_QUEUE_QUARANTINE_BUCKET, []).length,
+    actions: [...removals, ...quarantined].map(row => ({ index: row.index, action: row.action, reason: row.reason, saleId: saleIdOf(row.sale), orderNumber: row.sale?.orderNumber ?? row.rawEntry?.orderNumber ?? '' })),
+  }
+}
 
 export const classifyCentralSale = (sale, centralSales = []) => {
   const id = text(saleIdOf(sale))
