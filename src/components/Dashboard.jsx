@@ -2,7 +2,7 @@
 import { Icon } from './Icons'
 import OperationalDay from './OperationalDay'
 
-export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, preCloseGuard, onPrepareEnd, onPrepareStart, operationalDayLoading, operationalDayError, onStartOperationalDay, onEndOperationalDay }) {
+export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, preCloseGuard, onPrepareEnd, onPrepareStart, operationalDayLoading, operationalDayError, onStartOperationalDay, onEndOperationalDay, onReadDiagnostic }) {
   const cards = [
     { id: 'pos', title: 'الكاشير', icon: 'monitor', action: () => onNavigate('pos') },
     { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => onNavigate('orders') },
@@ -24,7 +24,7 @@ export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled 
 
   return (
     <div className="dashboard-container" dir="rtl">
-      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} loading={operationalDayLoading} error={operationalDayError} onPrepareEnd={onPrepareEnd} onPrepareStart={onPrepareStart} onStart={onStartOperationalDay} onEnd={onEndOperationalDay} />}
+      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} loading={operationalDayLoading} error={operationalDayError} onPrepareEnd={onPrepareEnd} onPrepareStart={onPrepareStart} onStart={onStartOperationalDay} onEnd={onEndOperationalDay} onReadDiagnostic={onReadDiagnostic} />}
       <div className="dashboard-grid">
         {cards.map(card => (
           <button 

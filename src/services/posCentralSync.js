@@ -29,8 +29,9 @@ import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, 
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
 import { isSaleSyncEligible, markSaleSynced, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale } from './salesSyncQueue.js'
-import { getReportSalesForOperationalDay, isReportableSale } from './reportSales.js'
+import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
+import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 
 const env = import.meta.env || {}
@@ -487,6 +488,22 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   // exact payload verification; never resend or rewrite the central sale.
   reconcileSalesAgainstCentral(centralSales)
   return reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay, openOrderCount })
+}
+
+// Read-only diagnostic path. Unlike readPreCloseReconciliation, this deliberately
+// does not call reconcileSalesAgainstCentral, so opening the panel cannot persist
+// sync metadata, alter the queue, or trigger any retry/upload behavior.
+export const readEndDayDiagnostic = async (operationalDay, { openOrderCount = 0, preCloseGuard = null } = {}) => {
+  await financialUser(false)
+  const centralSales = centralValues(await get(salesRef()))
+  return buildEndDayDiagnostic({
+    localSales: readLocalSales(),
+    queueEntries: readSaleQueue(),
+    centralSales,
+    operationalDay,
+    openOrderCount,
+    preCloseGuard,
+  })
 }
 
 export const runFullRecoverySync = async () => {

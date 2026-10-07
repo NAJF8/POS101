@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
+import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 
 const money = value => formatMoney(Number(value || 0))
 
-export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onPrepareStart, onStart, onEnd }) {
+export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onPrepareStart, onStart, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
@@ -14,6 +15,12 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const [openingCash, setOpeningCash] = useState('')
   const [openingNote, setOpeningNote] = useState('')
   const [openingSuggestion, setOpeningSuggestion] = useState(null)
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false)
+  const [diagnosticCode, setDiagnosticCode] = useState('')
+  const [diagnosticError, setDiagnosticError] = useState('')
+  const [diagnosticBusy, setDiagnosticBusy] = useState(false)
+  const [diagnosticReport, setDiagnosticReport] = useState(null)
+  const [diagnosticCopied, setDiagnosticCopied] = useState(false)
   React.useEffect(() => {
     const dirty = Boolean(startOpen || endOpen || openingCash || openingNote || actualCash)
     window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty } }))
@@ -56,6 +63,41 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
     setBusy(true)
     try { await onPrepareEnd?.(); setEndOpen(true) } catch { /* App surfaces the guard error. */ } finally { setBusy(false) }
   }
+  const openDiagnostic = () => {
+    setDiagnosticOpen(true)
+    setDiagnosticCode('')
+    setDiagnosticError('')
+    setDiagnosticCopied(false)
+  }
+  const runDiagnostic = async () => {
+    if (!verifySystemAdminCode(diagnosticCode)) {
+      setDiagnosticError('رمز التشخيص غير صحيح.')
+      return
+    }
+    setDiagnosticBusy(true)
+    setDiagnosticError('')
+    setDiagnosticCopied(false)
+    try {
+      setDiagnosticReport(await onReadDiagnostic?.())
+    } catch (diagnosticFailure) {
+      setDiagnosticError(diagnosticFailure?.message || 'تعذر قراءة تشخيص المزامنة.')
+    } finally { setDiagnosticBusy(false) }
+  }
+  const diagnosticText = report => {
+    if (!report) return ''
+    const lines = ['END_DAY_DIAGNOSTIC', `pendingQueue=${report.pendingQueue}`, `openOrderFlag=${report.openOrderFlag}`, `reconciliationState=${report.reconciliationState}`, `status=${report.status}`, `message=${report.message || ''}`]
+    for (const blocker of report.blockers || []) {
+      lines.push('', `ORDER=${blocker.orderNumber}`, `saleId=${blocker.saleId}`, `source=${blocker.source}`, `businessDate=${blocker.businessDate}`, `operationalDayId=${blocker.operationalDayId}`, `operationKey=${blocker.operationKey}`, `localStatus=${blocker.localStatus}`, `localSyncStatus=${blocker.localSyncStatus}`, `centralExists=${blocker.centralExists}`, `centralStatus=${blocker.centralStatus}`, `centralSyncStatus=${blocker.centralSyncStatus}`, `salePayloadMatches=${blocker.salePayloadMatches}`, `mismatchFields=${blocker.mismatchFields.join(',')}`, `queueEntryExists=${blocker.queueEntryExists}`)
+      for (const entry of blocker.queueEntries || []) lines.push(`queueOperationType=${entry.operationType}`, `queueId=${entry.id}`, `queueBusinessDate=${entry.businessDate}`, `queueOperationalDayId=${entry.operationalDayId}`)
+    }
+    return lines.join('\n')
+  }
+  const copyDiagnostic = async () => {
+    try {
+      await navigator.clipboard.writeText(diagnosticText(diagnosticReport))
+      setDiagnosticCopied(true)
+    } catch { setDiagnosticError('تعذر نسخ تقرير التشخيص.') }
+  }
 
   return <section className={`operational-day-card ${open ? 'is-open' : 'is-closed'}`} dir="rtl" aria-label="اليوم التشغيلي">
     <div className="operational-day-heading">
@@ -80,8 +122,9 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         ? <div className="operational-day-warning" role="status">
             <span>اليوم السابق ما زال مفتوحاً</span>
             <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
+            <button type="button" onClick={openDiagnostic}>تشخيص المزامنة</button>
           </div>
-        : <button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>}
+        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>تشخيص المزامنة</button></div>}
     </div> : <div className="operational-day-body">
       <div className="operational-day-empty">
         <strong>لا يوجد يوم تشغيلي مفتوح</strong>
@@ -92,6 +135,34 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
     {error && <p className="form-error" role="alert">{error}</p>}
     {startError && <p className="form-error" role="alert">{startError}</p>}
     {open && preCloseGuard?.message && <p className="form-error" role="alert">{preCloseGuard.message}</p>}
+
+    {diagnosticOpen && <div className="overlay"><div className="dialog operational-day-dialog end-day-diagnostic-dialog" dir="rtl">
+      <h2>تشخيص المزامنة</h2>
+      {!diagnosticReport && <>
+        <p>هذا التقرير للقراءة فقط ولا يغيّر المبيعات أو الطابور.</p>
+        <label>رمز النظام<input autoFocus type="password" inputMode="numeric" value={diagnosticCode} onChange={event => setDiagnosticCode(event.target.value)} /></label>
+        {diagnosticError && <p className="form-error" role="alert">{diagnosticError}</p>}
+        <div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setDiagnosticOpen(false)}>إلغاء</button><button className="primary-action" type="button" disabled={diagnosticBusy} onClick={runDiagnostic}>{diagnosticBusy ? 'جارٍ القراءة…' : 'فتح التشخيص'}</button></div>
+      </>}
+      {diagnosticReport && <>
+        <div className="diagnostic-runtime" aria-label="قيم حارس إنهاء اليوم">
+          <span>preCloseGuard.status <b>{diagnosticReport.status}</b></span>
+          <span>preCloseGuard.message <b>{diagnosticReport.message || '—'}</b></span>
+          <span>pendingQueue <b>{diagnosticReport.pendingQueue}</b></span>
+          <span>openOrderFlag <b>{String(diagnosticReport.openOrderFlag)}</b></span>
+          <span>reconciliation <b>{diagnosticReport.reconciliationState}</b></span>
+        </div>
+        {(diagnosticReport.blockers || []).map(blocker => <article className="diagnostic-blocker" key={`${blocker.saleId}|${blocker.operationKey}`}>
+          <h3>طلب {blocker.orderNumber || '—'} · {blocker.source}</h3>
+          <dl>
+            <dt>saleId</dt><dd>{blocker.saleId || '—'}</dd><dt>businessDate</dt><dd>{blocker.businessDate || '—'}</dd><dt>operationalDayId</dt><dd>{blocker.operationalDayId || '—'}</dd><dt>operationKey</dt><dd>{blocker.operationKey || '—'}</dd><dt>local status</dt><dd>{blocker.localStatus || '—'}</dd><dt>local syncStatus</dt><dd>{blocker.localSyncStatus || '—'}</dd><dt>centralVerified</dt><dd>{String(blocker.centralVerified)}</dd><dt>queueEntryExists</dt><dd>{String(blocker.queueEntryExists)}</dd><dt>centralExists</dt><dd>{String(blocker.centralExists)}</dd><dt>central status</dt><dd>{blocker.centralStatus || '—'}</dd><dt>central syncStatus</dt><dd>{blocker.centralSyncStatus || '—'}</dd><dt>salePayloadMatches</dt><dd>{String(blocker.salePayloadMatches)}</dd><dt>mismatchFields</dt><dd>{blocker.mismatchFields.length ? blocker.mismatchFields.join(', ') : '—'}</dd></dl>
+          {blocker.queueEntries?.map(entry => <p className="diagnostic-queue" key={`${entry.id}|${entry.operationType}`}>queue: {entry.operationType} · {entry.id} · {entry.businessDate} · {entry.operationalDayId}</p>)}
+        </article>)}
+        {diagnosticReport.blockers?.length === 0 && <p role="status">لا توجد مبيعات حالية محسوبة كمانع.</p>}
+        {diagnosticError && <p className="form-error" role="alert">{diagnosticError}</p>}
+        <div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setDiagnosticOpen(false)}>إغلاق</button><button className="primary-action" type="button" onClick={copyDiagnostic}>{diagnosticCopied ? 'تم النسخ' : 'نسخ تقرير التشخيص'}</button></div>
+      </>}
+    </div></div>}
 
     {startOpen && <div className="overlay"><div className="dialog operational-day-dialog" dir="rtl">
       <h2>بدء يوم تشغيلي جديد</h2>

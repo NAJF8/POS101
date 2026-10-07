@@ -1658,6 +1658,8 @@ input, textarea, select { cursor: text; }
 .operational-day-empty small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .operational-day-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 36px; margin: 0; padding: 7px 13px; border-radius: 9px; font-size: 12px; white-space: nowrap; transition: background-color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .operational-day-action:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(45,54,43,.1); }
+.operational-day-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.operational-day-diagnostic-action { min-height: 36px; padding: 7px 13px; border-radius: 9px; font-size: 12px; white-space: nowrap; }
 .operational-day-card.is-open .operational-day-action { background: #5b6257; }
 .operational-day-warning { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 14px; padding: 10px 12px; color: #7b542c; background: #fff8e8; border: 1px solid #ead6a8; border-radius: 9px; font-size: 13px; }
 .operational-day-warning button { border: 0; color: #8a3d2d; background: transparent; text-decoration: underline; font-weight: 800; cursor: pointer; }
@@ -1668,6 +1670,16 @@ input, textarea, select { cursor: text; }
 .operational-day-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
 .operational-day-summary span { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border-radius: 8px; background: #f7f5f0; color: var(--muted); }
 .operational-day-summary b { color: var(--coffee); }
+.end-day-diagnostic-dialog { max-height: min(760px, calc(100vh - 32px)); overflow: auto; }
+.diagnostic-runtime { display: grid; gap: 7px; margin: 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f7f5f0; color: var(--muted); font-size: 12px; }
+.diagnostic-runtime span { display: flex; justify-content: space-between; gap: 12px; }
+.diagnostic-runtime b, .diagnostic-blocker h3 { color: var(--coffee); }
+.diagnostic-blocker { margin: 12px 0; padding: 12px; border: 1px solid #ead6a8; border-radius: 10px; background: #fffdf7; }
+.diagnostic-blocker h3 { margin: 0 0 9px; font-size: 14px; }
+.diagnostic-blocker dl { display: grid; grid-template-columns: minmax(130px, .8fr) minmax(0, 1.2fr); gap: 5px 10px; margin: 0; font-size: 12px; }
+.diagnostic-blocker dt { color: var(--muted); }
+.diagnostic-blocker dd { margin: 0; color: var(--coffee); overflow-wrap: anywhere; }
+.diagnostic-queue { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .dashboard-container { flex-direction: column; align-items: stretch; gap: 18px; padding: 14px 10px 24px; }
   .operational-day-card { width: 100%; min-height: 0; padding: 15px; }
@@ -1675,6 +1687,11 @@ input, textarea, select { cursor: text; }
   .operational-day-body { align-items: end; gap: 10px; }
   .operational-day-main-info > strong { font-size: 19px; }
   .operational-day-summary { grid-template-columns: 1fr; }
+  .operational-day-actions { width: 100%; justify-content: stretch; }
+  .operational-day-actions > button { flex: 1 1 140px; }
+  .diagnostic-runtime span { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .diagnostic-blocker dl { grid-template-columns: 1fr; gap: 2px; }
+  .diagnostic-blocker dd { margin-bottom: 5px; }
 }
 
 @media (min-width: 601px) and (max-width: 1180px) {
