@@ -1,0 +1,29 @@
+{
+  "backupType": "POS101_WITHDRAWAL_TO_EXPENSE_BEFORE_MIGRATION",
+  "backupCreatedAt": "2026-10-08",
+  "reason": "RECLASSIFIED_WITHDRAWAL_TO_EXPENSE",
+  "businessDate": "2026-10-07",
+  "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+  "sourcePath": "pos101_cashbox_transactions/cash-e36b5748-f4dd-40a7-bcbd-f87e23d46baf",
+  "targetPath": "pos101_expenses/cash-e36b5748-f4dd-40a7-bcbd-f87e23d46baf",
+  "original": {
+    "amount": 50000,
+    "businessDate": "2026-10-07",
+    "cashierId": "staff-a57ab9ed-60d5-475d-bdf4-f22b57fcbab4",
+    "category": "سحوبات",
+    "createdAt": 1791414437672,
+    "createdByName": "",
+    "createdByUid": "kiosk:kiosk-0c12db01f46e4044a4792322",
+    "description": "109",
+    "employeeId": "staff-a57ab9ed-60d5-475d-bdf4-f22b57fcbab4",
+    "employeeNameSnapshot": "حيدر",
+    "fundingSource": "cashbox",
+    "id": "cash-e36b5748-f4dd-40a7-bcbd-f87e23d46baf",
+    "notes": "",
+    "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+    "reason": "109",
+    "source": "employee withdrawal",
+    "status": "active",
+    "type": "withdrawal"
+  }
+}

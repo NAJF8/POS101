@@ -26,6 +26,7 @@
     "test:financial-center": "node scripts/financial-center-regression.mjs",
     "test:financial-center-completion": "node scripts/financial-center-completion-regression.mjs",
     "test:expense-funding-source": "node scripts/expense-funding-source-regression.mjs",
+    "test:expense-withdrawal-classification": "node scripts/expense-withdrawal-classification-regression.mjs",
     "test:management-payments-report": "node scripts/management-payments-report-regression.mjs",
     "test:employee-report": "node scripts/employee-report-regression.mjs",
     "test:kiosk-auth-regression": "node scripts/kiosk-auth-regression.mjs",
