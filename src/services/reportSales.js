@@ -88,3 +88,53 @@ export const readLocalSales = () => {
 
 export const filterReportSales = (sales, { startMs = -Infinity, endMs = Infinity } = {}) => (Array.isArray(sales) ? sales : [])
   .filter(sale => sale.createdAt >= startMs && sale.createdAt <= endMs && !sale.voided)
+
+const CLOSED_SALE_STATUSES = new Set(['cancelled', 'canceled', 'voided', 'abandoned', 'draft'])
+const saleOperationalDayId = sale => String(sale?.operationalDayId || sale?.operational_day_id || sale?.shiftId || sale?.shift_id || '').trim()
+const operationalDayId = day => String(day?.operationalDayId || day?.id || '').trim()
+
+export const isReportableSale = sale => {
+  const status = String(sale?.status || '').trim().toLowerCase()
+  return !sale?.voided && !CLOSED_SALE_STATUSES.has(status)
+}
+
+const normalizedOperationalDays = operationalDays => (Array.isArray(operationalDays) ? operationalDays : [])
+  .map(day => ({ ...day, id: operationalDayId(day), businessDate: String(day?.businessDate || '').trim() }))
+  .filter(day => day.id && /^\d{4}-\d{2}-\d{2}$/.test(day.businessDate))
+
+const centralClosedSalesForDate = (centralSales, date, days) => {
+  const closedIds = new Set(days.filter(day => day.businessDate === date && day.status === 'closed').map(day => day.id))
+  return (Array.isArray(centralSales) ? centralSales : []).filter(sale => {
+    if (!isReportableSale(sale) || businessDateForSale(sale) !== date) return false
+    const id = saleOperationalDayId(sale)
+    // A closed date is authoritative by operationalDayId. The explicit date
+    // fallback is only for legacy central rows that have no day id at all.
+    return id ? closedIds.has(id) : !id
+  })
+}
+
+// Closed dates use the central ledger; the active open date may retain local
+// pending visibility. This function is shared by screen, print, and financial
+// summaries so they cannot silently choose different ledgers.
+export const getReportSalesForPeriod = ({ localSales = [], centralSales = [], operationalDays = [], from = '', to = '', currentOperationalDay = null } = {}) => {
+  if (!from || !to || from > to) return []
+  const days = normalizedOperationalDays(operationalDays)
+  const dates = new Set()
+  for (const row of [...(Array.isArray(localSales) ? localSales : []), ...(Array.isArray(centralSales) ? centralSales : [])]) {
+    const date = businessDateForSale(row)
+    if (date >= from && date <= to) dates.add(date)
+  }
+  for (const day of days) if (day.businessDate >= from && day.businessDate <= to) dates.add(day.businessDate)
+  const openId = operationalDayId(currentOperationalDay)
+  const result = []
+  for (const date of dates) {
+    const closedDays = days.filter(day => day.businessDate === date && day.status === 'closed')
+    if (closedDays.length) result.push(...centralClosedSalesForDate(centralSales, date, days))
+    else if (openId && currentOperationalDay?.businessDate === date) {
+      result.push(...(Array.isArray(localSales) ? localSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date))
+    } else {
+      result.push(...(Array.isArray(centralSales) ? centralSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date))
+    }
+  }
+  return result
+}

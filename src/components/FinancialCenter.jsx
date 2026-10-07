@@ -1,20 +1,28 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney } from '../utils.js'
-import { readLocalExpenses } from '../services/posCentralSync.js'
-import { readLocalSales } from '../services/reportSales.js'
+import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
+import { getReportSalesForPeriod, readLocalSales } from '../services/reportSales.js'
 import { calculateEmployeeExpenseReport, calculateFinancialReport, calculateCashboxBalance } from '../services/financialCenter.js'
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date())
 
-export default function FinancialCenter({ transactions = [], onSaveTransaction, onVoidTransaction, onSaveCashCount, onNavigate }) {
+export default function FinancialCenter({ transactions = [], centralSales = [], operationalDays = [], operationalDay = null, onSaveTransaction, onVoidTransaction, onSaveCashCount, onNavigate }) {
   const [from, setFrom] = useState(today())
   const [to, setTo] = useState(today())
   const [txType, setTxType] = useState('deposit')
   const [txAmount, setTxAmount] = useState('')
   const [txReason, setTxReason] = useState('')
   const [countAmount, setCountAmount] = useState('')
-  const sales = useMemo(() => readLocalSales(), [])
-  const expenses = useMemo(() => readLocalExpenses(), [])
+  const localSales = useMemo(() => readLocalSales(), [])
+  const sales = useMemo(() => getReportSalesForPeriod({ localSales, centralSales, operationalDays, from, to, currentOperationalDay: operationalDay }), [localSales, centralSales, operationalDays, from, to, operationalDay])
+  const [expenses, setExpenses] = useState(() => readLocalExpenses())
+  useEffect(() => {
+    let active = true
+    void readCentralExpensesForReports({ includeAllLocal: true, persistCache: false, dispatchUpdate: false })
+      .then(result => { if (active && Array.isArray(result?.expenses)) setExpenses(result.expenses) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
   const report = useMemo(() => calculateFinancialReport({ sales, expenses, transactions, from, to }), [sales, expenses, transactions, from, to])
   const employees = useMemo(() => calculateEmployeeExpenseReport(expenses, transactions, { from, to }), [expenses, transactions, from, to])
   const balance = calculateCashboxBalance(transactions)

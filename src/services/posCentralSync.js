@@ -443,6 +443,11 @@ export const findOperationalDayByBusinessDate = async businessDate => {
   return { ...matchOperationalDayByBusinessDate(days, businessDate), days }
 }
 
+export const readCentralOperationalDays = async () => {
+  await requireOperationalDayRole()
+  return operationalDayValues(await get(operationalDaysRef()))
+}
+
 export const runFullRecoverySync = async () => {
   const user = await requireRole('cashier-sync')
   const localDay = readCachedOperationalDay()
@@ -660,6 +665,7 @@ export const readCentralExpensesForReports = async ({ includeAllLocal = false, p
     pendingCount: pendingLocalExpenses.length,
     mergedCount: merged.length,
     operationalDayDates,
+    operationalDays: days,
   }
 }
 

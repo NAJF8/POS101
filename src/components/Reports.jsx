@@ -3,7 +3,7 @@ import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
-import { readLocalSales, numberValue } from '../services/reportSales'
+import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance } from '../services/financialCenter.js'
@@ -165,7 +165,7 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
   const [reportType, setReportType] = useState(initialReportType)
   const [employeeQuery, setEmployeeQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -201,6 +201,10 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   }, [])
   useEffect(() => { if (Array.isArray(salesOverride)) setSales(salesOverride) }, [salesOverride])
   const [expenseOperationalDayDates, setExpenseOperationalDayDates] = useState({})
+  const [reportOperationalDays, setReportOperationalDays] = useState(operationalDays)
+  useEffect(() => {
+    if (Array.isArray(operationalDays) && operationalDays.length) setReportOperationalDays(operationalDays)
+  }, [operationalDays])
   const [expenseReadError, setExpenseReadError] = useState('')
   const expenseReadInFlight = useRef(false)
   const expenseReadQueued = useRef(false)
@@ -224,6 +228,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         if (!active) return
         const operationalDayDates = result?.operationalDayDates || {}
         setExpenseOperationalDayDates(operationalDayDates)
+        if (Array.isArray(result?.operationalDays)) setReportOperationalDays(result.operationalDays)
         setExpenses(normalizeReportExpenses(result?.expenses || [], operationalDayDates))
         setExpenseReadError('')
       } catch (error) {
@@ -245,7 +250,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
 
   // One range is shared by every report card, the browser print, and direct
   // thermal payloads. No report can silently fall back to the current day.
-  const filteredSales = useMemo(() => filterRowsByBusinessDate(sales, periodFrom, periodTo), [sales, periodFrom, periodTo])
+  const reportSales = useMemo(() => getReportSalesForPeriod({ localSales: sales, centralSales, operationalDays: reportOperationalDays, from: periodFrom, to: periodTo, currentOperationalDay: operationalDay }), [sales, centralSales, reportOperationalDays, periodFrom, periodTo, operationalDay])
+  const filteredSales = useMemo(() => reportSales, [reportSales])
   const filteredExpenses = useMemo(() => filterRowsByBusinessDate(
     (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })),
     periodFrom,
@@ -254,17 +260,17 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const normalizedCashOutflows = useMemo(() => normalizeCashOutflowReport({ expenses, transactions: cashboxTransactions, staff, operationalDayDates: expenseOperationalDayDates }), [expenses, cashboxTransactions, staff, expenseOperationalDayDates])
   const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
 
-  const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, sales, expenses, cashboxTransactions, periodFrom, periodTo])
+  const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales: reportSales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, reportSales, expenses, cashboxTransactions, periodFrom, periodTo])
   const visibleEmployeeSummaries = useMemo(() => filterEmployeeSummaries(employeeDataset.summaries, employeeQuery), [employeeDataset.summaries, employeeQuery])
   const selectedEmployee = useMemo(() => employeeDataset.summaries.find(row => String(row.employee?.id) === String(selectedEmployeeId)) || null, [employeeDataset.summaries, selectedEmployeeId])
   const captainCandidates = useMemo(() => filterCaptainCandidates(staff, captainQuery), [staff, captainQuery])
   const selectedCaptain = useMemo(() => (Array.isArray(staff) ? staff : []).find(row => String(row.id) === String(selectedCaptainId)) || null, [staff, selectedCaptainId])
-  const captainDataset = useMemo(() => buildCaptainReport({ captain: selectedCaptain, staff, sales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo, sections: captainSections }), [selectedCaptain, staff, sales, expenses, cashboxTransactions, periodFrom, periodTo, captainSections])
+  const captainDataset = useMemo(() => buildCaptainReport({ captain: selectedCaptain, staff, sales: reportSales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo, sections: captainSections }), [selectedCaptain, staff, reportSales, expenses, cashboxTransactions, periodFrom, periodTo, captainSections])
 
   const periodDataset = useMemo(() => {
     if (reportType !== 'period') return EMPTY_PERIOD_DATASET
     const valid = isValidDateRange(periodFrom, periodTo)
-    const rangeSales = filterRowsByBusinessDate(sales, periodFrom, periodTo)
+    const rangeSales = reportSales
     const rangeExpenses = filterRowsByBusinessDate((Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)
     const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo)
     const dailyMap = new Map()
@@ -294,7 +300,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     rangeExpenses.forEach(row => addEmployee(row, numberValue(row.amount), 'expense'))
     rangeTransactions.filter(row => row.type === 'withdrawal').forEach(row => addEmployee(row, numberValue(row.amount), 'withdrawal'))
     return { valid, sales: rangeSales, expenses: rangeExpenses, transactions: rangeTransactions, daily, employees: [...employeeMap.values()], summary: { grossSales, cashSales, electronicSales, expensesTotal, withdrawals, deposits, adjustments, orderCount: rangeSales.length, averageOrder: rangeSales.length ? grossSales / rangeSales.length : 0, netCash: cashSales - expensesTotal - withdrawals + deposits + adjustments, beforeBalance, endBalance } }
-  }, [periodFrom, periodTo, sales, expenses, cashboxTransactions, expenseOperationalDayDates])
+  }, [periodFrom, periodTo, reportSales, sales, expenses, cashboxTransactions, expenseOperationalDayDates])
 
   const openPeriodReport = () => {
     if (!isValidDateRange(periodFrom, periodTo)) { setPeriodError('من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'); return }
