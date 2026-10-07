@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrec
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, readRawSaleQueue, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
@@ -604,23 +604,42 @@ export const mergeCentralSalesLocally = centralSales => {
   return merged
 }
 
-const runCashierCentralSyncInternal = async ({ initial = false } = {}) => {
-  await requireRole('cashier-sync')
+const logQueueDecision = (sale, reason, detail = '') => {
+  const payload = { reason, saleId: saleIdOf(sale), orderNumber: sale?.orderNumber ?? '', operationKey: sale?.operationKey || sale?.operation_key || '', detail }
+  console.info('[POS101_MANUAL_QUEUE]', payload)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
+}
+
+const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = false } = {}) => {
+  try { await requireRole('cashier-sync') } catch (error) {
+    logQueueDecision(null, error?.code === 'KIOSK_AUTH_REQUIRED' ? 'auth claims missing' : 'auth required', error?.message || '')
+    throw error
+  }
   const localSales = readSales()
   // The queue is durable evidence of a completed sale. Older cashier builds
   // could persist the queue wrapper without retaining the matching ledger row,
   // so the worker must include queue.sale as a candidate instead of silently
   // treating that sale as nonexistent.
-  const queuedSales = readSaleQueue().map(entry => entry.sale).filter(Boolean)
+  const rawQueue = readRawSaleQueue()
+  const queuedSales = []
+  for (const rawEntry of rawQueue) {
+    const sale = rawEntry?.sale
+    if (!sale) { logQueueDecision(null, 'malformed queue entry', 'missing sale payload'); continue }
+    if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'ineligible', `status=${sale?.status || ''}`); continue }
+    queuedSales.push(sale)
+  }
   const candidateByIdentity = new Map()
-  for (const sale of [...localSales, ...queuedSales]) {
+  for (const sale of [...(queueOnly ? [] : localSales), ...queuedSales]) {
     const identity = String(saleIdOf(sale) || sale?.operationKey || sale?.operation_key || '')
     if (identity && !candidateByIdentity.has(identity)) candidateByIdentity.set(identity, sale)
   }
   const before = await get(salesRef())
   const beforeCentral = centralValues(before)
   const centralIds = new Set(beforeCentral.map(saleIdOf))
-  const candidates = [...candidateByIdentity.values()].filter(isSaleEligibleForCentralUpload)
+  const candidates = [...candidateByIdentity.values()].filter(sale => {
+    if (!isSaleEligibleForCentralUpload(sale)) { logQueueDecision(sale, 'ineligible'); return false }
+    return true
+  })
   const uploadable = candidates
   let uploaded = 0
   let updated = 0
@@ -635,10 +654,12 @@ const runCashierCentralSyncInternal = async ({ initial = false } = {}) => {
     if (classification.action === 'quarantine') {
       const error = Object.assign(new Error(`تعذر رفع مبيعة متعارضة: ${classification.reason}`), { code: classification.reason })
       if (queueEntry) retainQueuedSale(queueEntry, error)
+      logQueueDecision(sale, 'duplicate guard', classification.reason)
       continue
     }
     if (classification.action === 'duplicate') {
       if (queueEntry) markSaleSynced(sale)
+      logQueueDecision(sale, 'duplicate guard', 'central payload already matches')
       updated += 1
       continue
     }
@@ -652,19 +673,24 @@ const runCashierCentralSyncInternal = async ({ initial = false } = {}) => {
       const readBack = await get(saleRef).catch(() => null)
       if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
         if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
-        throw Object.assign(error, { code: error?.code || 'SALE_READBACK_FAILED' })
+        logQueueDecision(sale, 'Firebase error', error?.message || '')
+        continue
       }
     }
     const readBack = await get(saleRef).catch(() => null)
     if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
       const error = Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
       if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
-      throw error
+      logQueueDecision(sale, 'Firebase error', error.message)
+      continue
     }
     await syncAccSaleBestEffort(sale)
     if (centralIds.has(saleIdOf(sale))) updated += 1
     else uploaded += 1
+    // The local ledger and queue are changed only after the full central
+    // payload has been read back and matched, including operationKey.
     markSaleSynced(sale)
+    logQueueDecision(sale, 'synced', 'central read-back verified')
   }
 
   const after = await get(salesRef())
@@ -682,12 +708,26 @@ const runCashierCentralSyncInternal = async ({ initial = false } = {}) => {
     updated,
     initialSyncCompleted: readInitialSyncCompleted(),
     uploadBlocked: false,
+    skipped: rawQueue.length - uploaded - updated,
   }
 }
 
 export const runCashierCentralSync = ({ initial = false } = {}) => {
   if (cashierSyncInFlight) return cashierSyncInFlight
   cashierSyncInFlight = runCashierCentralSyncInternal({ initial })
+    .finally(() => { cashierSyncInFlight = null })
+  return cashierSyncInFlight
+}
+
+// Explicit user-triggered path. It reads the current tab's localStorage at
+// click time and processes existing queue entries, including entries created
+// by older bundles. It never closes the day or deletes an unverified queue row.
+export const runCashierCentralSyncNow = () => {
+  if (cashierSyncInFlight) {
+    logQueueDecision(null, 'locked', 'another cashier sync is already running')
+    return cashierSyncInFlight
+  }
+  cashierSyncInFlight = runCashierCentralSyncInternal({ queueOnly: true })
     .finally(() => { cashierSyncInFlight = null })
   return cashierSyncInFlight
 }

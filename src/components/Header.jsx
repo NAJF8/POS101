@@ -13,7 +13,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup }) {
+export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, onSync, syncBusy = false, syncLabel = 'المزامنة جاهزة' }) {
   const now = useLiveClock()
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
@@ -52,6 +52,10 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
             <span>الرئيسية</span>
           </button>
         )}
+
+        {session && <button className="header-btn outline-btn" type="button" onClick={onSync} disabled={syncBusy} title={syncLabel}>
+          <span>{syncBusy ? 'جارٍ المزامنة…' : 'مزامنة الآن'}</span>
+        </button>}
 
         {session && currentView === 'pos' && (
           <>
