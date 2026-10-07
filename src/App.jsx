@@ -22,6 +22,7 @@ import { getOpenOrders } from './services/orderState.js'
 import { VERSION_CHECK_INTERVAL_MS, createVersionController, installServiceWorker } from './services/versionUpdate.js'
 import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
+import { canonicalSalesForOperationalDay, reconcileCanonicalSales } from './services/canonicalSales.js'
 import { calculateSettlement } from './services/financialCenter.js'
 import KioskActivation from './components/KioskActivation.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
@@ -423,8 +424,10 @@ export default function App() {
 
   const operationalDaySummary = useMemo(() => {
     const expenses = readLocalExpenses()
-    return calculateOperationalDaySummary(readLocalSales(), expenses, operationalDay?.id)
-  }, [operationalDay, ledgerVersion])
+    const localSales = readLocalSales()
+    const daySales = canonicalSalesForOperationalDay({ localSales, centralSales, operationalDay })
+    return calculateOperationalDaySummary(daySales, expenses, operationalDay?.id)
+  }, [operationalDay, centralSales, ledgerVersion])
 
   useEffect(() => {
     if (!operationalDay?.id || operationalDay.status !== 'open') {
@@ -477,8 +480,14 @@ export default function App() {
     const fresh = await readFreshSettlementPreview(operationalDay)
     setFreshSettlementPreview(fresh)
     const guard = await readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount })
-    if (!guard.allowed) throw Object.assign(new Error(guard.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose: guard })
-  }, [operationalDay, openOrdersCount])
+    const reconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales, operationalDay })
+    if (!guard.allowed || !reconciliation.allowed) {
+      const message = guard.message || 'تعذر مطابقة المبيعات المحلية والمركزية قبل التسوية.'
+      setPreCloseGuard({ ...guard, loading: false, state: 'real-pending', allowed: false, message, financialReconciliation: reconciliation })
+      throw Object.assign(new Error(message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose: { ...guard, financialReconciliation: reconciliation } })
+    }
+    setPreCloseGuard({ ...guard, loading: false, state: 'verified', allowed: true, message: '', financialReconciliation: reconciliation })
+  }, [operationalDay, openOrdersCount, centralSales])
 
   const handleEndOperationalDay = useCallback(async actualCash => {
     setOperationalDayError('')

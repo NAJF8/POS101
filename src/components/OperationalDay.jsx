@@ -201,6 +201,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         <p>وقت البدء: <b>{startedLabel}</b></p>
         <p>وقت الإغلاق الحالي: <b>{formatDateTime(Date.now())}</b></p>
         <div className="operational-day-summary">
+          {preCloseGuard?.allowed === false && <p className="form-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
           <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>
           <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
           <span>مبيعات نقدية <b>{money(settlementPreview.cashSales)}</b></span>
@@ -218,7 +219,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>
-          <button className="danger-button" type="button" disabled={busy || actualCash === ''} aria-disabled={preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
+          <button className="danger-button" type="button" disabled={busy || actualCash === '' || preCloseGuard?.loading || preCloseGuard?.allowed === false} aria-disabled={preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
         </div>
       </div>
     </div>}

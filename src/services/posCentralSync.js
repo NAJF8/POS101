@@ -32,6 +32,7 @@ import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSale
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
+import { reconcileCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 
 const env = import.meta.env || {}
@@ -1216,6 +1217,11 @@ export const readFreshSettlementPreview = async operationalDay => calculateSettl
 export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {} } = {}) => {
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
   if (!preClose.allowed) throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
+  const centralBeforeWrite = centralValues(await get(salesRef()))
+  const financialReconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales: centralBeforeWrite, operationalDay: day })
+  if (!financialReconciliation.allowed) {
+    throw Object.assign(new Error('تعذر مطابقة المبيعات المحلية والمركزية؛ تم تعطيل إنهاء اليوم دون أي كتابة.'), { code: 'FINANCIAL_RECONCILIATION_BLOCKED', financialReconciliation })
+  }
   const user = await financialUser(true)
   const id = String(day?.id || day?.operationalDayId || '').trim()
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
