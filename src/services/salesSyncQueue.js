@@ -1,5 +1,6 @@
 const SALES_KEY = 'pos101.sales'
 const QUEUE_KEY = 'pos101.syncQueue'
+export const QUARANTINE_BUCKET = 'pos101.salesQuarantine'
 
 const readJson = (key, fallback) => {
   try {
@@ -38,7 +39,78 @@ export const isSaleSyncEligible = sale => {
     && total >= 0)
 }
 
-const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale))
+const text = value => String(value ?? '').trim()
+const requiredIdentity = sale => ({
+  saleId: text(saleIdOf(sale)),
+  operationKey: text(operationKeyOf(sale)),
+  businessDate: text(sale?.businessDate),
+  operationalDayId: text(sale?.operationalDayId || sale?.operational_day_id),
+})
+export const missingSaleIdentity = sale => Object.entries(requiredIdentity(sale)).filter(([, value]) => !value).map(([key]) => key)
+export const isSaleIdentityComplete = sale => missingSaleIdentity(sale).length === 0
+export const isInvalidSaleStatus = sale => cancelledStatuses.has(text(sale?.status).toLowerCase())
+
+const stable = value => {
+  if (Array.isArray(value)) return value.map(stable)
+  if (value && typeof value === 'object') return Object.keys(value).sort().reduce((out, key) => { out[key] = stable(value[key]); return out }, {})
+  return value
+}
+const number = value => Number.isFinite(Number(value)) ? Number(value) : 0
+const normalizedItems = sale => saleItems(sale).map(item => ({
+  id: text(item?.id || item?.productId || item?.product_id || item?.sku || item?.name),
+  quantity: number(item?.quantity),
+  unitPrice: number(item?.unitPrice ?? item?.price ?? item?.unit_price),
+  lineTotal: number(item?.lineTotal ?? item?.total ?? (number(item?.quantity) * number(item?.unitPrice ?? item?.price ?? item?.unit_price))),
+})).sort((a, b) => `${a.id}|${a.unitPrice}|${a.quantity}`.localeCompare(`${b.id}|${b.unitPrice}|${b.quantity}`))
+export const financialFingerprint = sale => JSON.stringify(stable({
+  items: normalizedItems(sale),
+  gross: number(sale?.gross ?? sale?.subtotal),
+  discount: number(sale?.discount),
+  net: number(sale?.net ?? sale?.total ?? sale?.subtotal),
+  cashAmount: number(sale?.cashAmount ?? sale?.payment?.cashAmount),
+  electronicAmount: number(sale?.electronicAmount ?? sale?.payment?.electronicAmount),
+  paymentMethod: text(sale?.paymentMethod || sale?.payment?.method),
+  operationalDayId: text(sale?.operationalDayId || sale?.operational_day_id),
+  businessDate: text(sale?.businessDate),
+}))
+export const salePayloadMatches = (expected, actual) => Boolean(expected && actual
+  && text(saleIdOf(expected)) === text(saleIdOf(actual))
+  && (!operationKeyOf(expected) || text(operationKeyOf(expected)) === text(operationKeyOf(actual)))
+  && text(expected?.businessDate) === text(actual?.businessDate)
+  && text(expected?.operationalDayId || expected?.operational_day_id) === text(actual?.operationalDayId || actual?.operational_day_id)
+  && number(expected?.net ?? expected?.total ?? expected?.subtotal) === number(actual?.net ?? actual?.total ?? actual?.subtotal)
+  && text(expected?.paymentMethod || expected?.payment?.method) === text(actual?.paymentMethod || actual?.payment?.method)
+  && financialFingerprint(expected) === financialFingerprint(actual))
+
+export const classifyCentralSale = (sale, centralSales = []) => {
+  const id = text(saleIdOf(sale))
+  const operationKey = text(operationKeyOf(sale))
+  const byId = (centralSales || []).find(row => text(saleIdOf(row)) === id)
+  const byOperation = operationKey && (centralSales || []).find(row => text(operationKeyOf(row)) === operationKey)
+  if (byId && salePayloadMatches(sale, byId)) return { action: 'duplicate', central: byId, reason: 'CENTRAL_DUPLICATE' }
+  if (byId) return { action: 'quarantine', central: byId, reason: 'SALE_ID_COLLISION' }
+  if (byOperation && !salePayloadMatches(sale, byOperation)) return { action: 'quarantine', central: byOperation, reason: 'OPERATION_KEY_COLLISION' }
+  return { action: 'upload', central: null, reason: '' }
+}
+
+const quarantineEntry = (sale, quarantineReason, raw = sale, now = Date.now()) => ({
+  saleId: saleIdOf(sale) || '', orderNumber: sale?.orderNumber ?? '', operationKey: operationKeyOf(sale) || '',
+  businessDate: sale?.businessDate || '', operationalDayId: sale?.operationalDayId || '', status: sale?.status || '',
+  syncStatus: sale?.syncStatus || 'pending_sync', createdAt: sale?.createdAt || 0, updatedAt: sale?.updatedAt || now,
+  net: sale?.net ?? sale?.total ?? sale?.subtotal ?? 0, paymentMethod: sale?.paymentMethod || sale?.payment?.method || '',
+  rawQueuePayload: raw, quarantineReason, quarantinedAt: now,
+})
+export const readSalesQuarantine = () => readJson(QUARANTINE_BUCKET, [])
+export const quarantineSale = (sale, quarantineReason, raw = sale) => {
+  const existing = readSalesQuarantine()
+  const entry = quarantineEntry(sale, quarantineReason, raw)
+  const key = `${entry.saleId}|${entry.operationKey}|${entry.quarantineReason}`
+  if (!existing.some(row => `${row.saleId}|${row.operationKey}|${row.quarantineReason}` === key)) writeJson(QUARANTINE_BUCKET, [...existing, entry])
+  if (typeof console !== 'undefined') console.info('[POS_QUEUE_QUARANTINE]', { reason: quarantineReason, saleId: entry.saleId, orderNumber: entry.orderNumber, operationKeyPresent: Boolean(entry.operationKey), dayIdentityPresent: Boolean(entry.businessDate && entry.operationalDayId), classification: quarantineReason })
+  return entry
+}
+
+const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale) && isSaleIdentityComplete(entry.sale))
 const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
   const pending = pendingSale(sale, error)
   const attempts = Number(existing?.attempts)
@@ -62,7 +134,8 @@ const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.
   }
 }
 
-export const readSaleQueue = () => readJson(QUEUE_KEY, []).filter(isSaleEntry)
+export const readRawSaleQueue = () => readJson(QUEUE_KEY, [])
+export const readSaleQueue = () => readRawSaleQueue().filter(isSaleEntry)
 
 export const readSalesCount = () => readJson(SALES_KEY, []).filter(sale => saleIdOf(sale)).length
 
@@ -122,10 +195,16 @@ export const pendingSale = (sale, error) => ({
 // to both the ledger and the durable queue before this function returns.
 export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
   const saleId = saleIdOf(sale)
-  if (!saleId) throw new Error('Cannot queue a sale without saleId.')
+  if (!saleId) { quarantineSale(sale, 'LEGACY_UNSAFE_QUEUE', { sale }); return sale }
   const sales = readJson(SALES_KEY, [])
+  if (!isSaleIdentityComplete(sale)) {
+    if (!sales.some(row => sameSaleIdentity(row, sale))) writeJson(SALES_KEY, [...sales, sale])
+    quarantineSale(sale, 'LEGACY_UNSAFE_QUEUE', { sale })
+    return sale
+  }
   if (!isSaleSyncEligible(sale)) {
     if (!sales.some(row => sameSaleIdentity(row, sale))) writeJson(SALES_KEY, [...sales, sale])
+    if (isInvalidSaleStatus(sale)) quarantineSale(sale, 'INVALID_STATUS', { sale })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
     return sale
   }
@@ -159,8 +238,15 @@ export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
 // queue, so a future integration can use them for idempotency.
 export const reconcileSalesQueue = () => {
   const sales = readJson(SALES_KEY, [])
-  const queue = readJson(QUEUE_KEY, [])
+  const queue = readRawSaleQueue()
   let added = 0
+  let quarantined = 0
+  for (const entry of queue) {
+    const sale = entry?.sale || entry
+    if (!isSaleIdentityComplete(sale)) { quarantineSale(sale, 'LEGACY_UNSAFE_QUEUE', entry); quarantined += 1 }
+    else if (!isSaleSyncEligible(sale) || isInvalidSaleStatus(sale)) { quarantineSale(sale, 'INVALID_STATUS', entry); quarantined += 1 }
+    else if (!sales.some(row => sameSaleIdentity(row, sale))) { quarantineSale(sale, 'QUEUE_WITHOUT_LEDGER', entry); quarantined += 1 }
+  }
   for (const sale of sales) {
     if (!isSaleSyncEligible(sale) || sale.status === 'synced' || sale.syncConfirmedAt) continue
     if (queue.some(entry => isSaleEntry(entry) && sameSaleIdentity(entry.sale, sale))) continue
@@ -168,7 +254,7 @@ export const reconcileSalesQueue = () => {
     added += 1
   }
   if (added) writeJson(QUEUE_KEY, queue)
-  return { added, queue: queue.filter(isSaleEntry), pendingCount: readPendingSaleCount() }
+  return { added, quarantined, queue: queue.filter(isSaleEntry), pendingCount: readPendingSaleCount() }
 }
 
 export const buildSalesBackup = (createdAt = new Date().toISOString()) => {

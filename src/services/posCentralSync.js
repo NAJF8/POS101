@@ -457,10 +457,10 @@ export const readCentralSalesForOperationalDay = async day => {
   return getReportSalesForOperationalDay({ centralSales: rows, operationalDayId: day?.id || day?.operationalDayId, businessDate: day?.businessDate })
 }
 
-export const readPreCloseReconciliation = async operationalDay => {
+export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0 } = {}) => {
   await financialUser(false)
   const centralSales = centralValues(await get(salesRef()))
-  return reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay })
+  return reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay, openOrderCount })
 }
 
 export const runFullRecoverySync = async () => {
@@ -1098,9 +1098,9 @@ const centralSettlementInputs = async operationalDay => {
 
 export const readFreshSettlementPreview = async operationalDay => calculateSettlement(await centralSettlementInputs(operationalDay))
 
-export const settleAndEndOperationalDay = async (day, { actualCash, endedBy = {} } = {}) => {
-  const preClose = await readPreCloseReconciliation(day)
-  if (!preClose.allowed) throw Object.assign(new Error('توجد مبيعات غير متزامنة. أكمل المزامنة قبل إنهاء اليوم.'), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
+export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {} } = {}) => {
+  const preClose = await readPreCloseReconciliation(day, { openOrderCount })
+  if (!preClose.allowed) throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
   const user = await financialUser(true)
   const id = String(day?.id || day?.operationalDayId || '').trim()
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
@@ -1200,7 +1200,7 @@ export const saveCashboxTransaction = async transaction => {
   const id = String(transaction?.id || `cash-${crypto.randomUUID()}`).trim()
   const existing = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
   if (existing.exists()) return existing.val()
-  const payload = { ...transaction, id, createdAt: transaction?.createdAt || Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '', status: transaction?.status || 'active' }
+  const payload = { ...transaction, id, ...(transaction?.type === 'withdrawal' ? { fundingSource: transaction?.fundingSource === 'management' ? 'management' : 'cashbox' } : {}), createdAt: transaction?.createdAt || Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '', status: transaction?.status || 'active' }
   if (!payload.businessDate || !Number.isFinite(Number(payload.amount)) || Number(payload.amount) <= 0) throw new Error('businessDate والمبلغ الصحيحان مطلوبان.')
   await set(financialPath(`${cashboxTransactionsPath}/${id}`), payload)
   const readBack = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
@@ -1215,7 +1215,7 @@ export const updateCashboxTransaction = async transaction => {
   const existingSnapshot = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
   if (!existingSnapshot.exists()) throw new Error('حركة الصندوق غير موجودة.')
   const existing = existingSnapshot.val()
-  const payload = { ...existing, ...transaction, id, createdAt: existing.createdAt || transaction.createdAt || Date.now(), updatedAt: Date.now(), updatedBy: user.uid, createdByUid: existing.createdByUid || user.uid, status: transaction.status || existing.status || 'active' }
+  const payload = { ...existing, ...transaction, id, ...(existing.type === 'withdrawal' || transaction?.type === 'withdrawal' ? { fundingSource: transaction?.fundingSource === 'management' ? 'management' : (existing.fundingSource === 'management' ? 'management' : 'cashbox') } : {}), createdAt: existing.createdAt || transaction.createdAt || Date.now(), updatedAt: Date.now(), updatedBy: user.uid, createdByUid: existing.createdByUid || user.uid, status: transaction.status || existing.status || 'active' }
   await set(financialPath(`${cashboxTransactionsPath}/${id}`), payload)
   const readBack = await get(financialPath(`${cashboxTransactionsPath}/${id}`))
   if (!readBack.exists()) throw Object.assign(new Error('تعذر التحقق من تعديل حركة الصندوق.'), { code: 'CASHBOX_EDIT_READBACK_FAILED' })

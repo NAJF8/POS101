@@ -40,6 +40,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [entryType, setEntryType] = useState('current')
   const [historicalDate, setHistoricalDate] = useState('')
   const [payFromCashbox, setPayFromCashbox] = useState(false)
+  const [withdrawalFundingSource, setWithdrawalFundingSource] = useState('cashbox')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [syncMessage, setSyncMessage] = useState('')
@@ -51,7 +52,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     window.setTimeout(() => setSuccessMessage(''), 3200)
   }
 
-  const resetForm = () => { const activePerson = staff.find(row => row.active) || null; setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(activePerson?.name || 'علي'); setPersonId(activePerson?.id || ''); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setPayFromCashbox(false) }
+  const resetForm = () => { const activePerson = staff.find(row => row.active) || null; setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(activePerson?.name || 'علي'); setPersonId(activePerson?.id || ''); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setPayFromCashbox(false); setWithdrawalFundingSource('cashbox') }
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
@@ -121,6 +122,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
           description: cleanDescription,
           notes: cleanNotes,
           source: 'employee withdrawal',
+          fundingSource: withdrawalFundingSource,
         })
         resetForm(); setFormOpen(false); announceSuccess('تم حفظ السحب كحركة صندوق مرتبطة بالموظف')
       } catch (error) {
@@ -203,7 +205,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         <label>الموظف / الكاشير<select value={personId || person} onChange={e => { const value = e.target.value; const selected = staff.find(row => String(row.id) === value); setPersonId(selected?.id || ''); setPerson(selected?.name || value) }}>{(staff.length ? staff.filter(row => row.active !== false).map(row => <option key={row.id} value={row.id}>{row.name}{row.code ? ` · ${row.code}` : ''}</option>) : people.map(value => <option key={value} value={value}>{value}</option>))}</select></label>
         {entryType === 'current' ? <div className="expense-date-context"><span>تاريخ الأعمال</span><strong>{effectiveOperationalDay?.status === 'open' ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong><small>يرتبط المصروف باليوم التشغيلي المفتوح، حتى بعد منتصف الليل.</small></div> : <label>التاريخ السابق<input type="date" max={getLocalDateKey(Date.now())} value={historicalDate} onChange={e => setHistoricalDate(e.target.value)} required /></label>}
         <label className="expense-notes">ملاحظات (اختياري)<textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="أضف ملاحظة عند الحاجة" rows="3" /></label>
-        {entryType === 'current' && category !== 'سحوبات' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : category === 'سحوبات' ? <div className="expense-safe-note">سيُحفظ كسحب صندوق canonical مرتبط بالموظف، ولن يُنشأ له مصروف مكرر.</div> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}
+      {entryType === 'current' && category !== 'سحوبات' ? <label className="expense-cashbox-toggle"><input type="checkbox" checked={payFromCashbox} onChange={e => setPayFromCashbox(e.target.checked)} /> الدفع من الصندوق</label> : category === 'سحوبات' ? <><label>مصدر السحب<select value={withdrawalFundingSource} onChange={e => setWithdrawalFundingSource(e.target.value)}><option value="cashbox">من الصندوق</option><option value="management">من الإدارة</option></select></label><div className="expense-safe-note">سيُحفظ كسحب canonical مرتبط بالموظف؛ {withdrawalFundingSource === 'cashbox' ? 'يخصم من الصندوق.' : 'لا يخصم من الصندوق ولا من المتوقع النقدي.'}</div></> : <div className="expense-safe-note">المصروف السابق يُحفظ بتاريخه ولا يغيّر رصيد صندوق اليوم الحالي.</div>}
       </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate)}>{editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}</div></form>}
       </section>
       <div className="report-card expense-total"><h3>إجمالي المصاريف: {format(total)}</h3></div>

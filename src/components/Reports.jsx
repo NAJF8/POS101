@@ -261,6 +261,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     periodFrom,
     periodTo,
   ), [expenses, periodFrom, periodTo, expenseOperationalDayDates])
+  const filteredTransactions = useMemo(() => filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo), [cashboxTransactions, periodFrom, periodTo])
   const normalizedCashOutflows = useMemo(() => normalizeCashOutflowReport({ expenses, transactions: cashboxTransactions, staff, operationalDayDates: expenseOperationalDayDates }), [expenses, cashboxTransactions, staff, expenseOperationalDayDates])
   const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
 
@@ -368,7 +369,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     if (!directThermalReady || !onDirectThermalPrint) return
     const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
-      ? calculateComprehensiveSummary(filteredSales, filteredExpenses)
+      ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions)
       : undefined
     onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: reportType === 'expenses' ? filteredCashOutflows : filteredExpenses, cashOutflows: filteredCashOutflows, ...(reportType === 'materials' ? { products, categories, materials: buildMaterialsReport({ sales: filteredSales, products, categories }) } : {}), ...(summary ? { summary } : {}) })
   }
@@ -457,7 +458,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       <table className="print-table report-summary"><tbody><tr><td>إجمالي المصاريف</td><td className="number-cell">{money(summary.expensesTotal)}</td></tr><tr><td>إجمالي الرواتب</td><td className="number-cell">{money(summary.salaryTotal)}</td></tr><tr><td>إجمالي السحوبات</td><td className="number-cell">{money(summary.withdrawalsTotal)}</td></tr><tr className="summary-highlight"><td>إجمالي المبالغ على الموظف</td><td className="number-cell">{money(summary.employeeTotal)}</td></tr></tbody></table>
       <h3>المصاريف</h3>{detailRows(summary.expenses, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'النوع', value: row => row.category || '—' }, { label: 'الوصف', value: row => row.description || row.notes || '—' }, { label: 'المبلغ', value: row => money(row.amount), number: true }], 'لا توجد مصاريف')}
       <h3>الرواتب</h3>{detailRows(summary.salary, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظات', value: row => row.notes || row.description || '—' }], 'لا توجد رواتب')}
-      <h3>السحوبات</h3>{detailRows(summary.withdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }], 'لا توجد سحوبات')}
+      <h3>السحوبات</h3>{detailRows(summary.withdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المصدر', value: row => row.fundingSource === 'management' ? 'من الإدارة' : 'من الصندوق' }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }], 'لا توجد سحوبات')}
     </> : employeeTable()
     return <div className="report-view-container employee-report-view" dir="rtl">
       <div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button><button className="outline-btn" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button></div></div>
@@ -603,8 +604,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     } else if (reportType === 'comprehensive') {
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
-      const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses)
-      const { grossSales, discounts, expenses: expensesTotal, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll } = summary
+      const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions)
+      const { grossSales, discounts, expenses: expensesTotal, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll, cashSales, cashboxWithdrawals, managementWithdrawals, withdrawals, deposits, finalAfterAllSettlements } = summary
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
       const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
@@ -639,6 +640,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
             <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
             <tr><td>الإلكتروني</td><td className="number-cell">{format(electronicTotal)}</td></tr>
+            <tr><td>سحوبات من الصندوق</td><td className="number-cell">{format(cashboxWithdrawals)}</td></tr>
+            <tr><td>سحوبات من الإدارة</td><td className="number-cell">{format(managementWithdrawals)}</td></tr>
+            <tr><td>إجمالي السحوبات</td><td className="number-cell">{format(withdrawals)}</td></tr>
+            <tr><td>الإيداعات</td><td className="number-cell">{format(deposits)}</td></tr>
+            <tr className="summary-highlight"><td>المجموع بعد كل التصفيات</td><td className="number-cell">{format(finalAfterAllSettlements)}</td></tr>
             <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(stats.count)}</td></tr>
           </tbody>
         </table>
@@ -751,7 +757,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <tbody>
             {filteredCashOutflows.map((row, idx) => (
               <tr key={`${row.source}:${row.id}`}>
-                <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || '—'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.source === 'cashbox_transaction' ? 'الصندوق' : 'المصاريف'}</td>
+                <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || '—'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.sourceLabel || (row.source === 'expense' ? 'المصاريف' : row.source || '—')}</td>
               </tr>
             ))}
             {filteredCashOutflows.length === 0 && <tr><td colSpan="7">لا توجد مصاريف أو سحوبات نقدية مسجلة</td></tr>}

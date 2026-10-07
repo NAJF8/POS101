@@ -47,7 +47,7 @@ export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], s
     const person = matchEmployeeRecord(transaction, staff)
     const type = typeOf(transaction)
     const withdrawal = type === 'withdrawal' || type.includes('withdrawal')
-    rows.push({ id: text(transaction.id || transaction.transactionId) || `cashbox:${mirrorKeyOf(transaction)}`, source: 'cashbox_transaction', sourceType: text(transaction.type || transaction.transactionType) || 'cash_out', typeLabel: withdrawal ? 'سحوبات' : 'أخرى', amount: amount(transaction.amount), employeeId: text(person?.id || transaction.employeeId || transaction.staffId || transaction.cashierId), employeeName: text(person?.name || employeeNameOf(transaction) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(transaction)), description: descriptionOf(transaction), notes: text(transaction.notes || transaction.reason || transaction.note), businessDate: dateOf(transaction, operationalDayDates), createdAt: transaction.createdAt || transaction.created_at || transaction.timestamp || transaction.date || 0, operationalDayId: text(transaction.operationalDayId || transaction.operational_day_id || transaction.shiftId), original: transaction })
+    rows.push({ id: text(transaction.id || transaction.transactionId) || `cashbox:${mirrorKeyOf(transaction)}`, source: withdrawal && transaction.fundingSource === 'management' ? 'الإدارة' : 'الصندوق', sourceLabel: withdrawal && transaction.fundingSource === 'management' ? 'من الإدارة' : (withdrawal ? 'من الصندوق' : ''), sourceType: text(transaction.type || transaction.transactionType) || 'cash_out', typeLabel: withdrawal ? 'سحوبات' : 'أخرى', fundingSource: withdrawal && transaction.fundingSource === 'management' ? 'management' : (withdrawal ? 'cashbox' : ''), amount: amount(transaction.amount), employeeId: text(person?.id || transaction.employeeId || transaction.staffId || transaction.cashierId), employeeName: text(person?.name || employeeNameOf(transaction) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(transaction)), description: descriptionOf(transaction), notes: text(transaction.notes || transaction.reason || transaction.note), businessDate: dateOf(transaction, operationalDayDates), createdAt: transaction.createdAt || transaction.created_at || transaction.timestamp || transaction.date || 0, operationalDayId: text(transaction.operationalDayId || transaction.operational_day_id || transaction.shiftId), original: transaction })
   }
   return rows.sort((left, right) => `${left.businessDate}|${left.createdAt}|${left.id}`.localeCompare(`${right.businessDate}|${right.createdAt}|${right.id}`))
 }
@@ -57,7 +57,7 @@ export const filterCashOutflowReport = (rows, from, to, type = 'all') => (Array.
   if (to && row.businessDate > to) return false
   if (type === 'expenses') return row.source === 'expense' && row.typeLabel !== 'راتب'
   if (type === 'salary') return row.typeLabel === 'راتب'
-  if (type === 'withdrawals') return row.typeLabel === 'سحوبات'
+  if (type === 'withdrawals') return String(row.typeLabel || '').startsWith('سحوبات')
   if (type === 'other') return row.typeLabel === 'أخرى'
   return true
 })
