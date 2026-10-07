@@ -4,19 +4,40 @@ import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.
 
 const money = value => formatMoney(Number(value || 0))
 
-export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onStart, onEnd }) {
+export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onPrepareStart, onStart, onEnd }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
+  const [startOpen, setStartOpen] = useState(false)
+  const [startBusy, setStartBusy] = useState(false)
+  const [startError, setStartError] = useState('')
+  const [openingCash, setOpeningCash] = useState('')
+  const [openingNote, setOpeningNote] = useState('')
+  const [openingSuggestion, setOpeningSuggestion] = useState(null)
   const open = day?.status === 'open'
   const forgotten = open && day.startedAt && new Date(day.startedAt).toDateString() !== new Date().toDateString()
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])
   const startedTime = useMemo(() => day?.startedAt ? formatTime(day.startedAt, { hour: '2-digit', minute: '2-digit', hour12: true }) : '—', [day?.startedAt])
 
   const start = async () => {
-    if (busy) return
-    setBusy(true)
-    try { await onStart() } finally { setBusy(false) }
+    if (busy || startBusy) return
+    setStartBusy(true); setStartError('')
+    try {
+      const suggestion = await onPrepareStart?.()
+      setOpeningSuggestion(suggestion || null)
+      setOpeningCash(suggestion?.effectiveActualClosingCash == null ? '' : String(suggestion.effectiveActualClosingCash))
+      setOpeningNote('')
+      setStartOpen(true)
+    } catch (error) { setStartError(error?.message || 'تعذر قراءة رصيد إغلاق اليوم السابق.') } finally { setStartBusy(false) }
+  }
+  const confirmStart = async () => {
+    if (openingCash === '' || Number(openingCash) < 0) { setStartError('أكد رصيد بداية اليوم أولاً.'); return }
+    setStartBusy(true); setStartError('')
+    try {
+      const suggested = openingSuggestion?.effectiveActualClosingCash
+      await onStart({ openingCashBalance: Number(openingCash), openingCashSource: suggested != null && Number(openingCash) === Number(suggested) ? 'previous_closing' : 'manual', previousOperationalDayId: openingSuggestion?.previousOperationalDay?.id || '', openingCashAdjustmentNote: openingNote })
+      setStartOpen(false)
+    } catch (error) { setStartError(error?.message || 'تعذر بدء اليوم.') } finally { setStartBusy(false) }
   }
   const end = async () => {
     if (busy) return
@@ -61,10 +82,22 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         <strong>لا يوجد يوم تشغيلي مفتوح</strong>
         <small>ابدأ اليوم لبدء تسجيل المبيعات</small>
       </div>
-      <button className="primary-action operational-day-action" type="button" disabled={loading || busy} onClick={start}><Icon name="arrow" size={15} />{busy || loading ? 'جارٍ بدء اليوم…' : 'بدء اليوم'}</button>
+      <button className="primary-action operational-day-action" type="button" disabled={loading || busy || startBusy} onClick={start}><Icon name="arrow" size={15} />{busy || loading || startBusy ? 'جارٍ التحضير…' : 'بدء اليوم'}</button>
     </div>}
     {error && <p className="form-error" role="alert">{error}</p>}
+    {startError && <p className="form-error" role="alert">{startError}</p>}
     {open && preCloseGuard?.message && <p className="form-error" role="alert">{preCloseGuard.message}</p>}
+
+    {startOpen && <div className="overlay"><div className="dialog operational-day-dialog" dir="rtl">
+      <h2>بدء يوم تشغيلي جديد</h2>
+      <p>رصيد الصندوق عند بداية اليوم</p>
+      {openingSuggestion?.effectiveActualClosingCash != null
+        ? <p>صندوق اليوم السابق: <b>{money(openingSuggestion.effectiveActualClosingCash)}</b></p>
+        : <p role="status">لا يوجد رصيد إغلاق فعلي محفوظ لليوم السابق.</p>}
+      <label>رصيد بداية اليوم<input autoFocus type="number" min="0" value={openingCash} onChange={event => setOpeningCash(event.target.value)} placeholder="أدخل رصيد البداية" /></label>
+      {openingSuggestion?.effectiveActualClosingCash != null && Number(openingCash) !== Number(openingSuggestion.effectiveActualClosingCash) && <label>ملاحظة تعديل الرصيد<textarea value={openingNote} onChange={event => setOpeningNote(event.target.value)} placeholder="اختياري" /></label>}
+      <div className="dialog-actions"><button className="secondary-action" type="button" disabled={startBusy} onClick={() => setStartOpen(false)}>إلغاء</button><button className="primary-action" type="button" disabled={startBusy || openingCash === ''} onClick={confirmStart}>{startBusy ? 'جارٍ الحفظ…' : 'تأكيد رصيد البداية'}</button></div>
+    </div></div>}
 
     {endOpen && <div className="overlay">
       <div className="dialog operational-day-dialog">
@@ -77,13 +110,16 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
           <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
           <span>مبيعات نقدية <b>{money(settlementPreview.cashSales)}</b></span>
           <span>مبيعات إلكترونية <b>{money(settlementPreview.electronicSales)}</b></span>
+          <span>صندوق اليوم السابق <b>{settlementPreview.openingCashBalance == null ? 'غير متوفر' : money(settlementPreview.openingCashBalance)}</b></span>
+          <span>رصيد بداية اليوم <b>{settlementPreview.openingCashBalance == null ? 'غير متوفر' : money(settlementPreview.openingCashBalance)}</b></span>
           <span>مصاريف نقدية <b>{money(settlementPreview.expenses)}</b></span>
-          <span>سحوبات <b>{money(settlementPreview.withdrawals)}</b></span>
+          <span>سحوبات من الصندوق <b>{money(settlementPreview.cashboxWithdrawals)}</b></span>
+          <span>سحوبات من الإدارة <b>{money(settlementPreview.managementWithdrawals)}</b></span>
           <span>إيداعات <b>{money(settlementPreview.deposits)}</b></span>
-          <span>تعديلات <b>{money(settlementPreview.adjustments)}</b></span>
-          <span>المبلغ المتوقع <b>{money(settlementPreview.expectedCash)}</b></span>
+          <span>صافي حركة اليوم <b>{money(settlementPreview.dailyCashMovement)}</b></span>
+          <span>المبلغ المتوقع بالصندوق نهاية اليوم <b>{settlementPreview.openingCashBalance == null ? 'غير متوفر' : money(settlementPreview.expectedClosingCash)}</b></span>
           <label className="settlement-actual-cash">المبلغ الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل المبلغ الفعلي" /></label>
-          {actualCash !== '' && <span>الفرق <b>{money(Number(actualCash) - settlementPreview.expectedCash)}</b></span>}
+          {actualCash !== '' && settlementPreview.openingCashBalance != null && <span>الفرق <b>{money(Number(actualCash) - settlementPreview.expectedClosingCash)}</b></span>}
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>

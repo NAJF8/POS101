@@ -24,7 +24,7 @@ import {
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { normalizeStaffCanSell } from './staffEligibility.js'
-import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrection, makeSettlementIdempotencyKey } from './financialCenter.js'
+import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrection, getEffectiveSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
@@ -451,6 +451,27 @@ export const readCentralOperationalDays = async () => {
   return operationalDayValues(await get(operationalDaysRef()))
 }
 
+export const readOpeningCashSuggestion = async () => {
+  await requireOperationalDayRole()
+  const [daysSnapshot, settlementsSnapshot, correctionsSnapshot] = await Promise.all([
+    get(operationalDaysRef()),
+    get(financialPath(settlementPath)),
+    get(financialPath(settlementCorrectionsPath)),
+  ])
+  const days = operationalDayValues(daysSnapshot)
+    .filter(day => day.status === 'closed')
+    .sort((left, right) => Number(right.endedAt || right.startedAt || 0) - Number(left.endedAt || left.startedAt || 0))
+  const settlements = objectValues(settlementsSnapshot)
+  const corrections = objectValues(correctionsSnapshot)
+  for (const day of days) {
+    const settlement = settlements.find(row => String(row.operationalDayId || '') === String(day.id))
+    if (!settlement || !Number.isFinite(Number(settlement.actualCash))) continue
+    const effective = getEffectiveSettlement(settlement, corrections.filter(row => String(row.settlementId || '') === String(settlement.id)))
+    return { previousOperationalDay: day, previousSettlement: settlement, effectiveActualClosingCash: effective.effectiveActualCash, source: effective.correction ? 'settlement_correction' : 'settlement' }
+  }
+  return { previousOperationalDay: null, previousSettlement: null, effectiveActualClosingCash: null, source: 'manual' }
+}
+
 export const readCentralSalesForOperationalDay = async day => {
   await financialUser(false)
   const rows = centralValues(await get(salesRef()))
@@ -486,8 +507,10 @@ export const runFullRecoverySync = async () => {
   }
 }
 
-export const startOperationalDay = async ({ startedBy = {} } = {}) => {
+export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, openingCashSource = 'manual', previousOperationalDayId = '', openingCashAdjustmentNote = '' } = {}) => {
   const user = await requireOperationalDayRole()
+  const opening = Number(openingCashBalance)
+  if (!Number.isFinite(opening) || opening < 0) throw new Error('رصيد بداية اليوم مطلوب ويجب ألا يقل عن صفر.')
   const now = Date.now()
   const transaction = await runTransaction(operationalDaysRef(), current => {
     const days = Object.entries(current || {}).map(([id, value]) => ({ ...value, id: operationalDayIdOf(value) || id }))
@@ -501,6 +524,12 @@ export const startOperationalDay = async ({ startedBy = {} } = {}) => {
         businessDate: localBusinessDate(now),
         startedAt: now,
         startedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
+        openingCashBalance: opening,
+        openingCashSource: openingCashSource === 'previous_closing' ? 'previous_closing' : 'manual',
+        previousOperationalDayId: String(previousOperationalDayId || ''),
+        openingCashAdjustmentNote: String(openingCashAdjustmentNote || '').trim(),
+        confirmedAt: now,
+        confirmedBy: { uid: user.uid, name: startedBy.name || user.displayName || user.email || '', email: user.email || '' },
         endedAt: null,
         endedBy: null,
         status: 'open',
@@ -1096,7 +1125,7 @@ const centralSettlementInputs = async operationalDay => {
   return { sales, expenses, transactions }
 }
 
-export const readFreshSettlementPreview = async operationalDay => calculateSettlement(await centralSettlementInputs(operationalDay))
+export const readFreshSettlementPreview = async operationalDay => calculateSettlement({ ...(await centralSettlementInputs(operationalDay)), openingCashBalance: operationalDay?.openingCashBalance })
 
 export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {} } = {}) => {
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
@@ -1130,10 +1159,10 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   if (!settlement) {
     const actual = Number(actualCash)
     if (!Number.isFinite(actual) || actual < 0) throw Object.assign(new Error('المبلغ الفعلي للصندوق مطلوب.'), { code: 'ACTUAL_CASH_REQUIRED' })
-    const summary = calculateSettlement(inputs)
+    const summary = calculateSettlement({ ...inputs, openingCashBalance: remoteDay.openingCashBalance })
     const difference = actual - summary.expectedCash
     const status = difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
-    settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: remoteDay.businessDate, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
+    settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: remoteDay.businessDate, openingCashBalance: summary.openingCashBalance, cashSales: summary.cashSales, electronicSales: summary.electronicSales, expenses: summary.expenses, cashboxWithdrawals: summary.cashboxWithdrawals, managementWithdrawals: summary.managementWithdrawals, deposits: summary.deposits, dailyCashMovement: summary.dailyCashMovement, expectedCash: summary.expectedClosingCash, expectedClosingCash: summary.expectedClosingCash, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
   }
   const expectedCash = Number(settlement.expectedCash || 0)
   const cashbox = existingCashbox || { id: cashboxId, type: 'settlement', amount: Math.max(0, expectedCash), businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + Math.max(0, expectedCash) }
