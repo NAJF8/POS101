@@ -131,6 +131,7 @@ const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.
     attempts: Number.isFinite(attempts) && attempts >= 0 ? attempts : 0,
     lastAttemptAt: existing?.lastAttemptAt || null,
     lastError: error ? String(error?.message || error) : (existing?.lastError || ''),
+    lastErrorCode: error ? String(error?.code || '') : (existing?.lastErrorCode || ''),
   }
 }
 
@@ -273,4 +274,25 @@ export const retainQueuedSale = (entry, error) => {
   writeJson(QUEUE_KEY, queue)
   const sales = readJson(SALES_KEY, [])
   writeJson(SALES_KEY, sales.map(row => sameSale(row, saleId) ? sale : row))
+}
+
+export const markSaleAttempt = (entry, attemptedAt = Date.now()) => {
+  if (!entry?.sale) return null
+  const saleId = saleIdOf(entry.sale)
+  const queue = readJson(QUEUE_KEY, [])
+  let updated = null
+  const nextQueue = queue.map(row => {
+    if (!isSaleEntry(row) || !sameSaleIdentity(row.sale, entry.sale)) return row
+    updated = queueEntryForSale(row.sale, {
+      existing: row,
+      queuedAt: row.queuedAt,
+    })
+    updated.attempts = Number(row.attempts || 0) + 1
+    updated.lastAttemptAt = attemptedAt
+    updated.lastError = ''
+    updated.lastErrorCode = ''
+    return updated
+  })
+  if (updated) writeJson(QUEUE_KEY, nextQueue)
+  return updated || { ...entry, attempts: Number(entry.attempts || 0) + 1, lastAttemptAt: attemptedAt, lastError: '', lastErrorCode: '' }
 }

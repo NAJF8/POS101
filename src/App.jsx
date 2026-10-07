@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -25,6 +25,7 @@ import { calculateOperationalDaySummary } from './services/operationalDayReport.
 import { calculateSettlement } from './services/financialCenter.js'
 import KioskActivation from './components/KioskActivation.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
+import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -339,10 +340,7 @@ export default function App() {
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
       if (isCentralCashierUser(user)) {
-        const sync = getCentralSyncState().initialSyncCompleted
-          ? runCashierCentralSync()
-          : runCashierCentralSync({ initial: true })
-        void sync.catch(error => console.error('SALES_AUTO_SYNC_ERROR', error))
+        window.dispatchEvent(new Event('auth-ready'))
       }
     })
     return () => {
@@ -595,28 +593,19 @@ export default function App() {
 
   useEffect(() => {
     const retry = () => {
-      if (isCentralCashierUser(centralAuth()?.currentUser)) {
-        const sync = getCentralSyncState().initialSyncCompleted
-          ? runCashierCentralSync()
-          : runCashierCentralSync({ initial: true })
-        void sync.catch(error => console.error('SALES_RETRY_SYNC_ERROR', error))
-      }
+      if (!isCentralCashierUser(centralAuth()?.currentUser)) return null
+      const sync = getCentralSyncState().initialSyncCompleted
+        ? runCashierCentralSync()
+        : runCashierCentralSync({ initial: true })
+      void sync.catch(error => console.error('SALES_RETRY_SYNC_ERROR', error))
+      return sync
     }
-    const onVisibility = () => { if (!document.hidden) retry() }
-    window.addEventListener('pos101-sale-created', retry)
-    window.addEventListener('pos101-sale-updated', retry)
-    window.addEventListener('online', retry)
-    window.addEventListener('focus', retry)
+    const worker = createCashierQueueWorker({ processQueue: retry, hasEligibleQueue: () => isCentralCashierUser(centralAuth()?.currentUser) })
+    const stopWorker = worker.start({ events: ['pos101-sale-created', 'pos101-sale-updated', 'online', 'focus', 'auth-ready', 'firebase-reconnect'], target: window })
+    const onVisibility = () => { if (!document.hidden) void worker.run() }
     document.addEventListener('visibilitychange', onVisibility)
-    const timer = window.setInterval(retry, 30000)
-    return () => {
-      window.removeEventListener('pos101-sale-created', retry)
-      window.removeEventListener('pos101-sale-updated', retry)
-      window.removeEventListener('online', retry)
-      window.removeEventListener('focus', retry)
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.clearInterval(timer)
-    }
+    const reconnectStop = subscribeCentralReconnect(() => { window.dispatchEvent(new Event('firebase-reconnect')) })
+    return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility) }
   }, [])
 
   const refreshThermalStatus = useCallback(async settings => {

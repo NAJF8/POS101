@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrec
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { isSaleSyncEligible, markSaleSynced, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
@@ -64,6 +64,7 @@ let auth = null
 let db = null
 let appCheck = null
 let authReady = Promise.resolve()
+let cashierSyncInFlight = null
 
 if (configured) {
   authDebug('POS_AUTH_INIT')
@@ -246,6 +247,11 @@ const saleReadbackMatches = (expected, actual) => {
     && String(actual?.operationalDayId || '') === String(expected?.operationalDayId || '')
     && Number(actual?.total ?? actual?.subtotal) === Number(expected?.total ?? expected?.subtotal))
 }
+
+const centralSaleMatches = (expected, actual) => Boolean(
+  salePayloadMatches(expected, actual)
+  && financialFingerprint(expected) === financialFingerprint(actual)
+)
 
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
@@ -597,7 +603,7 @@ export const mergeCentralSalesLocally = centralSales => {
   return merged
 }
 
-export const runCashierCentralSync = async ({ initial = false } = {}) => {
+const runCashierCentralSyncInternal = async ({ initial = false } = {}) => {
   await requireRole('cashier-sync')
   const localSales = readSales()
   // The queue is durable evidence of a completed sale. Older cashier builds
@@ -619,27 +625,39 @@ export const runCashierCentralSync = async ({ initial = false } = {}) => {
   let updated = 0
   await retryAccSaleQueue()
   for (const sale of uploadable) {
-    const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
     const queueEntry = readSaleQueue().find(entry => {
       const queued = entry.sale
       return saleIdOf(queued) === saleIdOf(sale)
         || String(queued?.operationKey || queued?.operation_key || '') === String(sale?.operationKey || sale?.operation_key || '')
     })
+    const classification = classifyCentralSale(sale, beforeCentral)
+    if (classification.action === 'quarantine') {
+      const error = Object.assign(new Error(`تعذر رفع مبيعة متعارضة: ${classification.reason}`), { code: classification.reason })
+      if (queueEntry) retainQueuedSale(queueEntry, error)
+      continue
+    }
+    if (classification.action === 'duplicate') {
+      if (queueEntry) markSaleSynced(sale)
+      updated += 1
+      continue
+    }
+    const attemptedEntry = queueEntry ? markSaleAttempt(queueEntry) : null
+    const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
     try {
       await set(saleRef, serializeSale(sale))
     } catch (error) {
       // Another authorized device may have created the same sale concurrently.
       // Continue only when the complete sale identity and business fields read back.
       const readBack = await get(saleRef).catch(() => null)
-      if (!readBack?.exists() || !saleReadbackMatches(sale, readBack.val())) {
-        if (queueEntry) retainQueuedSale(queueEntry, error)
+      if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
+        if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
         throw Object.assign(error, { code: error?.code || 'SALE_READBACK_FAILED' })
       }
     }
     const readBack = await get(saleRef).catch(() => null)
-    if (!readBack?.exists() || !saleReadbackMatches(sale, readBack.val())) {
+    if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
       const error = Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
-      if (queueEntry) retainQueuedSale(queueEntry, error)
+      if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
       throw error
     }
     await syncAccSaleBestEffort(sale)
@@ -664,6 +682,20 @@ export const runCashierCentralSync = async ({ initial = false } = {}) => {
     initialSyncCompleted: readInitialSyncCompleted(),
     uploadBlocked: false,
   }
+}
+
+export const runCashierCentralSync = ({ initial = false } = {}) => {
+  if (cashierSyncInFlight) return cashierSyncInFlight
+  cashierSyncInFlight = runCashierCentralSyncInternal({ initial })
+    .finally(() => { cashierSyncInFlight = null })
+  return cashierSyncInFlight
+}
+
+export const subscribeCentralReconnect = callback => {
+  if (!configured || !db || typeof callback !== 'function') return () => {}
+  return onValue(ref(db, '.info/connected'), snapshot => {
+    if (snapshot.val() === true) callback()
+  }, () => {})
 }
 
 const readAndMergeAdminSales = async () => {

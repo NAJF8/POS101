@@ -29,6 +29,10 @@ assert.equal(persistedQueue[0].businessDate, sale.businessDate)
 assert.equal(persistedQueue[0].operationalDayId, sale.operationalDayId)
 assert.equal(persistedQueue[0].status, 'pending')
 assert.equal(queue.readPendingSaleCount(), 1)
+const attempted = queue.markSaleAttempt(persistedQueue[0], 1791302593000)
+assert.equal(attempted.attempts, 1)
+assert.equal(attempted.lastAttemptAt, 1791302593000)
+assert.equal(queue.readSaleQueue()[0].attempts, 1)
 
 const reloadedQueue = await import(`../src/services/salesSyncQueue.js?reload=${Date.now()}`)
 assert.equal(reloadedQueue.readSaleQueue().length, 1)
@@ -61,6 +65,7 @@ console.log(JSON.stringify({
   SALE_QUEUE_RELOAD: 'PASS',
   SALE_QUEUE_OFFLINE: 'PASS',
   SALE_QUEUE_RETRY: 'PASS',
+  ATTEMPT_METADATA: 'PASS',
   SALE_QUEUE_READBACK: 'PASS',
   SALE_QUEUE_IDEMPOTENCY: 'PASS',
   SALE_QUEUE_CANCELLED: 'PASS',
