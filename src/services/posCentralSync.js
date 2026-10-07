@@ -1225,8 +1225,23 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const normalized = normalizeExpense(expense)
   const expenseId = validExpenseId(expenseIdOf(normalized)) ? expenseIdOf(normalized) : `expense-${crypto.randomUUID()}`
   const transactionId = `expense-${safeKey(expenseId)}`
-  const existingTransactions = objectValues(await get(financialPath(cashboxTransactionsPath)))
-  if (existingTransactions.some(row => row.id === transactionId)) return (await get(ref(db, `pos101_expenses/${expenseId}`))).val()
+  const existingTransactionSnapshot = await get(financialPath(`${cashboxTransactionsPath}/${transactionId}`))
+  const existingExpenseSnapshot = await get(ref(db, `pos101_expenses/${expenseId}`))
+  const existingTransaction = existingTransactionSnapshot.exists() ? existingTransactionSnapshot.val() : null
+  if (existingTransaction && (String(existingTransaction.linkedExpenseId || existingTransaction.sourceRefId || '') !== String(expenseId))) {
+    throw Object.assign(new Error('معرف حركة الصندوق مرتبط بسجل مصروف آخر.'), { code: 'CASHBOX_TRANSACTION_COLLISION' })
+  }
+  // A prior linked transaction without its expense is an incomplete retry, not a
+  // successful save. Reuse the same canonical IDs and repair the paired record.
+  if (existingTransaction && existingExpenseSnapshot.exists()) {
+    const existingExpense = normalizeExpense({ ...existingExpenseSnapshot.val(), id: expenseId })
+    if (existingExpense.fundingSource === 'cashbox'
+      && Number(existingExpense.amount) === Number(normalized.amount)
+      && String(existingExpense.businessDate || '') === String(normalized.businessDate || '')
+      && String(existingExpense.linkedTransactionId || '') === transactionId) {
+      return existingExpense
+    }
+  }
   if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) throw new Error('المبلغ والتاريخ التشغيلي ووقت الإنشاء مطلوبة للمصروف.')
   const expensePayload = { ...centralExpensePayload({ ...normalized, id: expenseId, fundingSource: 'cashbox' }, user), fundingSource: 'cashbox', paymentSource: 'cashbox', linkedTransactionId: transactionId }
   const transactionPayload = { id: transactionId, type: 'expense', amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, fundingSource: 'cashbox', status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
@@ -1244,8 +1259,20 @@ export const saveCentralExpenseWithCashbox = async expense => {
   }
   const readBack = await get(ref(db, `pos101_expenses/${expenseId}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من المصروف المرتبط.')
-  cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== expenseId), normalizeExpense({ ...readBack.val(), id: expenseId })])
-  return normalizeExpense({ ...readBack.val(), id: expenseId })
+  const transactionReadBack = await get(financialPath(`${cashboxTransactionsPath}/${transactionId}`))
+  const savedExpense = normalizeExpense({ ...readBack.val(), id: expenseId })
+  const savedTransaction = transactionReadBack.exists() ? transactionReadBack.val() : null
+  if (!savedTransaction
+    || savedExpense.fundingSource !== 'cashbox'
+    || String(savedExpense.linkedTransactionId || '') !== transactionId
+    || Number(savedExpense.amount) !== Number(expensePayload.amount)
+    || Number(savedTransaction.amount) !== Number(transactionPayload.amount)
+    || String(savedTransaction.linkedExpenseId || '') !== expenseId
+    || String(savedTransaction.fundingSource || '') !== 'cashbox') {
+    throw Object.assign(new Error('تعذر التحقق من اكتمال حفظ مصروف الصندوق وحركته المرتبطة.'), { code: 'CASHBOX_EXPENSE_READBACK_FAILED' })
+  }
+  cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== expenseId), savedExpense])
+  return savedExpense
 }
 export const saveCashboxTransaction = async transaction => {
   const user = await financialUser(true)

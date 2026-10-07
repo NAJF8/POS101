@@ -17,6 +17,11 @@ const allowed = reconcilePreCloseSales({ localSales: local11, queueEntries: [], 
 assert.equal(allowed.allowed, true)
 assert.equal(allowed.pendingQueue, 0)
 
+const centralLegacyPendingMetadata = { ...sale('sale-10'), syncStatus: 'pending' }
+const legacyMetadataAllowed = reconcilePreCloseSales({ localSales: local11, queueEntries: pending, centralSales: [centralLegacyPendingMetadata, ...central10], operationalDay: day })
+assert.equal(legacyMetadataAllowed.allowed, true)
+assert.equal(legacyMetadataAllowed.pendingQueue, 0)
+
 const cancelled = reconcilePreCloseSales({ localSales: [...local11, { ...sale('cancelled'), status: 'cancelled' }], queueEntries: [{ sale: { ...sale('draft'), status: 'draft' } }], centralSales: local11, operationalDay: day })
 assert.equal(cancelled.allowed, true)
 
@@ -42,3 +47,4 @@ console.log('INVALID_STATUS_NOT_BLOCKING=PASS')
 console.log('CURRENT_DAY_ONLY_PENDING_BLOCK=PASS')
 console.log('OPEN_ORDER_DETECTION_SEPARATE_FROM_SYNC=PASS')
 console.log('POST_CLOSE_DRIFT_DETECTED=PASS')
+console.log('CENTRAL_PENDING_METADATA_NO_BLOCK=PASS')

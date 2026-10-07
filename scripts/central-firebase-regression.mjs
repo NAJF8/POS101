@@ -30,6 +30,9 @@ const assertProductionEnv = () => {
 }
 
 assert.match(sync, /initializeApp\(config, 'pos101-central'\)/)
+assert.match(sync, /CASHBOX_EXPENSE_READBACK_FAILED/)
+assert.match(sync, /linkedExpenseId.*expenseId/)
+assert.doesNotMatch(sync, /existingTransactions\.some\(row => row\.id === transactionId\)\) return/)
 assert.match(sync, /getDatabase\(app\)/)
 assert.match(sync, /VITE_POS101_DATABASE_URL/)
 assert.match(sync, /const configured = Boolean\(config\.apiKey && config\.authDomain && config\.databaseURL && config\.projectId\)/)

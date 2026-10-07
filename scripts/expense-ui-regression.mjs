@@ -8,6 +8,8 @@ for (const selector of ['.expense-mode-toggle', '.expense-list-card', '.expense-
 assert.match(component, /type="date" max=\{getLocalDateKey\(Date\.now\(\)\)\}/)
 assert.match(component, /entryType === 'current'/)
 assert.match(component, /fundingSource === 'cashbox'/)
+assert.match(component, /لم يثبت الحفظ المركزي بعد/)
+assert.doesNotMatch(component, /announceSuccess\('تم حفظ المصروف محليًا/)
 assert.match(component, /expenseListOpen.*useState\(false\)/)
 assert.match(component, /aria-expanded=\{expenseListOpen\}/)
 assert.match(component, /expenseListOpen \? 'إخفاء' : 'عرض'/)

@@ -1,4 +1,4 @@
-import { isSaleSyncEligible } from './salesSyncQueue.js'
+import { isSaleSyncEligible, salePayloadMatches } from './salesSyncQueue.js'
 
 const idOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const operationKeyOf = sale => String(sale?.operationKey || sale?.operation_key || '').trim()
@@ -10,11 +10,16 @@ const pendingMessage = ({ openOrderCount, pendingQueue }) => openOrderCount > 0
   : pendingQueue > 0 ? 'توجد مبيعات مكتملة غير متزامنة. انتظر اكتمال المزامنة قبل إنهاء اليوم.' : ''
 
 export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0 } = {}) => {
-  const centralKeys = new Set((Array.isArray(centralSales) ? centralSales : []).filter(sale => belongsToCurrentDay(sale, operationalDay)).flatMap(identityKeys))
+  const centralRows = Array.isArray(centralSales) ? centralSales : []
+  const centralKeys = new Set(centralRows.filter(sale => belongsToCurrentDay(sale, operationalDay)).flatMap(identityKeys))
   const localCandidates = (Array.isArray(localSales) ? localSales : []).filter(sale => belongsToCurrentDay(sale, operationalDay) && isSaleSyncEligible(sale))
   const queueCandidates = (Array.isArray(queueEntries) ? queueEntries : []).map(entry => entry?.sale).filter(sale => belongsToCurrentDay(sale, operationalDay) && operationKeyOf(sale) && isSaleSyncEligible(sale))
-  const missingLocal = localCandidates.filter(sale => !identityKeys(sale).some(key => centralKeys.has(key)))
-  const missingQueue = queueCandidates.filter(sale => !identityKeys(sale).some(key => centralKeys.has(key)))
+  // Central legacy rows may have a pending syncStatus or incomplete day metadata.
+  // The local current-day sale is the scope gate; exact id/fingerprint readback is
+  // the verification gate. Do not let stale metadata create a close blocker.
+  const centrallyVerified = sale => centralRows.some(remote => salePayloadMatches(sale, remote))
+  const missingLocal = localCandidates.filter(sale => !centrallyVerified(sale))
+  const missingQueue = queueCandidates.filter(sale => !centrallyVerified(sale))
   return {
     localCompletedCount: localCandidates.length,
     queuePendingCompletedCount: queueCandidates.length,

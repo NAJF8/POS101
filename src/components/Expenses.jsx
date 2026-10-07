@@ -85,7 +85,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         if (error?.code === 'AUTH_REQUIRED' && edited) {
           const pending = saveLocalExpensePending(edited)
           setExpenses(currentRows => currentRows.map(row => row.id === pending.id ? pending : row))
-          resetForm(); setFormOpen(false); announceSuccess('تم حفظ التعديل محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
+          setSyncMessage('تم الاحتفاظ بالتعديل محليًا فقط — Pending Sync. لم يثبت الحفظ المركزي بعد.')
         } else setSyncMessage(error?.message || 'تعذر مزامنة تعديل المصروف.')
       }
       return
@@ -150,7 +150,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     } catch (error) {
       if (['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) {
         saveLocalExpensePending(row)
-        resetForm(); setFormOpen(false); announceSuccess('تم حفظ المصروف محليًا — Pending Sync حتى استعادة جلسة المزامنة.')
+        setSyncMessage('تم الاحتفاظ بالمصروف محليًا فقط — Pending Sync. لم يثبت الحفظ المركزي بعد.')
       } else setSyncMessage(error?.message || 'تعذر مزامنة المصروف.')
     }
   }
