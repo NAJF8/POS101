@@ -19,6 +19,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve))
 
 let eligible = true
 let processCalls = 0
+const diagnostics = []
 let release
 const firstGate = new Promise(resolve => { release = resolve })
 const target = makeTarget()
@@ -29,6 +30,7 @@ const worker = createCashierQueueWorker({
     if (processCalls === 1) await firstGate
     if (processCalls === 2) throw new Error('processor fixture error')
   },
+  onDiagnostic: event => diagnostics.push(event),
   intervalMs: 1000,
 })
 const stop = worker.start({ events, target })
@@ -54,6 +56,10 @@ target.emit('focus')
 target.tick()
 await flush()
 assert.equal(processCalls, 3, 'ineligible queues must not run')
+assert.ok(diagnostics.some(event => event.event === 'WORKER_PROCESS_START' && event.trigger === 'startup'))
+assert.ok(diagnostics.some(event => event.event === 'WORKER_RUN_SKIPPED' && event.reason === 'locked'))
+assert.ok(diagnostics.some(event => event.event === 'WORKER_RUN_SKIPPED' && event.reason === 'ineligible'))
+assert.ok(diagnostics.some(event => event.event === 'WORKER_PROCESS_ERROR'))
 stop()
 
 console.log(JSON.stringify({

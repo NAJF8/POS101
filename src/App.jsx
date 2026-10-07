@@ -609,13 +609,24 @@ export default function App() {
       void sync.catch(error => console.error('SALES_RETRY_SYNC_ERROR', error))
       return sync
     }
-    const worker = createCashierQueueWorker({ processQueue: retry, hasEligibleQueue: () => isCentralCashierUser(centralAuth()?.currentUser) })
+    const worker = createCashierQueueWorker({
+      processQueue: retry,
+      hasEligibleQueue: () => isCentralCashierUser(centralAuth()?.currentUser),
+      onDiagnostic: payload => window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload })),
+    })
     const stopWorker = worker.start({ events: ['pos101-sale-created', 'pos101-sale-updated', 'online', 'focus', 'auth-ready', 'firebase-reconnect'], target: window })
     const onVisibility = () => { if (!document.hidden) void worker.run() }
     document.addEventListener('visibilitychange', onVisibility)
     const reconnectStop = subscribeCentralReconnect(() => { window.dispatchEvent(new Event('firebase-reconnect')) })
     return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility) }
   }, [])
+
+  // The auth callback and this worker effect are independent React effects.
+  // Re-emit the gate after React has committed the authenticated user so a
+  // cold tab cannot miss the one-shot auth-ready event during startup.
+  useEffect(() => {
+    if (centralAuthUser && isCentralCashierUser(centralAuthUser)) window.dispatchEvent(new Event('auth-ready'))
+  }, [centralAuthUser?.uid])
 
   const refreshThermalStatus = useCallback(async settings => {
     try {
