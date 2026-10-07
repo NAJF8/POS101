@@ -24,11 +24,14 @@ import {
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { areExpenseDuplicates, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { normalizeStaffCanSell } from './staffEligibility.js'
-import { calculateCashboxBalance, calculateSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
+import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrection, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
 import { isSaleSyncEligible, markSaleSynced, readSaleQueue, retainQueuedSale } from './salesSyncQueue.js'
+import { getReportSalesForOperationalDay, isReportableSale } from './reportSales.js'
+import { reconcilePreCloseSales } from './preCloseReconciliation.js'
+import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -448,6 +451,18 @@ export const readCentralOperationalDays = async () => {
   return operationalDayValues(await get(operationalDaysRef()))
 }
 
+export const readCentralSalesForOperationalDay = async day => {
+  await financialUser(false)
+  const rows = centralValues(await get(salesRef()))
+  return getReportSalesForOperationalDay({ centralSales: rows, operationalDayId: day?.id || day?.operationalDayId, businessDate: day?.businessDate })
+}
+
+export const readPreCloseReconciliation = async operationalDay => {
+  await financialUser(false)
+  const centralSales = centralValues(await get(salesRef()))
+  return reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay })
+}
+
 export const runFullRecoverySync = async () => {
   const user = await requireRole('cashier-sync')
   const localDay = readCachedOperationalDay()
@@ -540,6 +555,7 @@ export const runCashierCentralSync = async ({ initial = false } = {}) => {
   const uploadable = candidates
   let uploaded = 0
   let updated = 0
+  await retryAccSaleQueue()
   for (const sale of uploadable) {
     const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
     const queueEntry = readSaleQueue().find(entry => {
@@ -564,6 +580,7 @@ export const runCashierCentralSync = async ({ initial = false } = {}) => {
       if (queueEntry) retainQueuedSale(queueEntry, error)
       throw error
     }
+    await syncAccSaleBestEffort(sale)
     if (centralIds.has(saleIdOf(sale))) updated += 1
     else uploaded += 1
     markSaleSynced(sale)
@@ -723,6 +740,7 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   let uploaded = 0
   let skipped = 0
   const retainedPending = []
+  await retryAccExpenseQueue()
   for (const localExpense of localExpenses) {
     const base = normalizeExpense(localExpense)
     const normalized = { ...base, createdAt: base.createdAt || safeCreatedAtForBusinessDate(base.businessDate), timestamp: base.timestamp || base.createdAt }
@@ -740,6 +758,7 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
       const readBack = await get(expenseRef)
       if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف بعد الرفع.')
       const saved = normalizeExpense({ ...readBack.val(), id })
+      await syncAccExpenseBestEffort(saved)
       centralExpenses.push(saved)
       cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), { ...saved, syncStatus: 'synced' }])
       uploaded += 1
@@ -778,6 +797,7 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
     String(savedValue.paymentSource || '') !== String(payload.paymentSource || '')
   )) throw Object.assign(new Error('تعذر التحقق من تعديل المصروف بعد الحفظ.'), { code: 'EXPENSE_EDIT_READBACK_FAILED' })
   const saved = normalizeExpense({ ...readBack.val(), id })
+  await syncAccExpenseBestEffort(saved, existing ? 'upsert' : 'upsert')
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), saved])
   authDebug('POS_EXPENSE_WRITE_SUCCESS', { existing: Boolean(existing) })
   return saved
@@ -800,6 +820,7 @@ export const deleteCentralExpense = async expense => {
   await set(ref(db, `pos101_expenses/${id}`), null)
   const check = await get(ref(db, `pos101_expenses/${id}`))
   if (check.exists()) throw Object.assign(new Error('تعذر التحقق من حذف المصروف.'), { code: 'DELETE_READBACK_FAILED' })
+  await syncAccExpenseBestEffort({ ...expense, id, status: 'voided', updatedAt: Date.now() }, 'void')
   writeLocalExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
   dispatchExpensesUpdated()
   return { id, deletedBy: user.uid }
@@ -983,6 +1004,7 @@ export const subscribeCentralCashboxTransactions = (callback, onError = error =>
   return () => { active = false; stop() }
 }
 const settlementPath = 'pos101_cashbox_settlements'
+const settlementCorrectionsPath = 'pos101_settlement_corrections'
 const countsPath = 'pos101_cashbox_counts'
 const safeKey = value => String(value || '').replace(/[.#$\[\]/]/g, '_')
 const settlementKey = operationalDayId => `settlement-${safeKey(operationalDayId)}`
@@ -999,17 +1021,86 @@ export const subscribeCentralSettlements = (callback, onError = error => console
   return () => { active = false; stop() }
 }
 
+export const readCentralSettlementCorrections = async () => { await financialUser(false); return objectValues(await get(financialPath(settlementCorrectionsPath))) }
+export const subscribeCentralSettlementCorrections = (callback, onError = error => console.error('SETTLEMENT_CORRECTION_SUBSCRIBE_ERROR', error)) => {
+  let active = true
+  let stop = () => {}
+  void financialUser(false).then(() => {
+    if (!active) return
+    stop = onValue(financialPath(settlementCorrectionsPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
+  }).catch(error => onError(error))
+  return () => { active = false; stop() }
+}
+
+export const saveSettlementCorrection = async ({ settlementId, correctedActualCash, reason, notes = '', systemCode = '' } = {}) => {
+  if (!verifySystemAdminCode(systemCode)) throw Object.assign(new Error('رمز النظام غير صحيح.'), { code: 'SYSTEM_ADMIN_CODE_REQUIRED' })
+  const user = await staffUser(true)
+  const id = String(settlementId || '').trim()
+  if (!id) throw Object.assign(new Error('معرف التسوية مطلوب.'), { code: 'SETTLEMENT_ID_REQUIRED' })
+  if (!String(reason || '').trim()) throw Object.assign(new Error('سبب التصحيح مطلوب.'), { code: 'CORRECTION_REASON_REQUIRED' })
+  const settlementSnapshot = await get(financialPath(`${settlementPath}/${id}`))
+  if (!settlementSnapshot.exists()) throw Object.assign(new Error('التسوية الأصلية غير موجودة.'), { code: 'SETTLEMENT_NOT_FOUND' })
+  const settlement = settlementSnapshot.val()
+  const calculation = calculateSettlementCorrection({ settlement, correctedActualCash })
+  const now = Date.now()
+  const correctionId = `correction-${safeKey(id)}-${now}-${crypto.randomUUID().slice(0, 8)}`
+  const correction = {
+    id: correctionId,
+    settlementId: id,
+    operationalDayId: String(settlement.operationalDayId || ''),
+    businessDate: String(settlement.businessDate || ''),
+    originalExpectedCash: Number(settlement.expectedCash || 0),
+    originalActualCash: Number(settlement.actualCash || 0),
+    originalDifference: Number(settlement.difference || 0),
+    ...calculation,
+    reason: String(reason).trim(),
+    notes: String(notes || '').trim(),
+    createdAt: now,
+    createdByUid: user.uid,
+    createdByName: user.displayName || user.email || '',
+    status: 'active',
+  }
+  const auditId = `audit-${correctionId}`
+  const audit = financialAuditPayload({
+    id: auditId,
+    user,
+    action: 'settlement actual cash correction',
+    entityType: 'settlement_correction',
+    entityId: correctionId,
+    before: { actualCash: correction.originalActualCash, difference: correction.originalDifference },
+    after: { actualCash: correction.correctedActualCash, difference: correction.correctedDifference },
+    reason: correction.reason,
+    businessDate: correction.businessDate,
+  })
+  await update(ref(db), { [`${settlementCorrectionsPath}/${correctionId}`]: correction, [`${auditPath}/${auditId}`]: audit })
+  const [correctionBack, auditBack, originalBack] = await Promise.all([
+    get(financialPath(`${settlementCorrectionsPath}/${correctionId}`)),
+    get(financialPath(`${auditPath}/${auditId}`)),
+    get(financialPath(`${settlementPath}/${id}`)),
+  ])
+  if (!correctionBack.exists() || !auditBack.exists()) throw Object.assign(new Error('تعذر التحقق من حفظ تصحيح التسوية.'), { code: 'CORRECTION_READBACK_FAILED' })
+  const original = originalBack.val()
+  if (!originalBack.exists() || Number(original.actualCash) !== correction.originalActualCash || Number(original.difference) !== correction.originalDifference || Number(original.expectedCash) !== correction.originalExpectedCash) {
+    throw Object.assign(new Error('فشل تحقق ثبات التسوية الأصلية.'), { code: 'ORIGINAL_SETTLEMENT_MUTATED' })
+  }
+  return { correction: correctionBack.val(), audit: auditBack.val(), settlement: original }
+}
+
 const centralSettlementInputs = async operationalDay => {
   const [salesSnapshot, expensesSnapshot, transactionsSnapshot] = await Promise.all([get(salesRef()), get(expensesRef()), get(financialPath(cashboxTransactionsPath))])
   const dayId = String(operationalDay?.id || operationalDay?.operationalDayId || '')
   const dayDate = String(operationalDay?.businessDate || '')
-  const sales = centralValues(salesSnapshot).filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate))
+  const sales = getReportSalesForOperationalDay({ centralSales: centralValues(salesSnapshot), operationalDayId: dayId, businessDate: dayDate }).filter(isReportableSale)
   const expenses = expenseValues(expensesSnapshot).filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate))
   const transactions = objectValues(transactionsSnapshot).filter(row => row.businessDate === dayDate && row.status !== 'voided')
   return { sales, expenses, transactions }
 }
 
+export const readFreshSettlementPreview = async operationalDay => calculateSettlement(await centralSettlementInputs(operationalDay))
+
 export const settleAndEndOperationalDay = async (day, { actualCash, endedBy = {} } = {}) => {
+  const preClose = await readPreCloseReconciliation(day)
+  if (!preClose.allowed) throw Object.assign(new Error('توجد مبيعات غير متزامنة. أكمل المزامنة قبل إنهاء اليوم.'), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
   const user = await financialUser(true)
   const id = String(day?.id || day?.operationalDayId || '').trim()
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')

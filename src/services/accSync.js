@@ -1,5 +1,4 @@
 ﻿import { initializeApp, getApps } from 'firebase/app'
-import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions'
 import {
   getAuth,
   browserLocalPersistence,
@@ -47,18 +46,15 @@ let configured = Boolean(firebaseConfig.apiKey && firebaseConfig.messagingSender
 let app = null
 let auth = null
 let db = null
-let functions = null
 let authPersistenceReady = Promise.resolve()
 if (configured) {
   app = getApps().find(item => item.name === 'pos101-acc') || initializeApp(firebaseConfig, 'pos101-acc')
   auth = getAuth(app)
   authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => {})
   db = getDatabase(app)
-  functions = getFunctions(app, env.VITE_FIREBASE_FUNCTIONS_REGION || 'europe-west1')
   if (useEmulator) {
     connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true })
     connectDatabaseEmulator(db, emulatorHost, 9000)
-    connectFunctionsEmulator(functions, emulatorHost, Number(env.VITE_FIREBASE_FUNCTIONS_EMULATOR_PORT || 5001))
   }
 }
 
@@ -355,82 +351,146 @@ async function legacySaveAccSale(sale, profile) {
 
 export async function saveAccSale(sale, profile) {
   ensureConfigured()
-  if (!functions) throw new Error('ACC Functions غير مهيأة.')
   const user = await waitForAuthUser()
   if (!user || !profile?.id || user.uid !== profile.id) throw Object.assign(new Error('جلسة Google غير صالحة للمزامنة.'), { code: 'UNAUTHENTICATED' })
-  await verifyPosCashier(user)
-  const callable = httpsCallable(functions, 'createPosSale')
-  const data = {
-    saleId: sale.saleId || sale.id,
-    operationKey: sale.operationKey || sale.operation_key,
-    orderNumber: sale.orderNumber ?? sale.order_number ?? '',
-    businessDate: sale.businessDate,
-    createdAt: sale.createdAt ?? sale.created_at,
-    updatedAt: sale.updatedAt ?? sale.updated_at ?? sale.createdAt ?? sale.created_at,
-    cashierId: sale.cashierId ?? sale.cashier_id ?? '',
-    cashierName: sale.cashierName ?? sale.cashier_name ?? '',
-    shiftId: sale.shiftId ?? sale.shift_id ?? sale.operationalDayId ?? '',
-    deviceId: sale.deviceId ?? sale.device_id ?? '',
-    orderType: sale.orderType ?? sale.order_type ?? '',
-    status: sale.status,
-    subtotal: Number(sale.subtotal || 0),
-    paymentMethod: sale.paymentMethod || 'cash',
-    discountAmount: Number(sale.discount ?? sale.discountAmount ?? 0),
-    discount: Number(sale.discount ?? sale.discountAmount ?? 0),
-    total: Number(sale.total ?? sale.subtotal ?? 0),
-    items: (sale.items || []).map(item => ({
-      productId: item.accProductId || item.product_id || item.id,
-      quantity: Number(item.quantity || 0),
-      unitPrice: Number(item.price || item.unit_price || 0),
-    })),
+  const verified = await verifyPosCashier(user)
+  const sourceId = String(sale.saleId || sale.id || '').trim()
+  if (!sourceId) throw new Error('معرف المبيعة مطلوب للمزامنة.')
+  const integrationKey = `POS101:sale:${sourceId}`
+  const candidateIds = [sourceId, `pos101_${cleanKey(sourceId)}`]
+  let existing = null
+  for (const candidateId of candidateIds) {
+    const snapshot = await get(ref(db, `sales/${candidateId}`)).catch(() => null)
+    if (snapshot?.exists() && (snapshot.val().integrationKey === integrationKey || snapshot.val().sourceId === sourceId || snapshot.val().source_sale_id === sourceId)) { existing = { ...snapshot.val(), id: candidateId }; break }
   }
-  return (await callable(data)).data
+  const id = existing?.id || candidateIds[1]
+  const now = new Date().toISOString()
+  const record = {
+    ...(existing || {}), id, source: 'POS101', sourceType: 'sale', sourceId, integrationKey,
+    source_channel: 'POS101', source_type: 'sale', source_sale_id: sourceId,
+    source_operation_key: sale.operationKey || sale.operation_key || `pos101:${sourceId}`,
+    operation_key: sale.operationKey || sale.operation_key || `pos101:${sourceId}`,
+    businessDate: sale.businessDate || sale.business_date || null,
+    businessDateStatus: sale.businessDate || sale.business_date ? 'resolved' : 'manual_required',
+    date: sale.businessDate || sale.business_date || null,
+    month: monthOf(sale.businessDate || sale.business_date),
+    orderNumber: sale.orderNumber ?? sale.order_number ?? '',
+    createdAt: sale.createdAt ?? sale.created_at ?? existing?.createdAt ?? now,
+    updatedAt: sale.updatedAt ?? sale.updated_at ?? now,
+    created_at: sale.createdAt ?? sale.created_at ?? existing?.created_at ?? now,
+    updated_at: sale.updatedAt ?? sale.updated_at ?? now,
+    cashierId: sale.cashierId ?? sale.cashier_id ?? '', cashier_id: sale.cashierId ?? sale.cashier_id ?? '',
+    cashierName: sale.cashierName ?? sale.cashier_name ?? '', cashier_name: sale.cashierName ?? sale.cashier_name ?? '',
+    shiftId: sale.shiftId ?? sale.shift_id ?? sale.operationalDayId ?? '', shift_id: sale.shiftId ?? sale.shift_id ?? sale.operationalDayId ?? '',
+    deviceId: sale.deviceId ?? sale.device_id ?? '', device_id: sale.deviceId ?? sale.device_id ?? '',
+    orderType: sale.orderType ?? sale.order_type ?? '', order_type: sale.orderType ?? sale.order_type ?? '',
+    status: sale.status || existing?.status || 'completed',
+    subtotal: Number(sale.subtotal || 0), discountAmount: Number(sale.discount ?? sale.discountAmount ?? 0),
+    discount_amount: Number(sale.discount ?? sale.discountAmount ?? 0), discount: Number(sale.discount ?? sale.discountAmount ?? 0),
+    total: Number(sale.total ?? sale.subtotal ?? 0), total_after_discount: Number(sale.total ?? sale.subtotal ?? 0),
+    paymentMethod: sale.paymentMethod || sale.payment_method || 'cash', payment_method: sale.paymentMethod || sale.payment_method || 'cash',
+    items: (sale.items || []).map(item => ({ ...item, productId: item.accProductId || item.product_id || item.id, product_id: item.accProductId || item.product_id || item.id, quantity: Number(item.quantity || 0), unitPrice: Number(item.price || item.unit_price || 0), unit_price: Number(item.price || item.unit_price || 0) })),
+    created_by: verified.id, syncVersion: Number(existing?.syncVersion || 0) + 1,
+  }
+  await set(ref(db, `sales/${id}`), record)
+  const back = await get(ref(db, `sales/${id}`))
+  if (!back.exists() || back.val().integrationKey !== integrationKey) throw Object.assign(new Error('ACC sale read-back failed.'), { code: 'ACC_SALE_READBACK_FAILED' })
+  return { ...back.val(), id, alreadyProcessed: Boolean(existing) }
 }
 
 export async function saveAccExpense(expense, profile) {
   ensureConfigured()
-  if (!functions) throw new Error('ACC Functions غير مهيأة.')
   const user = await waitForAuthUser()
-  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
-  const callable = httpsCallable(functions, 'createPosExpense')
-  return (await callable({
-    expenseId: expense.id,
-    amount: Number(expense.amount),
-    category: expense.category || 'أخرى',
-    description: expense.description || expense.notes || expense.category || 'مصروف POS',
-    paymentMethod: expense.paymentMethod || expense.payment_method || 'cash',
-    businessDate: expense.businessDate,
-    createdAt: expense.createdAt ?? expense.created_at ?? expense.timestamp,
-    updatedAt: expense.updatedAt ?? expense.updated_at ?? expense.createdAt ?? expense.created_at,
-    status: expense.status || 'active',
-  })).data
+  if (!user || !profile?.id || user.uid !== profile.id) throw Object.assign(new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.'), { code: 'UNAUTHENTICATED' })
+  const verified = await verifyPosCashier(user)
+  const sourceId = String(expense.id || expense.expenseId || '').trim()
+  if (!sourceId) throw new Error('معرف المصروف مطلوب للمزامنة.')
+  return writeAccExpense(expense, verified, sourceId, 'active')
 }
 
 export async function updateAccExpense(expense, profile) {
-  ensureConfigured()
-  if (!functions) throw new Error('ACC Functions غير مهيأة.')
-  const user = await waitForAuthUser()
-  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
-  const callable = httpsCallable(functions, 'updatePosExpense')
-  return (await callable({
-    expenseId: expense.id,
-    amount: Number(expense.amount),
-    category: expense.category || 'أخرى',
-    description: expense.description || expense.notes || expense.category || 'مصروف POS',
-    paymentMethod: expense.paymentMethod || expense.payment_method || 'cash',
-    businessDate: expense.businessDate,
-    updatedAt: expense.updatedAt ?? expense.updated_at ?? Date.now(),
-    status: expense.status || 'active',
-  })).data
+  return saveAccExpense(expense, profile)
 }
 
 export async function voidAccExpense(expense, profile) {
+  return saveAccExpense({ ...expense, status: 'voided' }, profile)
+}
+
+async function writeAccExpense(expense, verified, sourceId, status) {
+  const integrationKey = `POS101:expense:${sourceId}`
+  const candidateIds = [sourceId, `pos101:${cleanKey(sourceId)}`, `pos101_${cleanKey(sourceId)}`]
+  let existing = null
+  for (const candidateId of candidateIds) {
+    const snapshot = await get(ref(db, `expenses/${candidateId}`)).catch(() => null)
+    if (snapshot?.exists() && (snapshot.val().integrationKey === integrationKey || snapshot.val().sourceId === sourceId || snapshot.val().source_expense_id === sourceId)) { existing = { ...snapshot.val(), id: candidateId }; break }
+  }
+  const id = existing?.id || candidateIds[2]
+  const now = new Date().toISOString()
+  const record = { ...(existing || {}), id, source: 'POS101', sourceType: 'expense', sourceId, integrationKey, source_channel: 'POS101', source_type: 'expense', source_expense_id: sourceId, businessDate: expense.businessDate || expense.business_date || null, date: expense.businessDate || expense.business_date || null, month: monthOf(expense.businessDate || expense.business_date), amount: Number(expense.amount || 0), category: expense.category || existing?.category || 'أخرى', description: expense.description || expense.notes || expense.category || existing?.description || 'مصروف POS', paymentMethod: expense.paymentMethod || expense.payment_method || 'cash', payment_method: expense.paymentMethod || expense.payment_method || 'cash', status, createdAt: expense.createdAt ?? expense.created_at ?? existing?.createdAt ?? now, updatedAt: expense.updatedAt ?? expense.updated_at ?? now, created_by: verified.id, syncVersion: Number(existing?.syncVersion || 0) + 1 }
+  await set(ref(db, `expenses/${id}`), record)
+  const back = await get(ref(db, `expenses/${id}`))
+  if (!back.exists() || back.val().integrationKey !== integrationKey) throw Object.assign(new Error('ACC expense read-back failed.'), { code: 'ACC_EXPENSE_READBACK_FAILED' })
+  return { ...back.val(), id }
+}
+
+export async function getAccCashierProfile() {
   ensureConfigured()
-  if (!functions) throw new Error('ACC Functions غير مهيأة.')
   const user = await waitForAuthUser()
-  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
-  const callable = httpsCallable(functions, 'voidPosExpense')
-  return (await callable({ expenseId: expense.id, businessDate: expense.businessDate, updatedAt: Date.now() })).data
+  return user ? verifyPosCashier(user) : null
+}
+
+const ACC_EXPENSE_QUEUE_KEY = 'pos101.accExpenseSyncQueue'
+const readAccExpenseQueue = () => { try { const value = JSON.parse(localStorage.getItem(ACC_EXPENSE_QUEUE_KEY) || '[]'); return Array.isArray(value) ? value : [] } catch { return [] } }
+const writeAccExpenseQueue = queue => localStorage.setItem(ACC_EXPENSE_QUEUE_KEY, JSON.stringify(queue))
+export async function syncAccExpenseBestEffort(expense, action = 'upsert') {
+  const queue = readAccExpenseQueue().filter(item => item.id !== String(expense?.id || ''))
+  try {
+    const profile = await getAccCashierProfile()
+    if (!profile) throw Object.assign(new Error('ACC session unavailable.'), { code: 'ACC_AUTH_REQUIRED' })
+    const result = action === 'void' ? await voidAccExpense(expense, profile) : await (expense?.updatedAt ? updateAccExpense(expense, profile) : saveAccExpense(expense, profile))
+    writeAccExpenseQueue(queue)
+    return result
+  } catch (error) {
+    writeAccExpenseQueue([...queue, { id: String(expense?.id || ''), expense, action, queuedAt: Date.now(), error: error?.code || 'UNKNOWN' }].filter(item => item.id))
+    return { queued: true, code: error?.code || 'ACC_SYNC_PENDING' }
+  }
+}
+
+export async function retryAccExpenseQueue() {
+  const queue = readAccExpenseQueue()
+  let synced = 0
+  for (const item of queue) {
+    const result = await syncAccExpenseBestEffort(item.expense, item.action)
+    if (!result?.queued) synced += 1
+  }
+  return { synced, pending: readAccExpenseQueue().length }
+}
+
+const ACC_SALE_QUEUE_KEY = 'pos101.accSaleSyncQueue'
+const readAccSaleQueue = () => { try { const value = JSON.parse(localStorage.getItem(ACC_SALE_QUEUE_KEY) || '[]'); return Array.isArray(value) ? value : [] } catch { return [] } }
+const writeAccSaleQueue = queue => localStorage.setItem(ACC_SALE_QUEUE_KEY, JSON.stringify(queue))
+export async function syncAccSaleBestEffort(sale) {
+  const id = String(sale?.saleId || sale?.id || '')
+  const queue = readAccSaleQueue().filter(item => item.id !== id)
+  try {
+    const profile = await getAccCashierProfile()
+    if (!profile) throw Object.assign(new Error('ACC session unavailable.'), { code: 'ACC_AUTH_REQUIRED' })
+    const result = await saveAccSale(sale, profile)
+    writeAccSaleQueue(queue)
+    return result
+  } catch (error) {
+    if (id) writeAccSaleQueue([...queue, { id, sale, queuedAt: Date.now(), error: error?.code || 'UNKNOWN' }])
+    return { queued: true, code: error?.code || 'ACC_SYNC_PENDING' }
+  }
+}
+export async function retryAccSaleQueue() {
+  const queue = readAccSaleQueue()
+  let synced = 0
+  for (const item of queue) {
+    const result = await syncAccSaleBestEffort(item.sale)
+    if (!result?.queued) synced += 1
+  }
+  return { synced, pending: readAccSaleQueue().length }
 }
 
 export async function loadAccPurchaseCatalog() {
@@ -443,12 +503,7 @@ export async function loadAccPurchaseCatalog() {
 }
 
 export async function saveAccPurchase(purchase, profile) {
-  ensureConfigured()
-  if (!functions) throw new Error('ACC Functions غير مهيأة.')
-  const user = auth.currentUser
-  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
-  const callable = httpsCallable(functions, 'createPosPurchase')
-  return (await callable({ purchaseId: purchase.id, inventoryItemId: purchase.inventory_item_id, quantity: purchase.quantity, unit: purchase.purchase_unit || purchase.unit, unitPurchasePrice: purchase.unit_cost, discount: purchase.discount || 0, supplierId: purchase.supplier_id, paymentMethod: purchase.payment_method || 'cash', paidAmount: purchase.paid_amount, notes: purchase.notes, date: purchase.date })).data
+  throw Object.assign(new Error('ACC direct purchase sync is intentionally disabled; no Cloud Functions path is available.'), { code: 'ACC_PURCHASE_SYNC_DISABLED' })
 }
 
 
