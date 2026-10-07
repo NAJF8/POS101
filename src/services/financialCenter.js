@@ -91,7 +91,11 @@ export const latestActiveSettlementCorrection = (corrections = []) => correction
 
 export const getEffectiveSettlement = (settlement, corrections = []) => {
   const correction = latestActiveSettlementCorrection(corrections)
-  if (!correction) return { settlement, correction: null, effectiveActualCash: amount(settlement?.actualCash), effectiveDifference: amount(settlement?.difference), effectiveStatus: settlementStatusForDifference(amount(settlement?.difference)) }
+  if (!correction) {
+    const effectiveActualCash = amount(settlement?.actualCash)
+    const effectiveDifference = effectiveActualCash - amount(settlement?.expectedCash)
+    return { settlement, correction: null, effectiveActualCash, effectiveDifference, effectiveStatus: settlementStatusForDifference(effectiveDifference) }
+  }
   const effectiveActualCash = amount(correction.correctedActualCash)
   const effectiveDifference = effectiveActualCash - amount(settlement?.expectedCash)
   return { settlement, correction, effectiveActualCash, effectiveDifference, effectiveStatus: settlementStatusForDifference(effectiveDifference) }

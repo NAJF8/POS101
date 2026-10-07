@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readFreshSettlementPreview, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readFreshSettlementPreview, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -136,6 +136,8 @@ export default function App() {
   const [staff, setStaff] = useState([])
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
+  const settlementCorrectionListener = useRef(null)
+  const [settlementCorrections, setSettlementCorrections] = useState([])
   const saleInFlight = useRef(false)
   const staffMigrationAttempted = useRef(false)
   const staffAuthInFlight = useRef(null)
@@ -263,6 +265,7 @@ export default function App() {
       staffListener.current?.(); staffListener.current = null
       cashboxListener.current?.(); cashboxListener.current = null
       settlementListener.current?.(); settlementListener.current = null
+      settlementCorrectionListener.current?.(); settlementCorrectionListener.current = null
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
@@ -282,6 +285,7 @@ export default function App() {
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         cashboxListener.current = subscribeCentralCashboxTransactions(setCashboxTransactions)
         settlementListener.current = subscribeCentralSettlements(setSettlements)
+        settlementCorrectionListener.current = subscribeCentralSettlementCorrections(setSettlementCorrections)
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
         // Migrate the device cache before attaching the listener. Otherwise an
         // initial empty RTDB snapshot could overwrite legacy local expenses.
@@ -318,6 +322,7 @@ export default function App() {
       staffListener.current?.()
       cashboxListener.current?.()
       settlementListener.current?.()
+      settlementCorrectionListener.current?.()
       setAdminCentralSales([])
       setProductAuthUser(null)
     }
@@ -942,7 +947,7 @@ export default function App() {
         <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
       {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
-      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
+      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} settlements={settlements} settlementCorrections={settlementCorrections} onSaveSettlementCorrection={saveSettlementCorrection} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
 
       {currentView === 'orders' && (session || adminReady) && (
         <OrderHistoryMenu
