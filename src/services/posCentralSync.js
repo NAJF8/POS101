@@ -66,6 +66,9 @@ let db = null
 let appCheck = null
 let authReady = Promise.resolve()
 let cashierSyncInFlight = null
+let cashierSyncInFlightStartedAt = 0
+let cashierSyncInFlightToken = 0
+const CASHIER_SYNC_LOCK_STALE_MS = 60 * 1000
 
 if (configured) {
   authDebug('POS_AUTH_INIT')
@@ -604,9 +607,22 @@ export const mergeCentralSalesLocally = centralSales => {
   return merged
 }
 
-const logQueueDecision = (sale, reason, detail = '') => {
-  const payload = { reason, saleId: saleIdOf(sale), orderNumber: sale?.orderNumber ?? '', operationKey: sale?.operationKey || sale?.operation_key || '', detail }
-  console.info('[POS101_MANUAL_QUEUE]', payload)
+const logQueueDecision = (sale, reason = '', detail = '', fields = {}) => {
+  const payload = {
+    queueLength: fields.queueLength ?? null,
+    eligible: fields.eligible ?? null,
+    locked: fields.locked ?? false,
+    processingStarted: fields.processingStarted ?? false,
+    skippedReason: reason || '',
+    saleId: saleIdOf(sale),
+    orderNumber: sale?.orderNumber ?? '',
+    operationKey: sale?.operationKey || sale?.operation_key || '',
+    firebaseWriteResult: fields.firebaseWriteResult ?? 'not-started',
+    readbackResult: fields.readbackResult ?? 'not-started',
+    localUpdateResult: fields.localUpdateResult ?? 'not-started',
+    detail,
+  }
+  console.info('[POS101_MANUAL_QUEUE]', JSON.stringify(payload))
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
 }
 
@@ -621,11 +637,12 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
   // so the worker must include queue.sale as a candidate instead of silently
   // treating that sale as nonexistent.
   const rawQueue = readRawSaleQueue()
+  logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const queuedSales = []
   for (const rawEntry of rawQueue) {
     const sale = rawEntry?.sale
-    if (!sale) { logQueueDecision(null, 'malformed queue entry', 'missing sale payload'); continue }
-    if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'ineligible', `status=${sale?.status || ''}`); continue }
+    if (!sale) { logQueueDecision(null, 'malformed queue entry', 'missing sale payload', { queueLength: rawQueue.length }); continue }
+    if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'ineligible', `status=${sale?.status || ''}`, { queueLength: rawQueue.length, eligible: false }); continue }
     queuedSales.push(sale)
   }
   const candidateByIdentity = new Map()
@@ -637,7 +654,7 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
   const beforeCentral = centralValues(before)
   const centralIds = new Set(beforeCentral.map(saleIdOf))
   const candidates = [...candidateByIdentity.values()].filter(sale => {
-    if (!isSaleEligibleForCentralUpload(sale)) { logQueueDecision(sale, 'ineligible'); return false }
+    if (!isSaleEligibleForCentralUpload(sale)) { logQueueDecision(sale, 'ineligible', '', { queueLength: rawQueue.length, eligible: false }); return false }
     return true
   })
   const uploadable = candidates
@@ -654,12 +671,12 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
     if (classification.action === 'quarantine') {
       const error = Object.assign(new Error(`تعذر رفع مبيعة متعارضة: ${classification.reason}`), { code: classification.reason })
       if (queueEntry) retainQueuedSale(queueEntry, error)
-      logQueueDecision(sale, 'duplicate guard', classification.reason)
+      logQueueDecision(sale, 'duplicate guard', classification.reason, { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'blocked', readbackResult: 'not-required', localUpdateResult: 'retained-in-queue' })
       continue
     }
     if (classification.action === 'duplicate') {
       if (queueEntry) markSaleSynced(sale)
-      logQueueDecision(sale, 'duplicate guard', 'central payload already matches')
+      logQueueDecision(sale, 'duplicate guard', 'central payload already matches', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'not-needed', readbackResult: 'verified', localUpdateResult: 'synced' })
       updated += 1
       continue
     }
@@ -673,7 +690,7 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
       const readBack = await get(saleRef).catch(() => null)
       if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
         if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
-        logQueueDecision(sale, 'Firebase error', error?.message || '')
+        logQueueDecision(sale, 'Firebase error', error?.message || '', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'failed', readbackResult: 'failed', localUpdateResult: 'retained-in-queue' })
         continue
       }
     }
@@ -681,7 +698,7 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
     if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
       const error = Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
       if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
-      logQueueDecision(sale, 'Firebase error', error.message)
+      logQueueDecision(sale, 'Firebase error', error.message, { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'completed', readbackResult: 'mismatch', localUpdateResult: 'retained-in-queue' })
       continue
     }
     await syncAccSaleBestEffort(sale)
@@ -690,7 +707,7 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
     // The local ledger and queue are changed only after the full central
     // payload has been read back and matched, including operationKey.
     markSaleSynced(sale)
-    logQueueDecision(sale, 'synced', 'central read-back verified')
+    logQueueDecision(sale, 'synced', 'central read-back verified', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'completed', readbackResult: 'verified', localUpdateResult: 'synced' })
   }
 
   const after = await get(salesRef())
@@ -714,8 +731,10 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
 
 export const runCashierCentralSync = ({ initial = false } = {}) => {
   if (cashierSyncInFlight) return cashierSyncInFlight
+  cashierSyncInFlightStartedAt = Date.now()
+  const token = ++cashierSyncInFlightToken
   cashierSyncInFlight = runCashierCentralSyncInternal({ initial })
-    .finally(() => { cashierSyncInFlight = null })
+    .finally(() => { if (cashierSyncInFlightToken === token) { cashierSyncInFlight = null; cashierSyncInFlightStartedAt = 0 } })
   return cashierSyncInFlight
 }
 
@@ -724,11 +743,20 @@ export const runCashierCentralSync = ({ initial = false } = {}) => {
 // by older bundles. It never closes the day or deletes an unverified queue row.
 export const runCashierCentralSyncNow = () => {
   if (cashierSyncInFlight) {
-    logQueueDecision(null, 'locked', 'another cashier sync is already running')
-    return cashierSyncInFlight
+    const age = Date.now() - cashierSyncInFlightStartedAt
+    if (age > CASHIER_SYNC_LOCK_STALE_MS) {
+      logQueueDecision(null, 'stale lock released', `ageMs=${age}`, { locked: true })
+      cashierSyncInFlight = null
+    } else {
+      const error = Object.assign(new Error('المزامنة قيد التنفيذ. انتظر اكتمالها ثم أعد المحاولة.'), { code: 'SYNC_LOCK_ACTIVE' })
+      logQueueDecision(null, 'locked', `ageMs=${age}`, { locked: true })
+      return Promise.reject(error)
+    }
   }
+  cashierSyncInFlightStartedAt = Date.now()
+  const token = ++cashierSyncInFlightToken
   cashierSyncInFlight = runCashierCentralSyncInternal({ queueOnly: true })
-    .finally(() => { cashierSyncInFlight = null })
+    .finally(() => { if (cashierSyncInFlightToken === token) { cashierSyncInFlight = null; cashierSyncInFlightStartedAt = 0 } })
   return cashierSyncInFlight
 }
 
@@ -1050,6 +1078,7 @@ const financialUser = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
+  if (!write && isCentralAdminUser(user)) return user
   return requireKioskUser(user)
 }
 
