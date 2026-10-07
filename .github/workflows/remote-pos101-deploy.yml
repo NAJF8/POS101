@@ -40,15 +40,7 @@ jobs:
         shell: bash
         run: |
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          test -n "$VITE_POS101_API_KEY"
-          test -n "$VITE_POS101_AUTH_DOMAIN"
-          test -n "$VITE_POS101_DATABASE_URL"
-          test -n "$VITE_POS101_PROJECT_ID"
-          test -n "$VITE_POS101_STORAGE_BUCKET"
-          test -n "$VITE_POS101_MESSAGING_SENDER_ID"
-          test -n "$VITE_POS101_APP_ID"
-          test "$VITE_POS101_DATABASE_URL" = "https://cmms-37512-default-rtdb.asia-southeast1.firebasedatabase.app"
-          echo "MISSING_FIREBASE_ENV_BLOCKS_DEPLOY=PASS"
+          node scripts/central-firebase-regression.mjs --env
       - run: npm run test:report-open-orders
       - run: npm run test:comprehensive-report
       - run: node scripts/central-firebase-regression.mjs
@@ -66,6 +58,9 @@ jobs:
       - run: node scripts/financial-center-regression.mjs
       - run: node scripts/comprehensive-report-regression.mjs
       - run: git diff --check
+      - name: Remove any stale build output
+        shell: bash
+        run: rm -rf dist
       - run: npm run build
       - run: node scripts/central-firebase-regression.mjs --build
       - name: Stamp exact build identity
