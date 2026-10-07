@@ -20,6 +20,13 @@ jobs:
       VITE_POS101_MESSAGING_SENDER_ID: "451592788539"
       VITE_POS101_APP_ID: "1:451592788539:web:d3dc3e68b1543996b39a1e"
       VITE_POS101_KIOSK_WORKER_URL: https://pos101-kiosk-auth.coffee101.workers.dev
+      VITE_FIREBASE_API_KEY: AIzaSyCzmUhkN29ey7B1BpexJvgh8miI2RlAn74
+      VITE_FIREBASE_AUTH_DOMAIN: acc-101.firebaseapp.com
+      VITE_FIREBASE_DATABASE_URL: https://acc-101-default-rtdb.europe-west1.firebasedatabase.app
+      VITE_FIREBASE_PROJECT_ID: acc-101
+      VITE_FIREBASE_STORAGE_BUCKET: acc-101.firebasestorage.app
+      VITE_FIREBASE_MESSAGING_SENDER_ID: "1027289206201"
+      VITE_FIREBASE_APP_ID: "1:1027289206201:web:3c58deb7fe132066723a68"
     steps:
       - uses: actions/checkout@v4
         with:
