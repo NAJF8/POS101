@@ -165,7 +165,7 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], settlements = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
   const [reportType, setReportType] = useState(initialReportType)
   const [employeeQuery, setEmployeeQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -252,6 +252,10 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   // thermal payloads. No report can silently fall back to the current day.
   const reportSales = useMemo(() => getReportSalesForPeriod({ localSales: sales, centralSales, operationalDays: reportOperationalDays, from: periodFrom, to: periodTo, currentOperationalDay: operationalDay }), [sales, centralSales, reportOperationalDays, periodFrom, periodTo, operationalDay])
   const filteredSales = useMemo(() => reportSales, [reportSales])
+  const selectedClosedDay = useMemo(() => periodFrom === periodTo ? reportOperationalDays.find(day => day?.status === 'closed' && String(day.businessDate) === periodFrom) : null, [reportOperationalDays, periodFrom, periodTo])
+  const storedSettlement = useMemo(() => selectedClosedDay ? (Array.isArray(settlements) ? settlements : []).find(row => String(row?.operationalDayId || '') === String(selectedClosedDay.id || selectedClosedDay.operationalDayId || '') || String(row?.businessDate || '') === periodFrom) : null, [selectedClosedDay, settlements, periodFrom])
+  const postCloseDrift = Boolean(storedSettlement && (Number(storedSettlement.orderCount || 0) !== filteredSales.length || Number(storedSettlement.sales || 0) !== filteredSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)))
+  const reportSource = selectedClosedDay ? 'firebase-central' : 'merged-safe'
   const filteredExpenses = useMemo(() => filterRowsByBusinessDate(
     (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })),
     periodFrom,
@@ -804,11 +808,12 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         </div>
         
         <div className={`report-paper${reportType === 'comprehensive' ? ' comprehensive-report' : reportType === 'materials' ? ' materials-report' : ''}`}>
-          <div className="report-paper-header">
+          <div className="report-paper-header" data-report-source={reportSource}>
             <img src={logoUrl} alt="" className="report-logo" />
             <h2>{title}</h2>
             <p>من {periodFrom} إلى {periodTo}</p>
             <p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || session?.shiftName || 'الإدارة'}</p>
+            {postCloseDrift && <p className="form-error" role="alert">تنبيه: توجد فروقات بين بيانات اليوم الحالية والتسوية الأصلية.</p>}
           </div>
           
           {content}

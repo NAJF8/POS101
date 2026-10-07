@@ -22,7 +22,7 @@ const sameSaleIdentity = (left, right) => {
   return Boolean((leftId && rightId && leftId === rightId)
     || (leftOperationKey && rightOperationKey && leftOperationKey === rightOperationKey))
 }
-const cancelledStatuses = new Set(['cancelled', 'canceled', 'voided', 'abandoned'])
+const cancelledStatuses = new Set(['cancelled', 'canceled', 'voided', 'abandoned', 'draft'])
 const saleItems = sale => Array.isArray(sale?.items)
   ? sale.items
   : Array.isArray(sale?.order?.items) ? sale.order.items : []

@@ -4,7 +4,7 @@ import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.
 
 const money = value => formatMoney(Number(value || 0))
 
-export default function OperationalDay({ day, summary, settlementPreview = summary, loading, error, onStart, onEnd }) {
+export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onStart, onEnd }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
@@ -20,9 +20,15 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   }
   const end = async () => {
     if (busy) return
+    if (preCloseGuard?.allowed === false) return
     setBusy(true)
     if (actualCash === '') return
     try { await onEnd(actualCash); setEndOpen(false); setActualCash('') } finally { setBusy(false) }
+  }
+  const openEnd = async () => {
+    if (busy) return
+    setBusy(true)
+    try { await onPrepareEnd?.(); setEndOpen(true) } catch { /* App surfaces the guard error. */ } finally { setBusy(false) }
   }
 
   return <section className={`operational-day-card ${open ? 'is-open' : 'is-closed'}`} dir="rtl" aria-label="اليوم التشغيلي">
@@ -47,9 +53,9 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
       {forgotten
         ? <div className="operational-day-warning" role="status">
             <span>اليوم السابق ما زال مفتوحاً</span>
-            <button type="button" onClick={() => setEndOpen(true)}>إنهاء اليوم</button>
+            <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
           </div>
-        : <button className="primary-action operational-day-action" type="button" onClick={() => setEndOpen(true)}>إنهاء اليوم</button>}
+        : <button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>}
     </div> : <div className="operational-day-body">
       <div className="operational-day-empty">
         <strong>لا يوجد يوم تشغيلي مفتوح</strong>
@@ -58,6 +64,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
       <button className="primary-action operational-day-action" type="button" disabled={loading || busy} onClick={start}><Icon name="arrow" size={15} />{busy || loading ? 'جارٍ بدء اليوم…' : 'بدء اليوم'}</button>
     </div>}
     {error && <p className="form-error" role="alert">{error}</p>}
+    {open && preCloseGuard?.message && <p className="form-error" role="alert">{preCloseGuard.message}</p>}
 
     {endOpen && <div className="overlay">
       <div className="dialog operational-day-dialog">
@@ -80,7 +87,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>
-          <button className="danger-button" type="button" disabled={busy || actualCash === ''} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
+          <button className="danger-button" type="button" disabled={busy || actualCash === ''} aria-disabled={preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
         </div>
       </div>
     </div>}

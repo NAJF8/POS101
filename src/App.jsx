@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readLocalExpenses, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readFreshSettlementPreview, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, saveCentralStaff, saveCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -125,6 +125,8 @@ export default function App() {
   const [operationalDay, setOperationalDay] = useState(() => readCachedOperationalDay())
   const [operationalDayLoading, setOperationalDayLoading] = useState(false)
   const [operationalDayError, setOperationalDayError] = useState('')
+  const [preCloseGuard, setPreCloseGuard] = useState({ loading: false, allowed: true, message: '' })
+  const [freshSettlementPreview, setFreshSettlementPreview] = useState(null)
   const [ledgerVersion, setLedgerVersion] = useState(0)
   const operationalDayListener = useRef(null)
   const expenseListener = useRef(null)
@@ -379,6 +381,23 @@ export default function App() {
   }, [operationalDay, ledgerVersion])
 
   useEffect(() => {
+    if (!operationalDay?.id || operationalDay.status !== 'open') {
+      setPreCloseGuard({ loading: false, allowed: true, message: '' })
+      return undefined
+    }
+    let active = true
+    setPreCloseGuard({ loading: true, allowed: false, message: '' })
+    void readPreCloseReconciliation(operationalDay).then(result => {
+      if (!active) return
+      setPreCloseGuard({ ...result, loading: false, allowed: Boolean(result?.allowed), message: result?.allowed ? '' : 'توجد مبيعات غير متزامنة. أكمل المزامنة قبل إنهاء اليوم.' })
+    }).catch(error => {
+      if (!active) return
+      setPreCloseGuard({ loading: false, allowed: false, message: error?.message || 'تعذر التحقق من مزامنة المبيعات.' })
+    })
+    return () => { active = false }
+  }, [operationalDay?.id, operationalDay?.status, ledgerVersion, centralAuthUser?.uid])
+
+  useEffect(() => {
     const refreshOperationalSummary = () => setLedgerVersion(value => value + 1)
     window.addEventListener('pos101-sale-created', refreshOperationalSummary)
     window.addEventListener('pos101-sale-updated', refreshOperationalSummary)
@@ -396,6 +415,7 @@ export default function App() {
     try {
       const day = await startOperationalDay({ startedBy: { name: session?.name || session?.shiftName || '' } })
       setOperationalDay(day)
+      setFreshSettlementPreview(null)
       setModal(null)
     } catch (error) {
       setOperationalDayError(error?.message || 'تعذر بدء اليوم التشغيلي.')
@@ -403,12 +423,20 @@ export default function App() {
     } finally { setOperationalDayLoading(false) }
   }, [session])
 
+  const prepareEndOperationalDay = useCallback(async () => {
+    const fresh = await readFreshSettlementPreview(operationalDay)
+    setFreshSettlementPreview(fresh)
+    const guard = await readPreCloseReconciliation(operationalDay)
+    if (!guard.allowed) throw Object.assign(new Error('توجد مبيعات غير متزامنة. أكمل المزامنة قبل إنهاء اليوم.'), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose: guard })
+  }, [operationalDay])
+
   const handleEndOperationalDay = useCallback(async actualCash => {
     setOperationalDayError('')
     try {
       const result = await settleAndEndOperationalDay(operationalDay, { actualCash, endedBy: { name: session?.name || session?.shiftName || '' } })
       const reopened = await readOpenOperationalDay()
       setOperationalDay(reopened)
+      setFreshSettlementPreview(null)
       return result
     } catch (error) {
       setOperationalDayError(error?.message || 'تعذر إنهاء اليوم التشغيلي.')
@@ -419,12 +447,12 @@ export default function App() {
   const settlementPreview = useMemo(() => {
     const dayId = operationalDay?.id
     const dayDate = operationalDay?.businessDate
-    return calculateSettlement({
+    return freshSettlementPreview || calculateSettlement({
       sales: readLocalSales().filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate)),
       expenses: readLocalExpenses().filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate)),
       transactions: cashboxTransactions.filter(row => row.businessDate === dayDate && row.status !== 'voided'),
     })
-  }, [operationalDay, cashboxTransactions, ledgerVersion])
+  }, [freshSettlementPreview, operationalDay, cashboxTransactions, ledgerVersion])
 
   const loginAdmin = useCallback(async () => {
     if (adminAuthBusy) return
@@ -907,7 +935,7 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
-        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
+        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} onPrepareEnd={prepareEndOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
@@ -965,6 +993,7 @@ export default function App() {
           operationalDay={operationalDay}
           centralSales={centralSales}
           operationalDays={centralOperationalDays}
+          settlements={settlements}
           cashboxTransactions={cashboxTransactions}
           staff={staff}
           salesOverride={adminReady ? adminCentralSales : null}
@@ -982,7 +1011,7 @@ export default function App() {
       {currentView === 'expense-entry' && session && (
         <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
-      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} operationalDays={centralOperationalDays} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} />}
+      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} operationalDays={centralOperationalDays} settlements={settlements} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} />}
 
       {adminReady && !session && currentView === 'dashboard' && (
         <section className="admin-central-readonly" dir="rtl" aria-label="مركز مبيعات الإدارة">
