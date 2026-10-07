@@ -24,9 +24,12 @@ export const diagnosticMismatchFields = (local, central) => {
   if (!central) return []
   const fields = []
   if (JSON.stringify(stable(normalizedItems(local))) !== JSON.stringify(stable(normalizedItems(central)))) fields.push('items')
+  if (number(local?.gross ?? local?.subtotal) !== number(central?.gross ?? central?.subtotal)) fields.push('gross')
   if (number(local?.discount) !== number(central?.discount)) fields.push('discount')
   if (text(local?.paymentMethod || local?.payment?.method) !== text(central?.paymentMethod || central?.payment?.method)) fields.push('paymentMethod')
   if (number(local?.net ?? local?.total ?? local?.subtotal) !== number(central?.net ?? central?.total ?? central?.subtotal)) fields.push('net')
+  if (number(local?.cashAmount ?? local?.payment?.cashAmount) !== number(central?.cashAmount ?? central?.payment?.cashAmount)) fields.push('cashAmount')
+  if (number(local?.electronicAmount ?? local?.payment?.electronicAmount) !== number(central?.electronicAmount ?? central?.payment?.electronicAmount)) fields.push('electronicAmount')
   if (text(local?.businessDate) !== text(central?.businessDate)) fields.push('businessDate')
   if (text(local?.operationalDayId || local?.operational_day_id) !== text(central?.operationalDayId || central?.operational_day_id)) fields.push('operationalDayId')
   if (operationKeyOf(local) !== operationKeyOf(central)) fields.push('operationKey')
