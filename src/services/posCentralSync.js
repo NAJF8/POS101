@@ -692,6 +692,31 @@ const logQueueDecision = (sale, reason = '', detail = '', fields = {}) => {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
 }
 
+const normalizeQueuedSaleForCurrentDay = sale => {
+  const currentDay = readCachedOperationalDay()
+  const saleId = String(saleIdOf(sale) || '').trim()
+  const total = Number(sale?.total ?? sale?.subtotal)
+  const items = Array.isArray(sale?.items) ? sale.items : Array.isArray(sale?.order?.items) ? sale.order.items : []
+  let businessDate = String(sale?.businessDate || '').trim()
+  let operationalDayId = String(sale?.operationalDayId || sale?.operational_day_id || '').trim()
+  const createdDate = sale?.createdAt ? localBusinessDate(sale.createdAt) : ''
+  if (!businessDate && currentDay?.businessDate && createdDate === String(currentDay.businessDate)) businessDate = String(currentDay.businessDate)
+  if (!operationalDayId && currentDay?.id && businessDate === String(currentDay.businessDate)) operationalDayId = String(currentDay.id)
+  const operationKey = String(sale?.operationKey || sale?.operation_key || '').trim() || (saleId ? `pos101:${saleId}` : '')
+  const paymentMethod = String(sale?.paymentMethod || sale?.payment?.method || sale?.paymentType || '').trim()
+  const missing = []
+  if (!saleId) missing.push('saleId')
+  if (!Number.isFinite(total)) missing.push('total')
+  if (!items.length) missing.push('items')
+  if (!businessDate) missing.push('businessDate')
+  else if (currentDay?.businessDate && businessDate !== String(currentDay.businessDate)) missing.push(`businessDate!=${currentDay.businessDate}`)
+  if (currentDay?.id && operationalDayId && operationalDayId !== String(currentDay.id)) missing.push(`operationalDayId!=${currentDay.id}`)
+  return {
+    sale: { ...sale, saleId, id: saleId, operationKey, businessDate, operationalDayId, paymentMethod, items },
+    missing,
+  }
+}
+
 const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = false, manualReport = null } = {}) => {
   try { await requireRole('cashier-sync') } catch (error) {
     logQueueDecision(null, error?.code === 'KIOSK_AUTH_REQUIRED' ? 'auth claims missing' : 'auth required', error?.message || '')
@@ -706,10 +731,15 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const queuedSales = []
   for (const rawEntry of rawQueue) {
-    const sale = rawEntry?.sale
-    if (!sale) { logQueueDecision(null, 'malformed queue entry', 'missing sale payload', { queueLength: rawQueue.length }); continue }
-    if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'ineligible', `status=${sale?.status || ''}`, { queueLength: rawQueue.length, eligible: false }); continue }
-    queuedSales.push(sale)
+    const rawSale = rawEntry?.sale
+    if (!rawSale) { logQueueDecision(null, 'missing:sale', 'missing sale payload', { queueLength: rawQueue.length }); continue }
+    const normalized = normalizeQueuedSaleForCurrentDay(rawSale)
+    if (normalized.missing.length) {
+      logQueueDecision(normalized.sale, `missing:${normalized.missing.join(',')}`, 'queue entry is not recoverable', { queueLength: rawQueue.length, eligible: false })
+      if (manualReport) manualReport.salesToProcess.push({ orderNumber: normalized.sale?.orderNumber ?? null, saleId: saleIdOf(normalized.sale), operationKey: normalized.sale?.operationKey || '', centralBefore: false, writeAttempted: false, writeResult: 'SKIPPED', readbackResult: 'SKIPPED', localUpdateResult: 'RETAINED', error: `missing:${normalized.missing.join(',')}` })
+      continue
+    }
+    queuedSales.push(normalized.sale)
   }
   const candidateByIdentity = new Map()
   for (const sale of [...(queueOnly ? [] : localSales), ...queuedSales]) {
@@ -720,7 +750,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   const beforeCentral = centralValues(before)
   const centralIds = new Set(beforeCentral.map(saleIdOf))
   const candidates = [...candidateByIdentity.values()].filter(sale => {
-    if (!isSaleEligibleForCentralUpload(sale)) { logQueueDecision(sale, 'ineligible', '', { queueLength: rawQueue.length, eligible: false }); return false }
+    if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'missing:validSalePayload', 'queue entry is not recoverable', { queueLength: rawQueue.length, eligible: false }); return false }
     return true
   })
   const uploadable = candidates
@@ -747,22 +777,6 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
       error: '',
     } : null
     if (manualSale) manualReport.salesToProcess.push(manualSale)
-    if (queueOnly) {
-      const missing = ['saleId', 'operationKey', 'businessDate', 'operationalDayId', 'total', 'paymentMethod'].filter(field => {
-        if (field === 'saleId') return !saleIdOf(sale)
-        if (field === 'operationKey') return !String(sale?.operationKey || sale?.operation_key || '')
-        if (field === 'businessDate') return !String(sale?.businessDate || '')
-        if (field === 'operationalDayId') return !String(sale?.operationalDayId || sale?.operational_day_id || '')
-        if (field === 'paymentMethod') return !String(sale?.paymentMethod || sale?.payment?.method || '')
-        return !Number.isFinite(Number(sale?.total ?? sale?.subtotal))
-      })
-      if (missing.length) {
-        const error = Object.assign(new Error(`بيانات المبيعة ناقصة: ${missing.join(',')}`), { code: 'SALE_VALIDATION_FAILED' })
-        if (queueEntry) retainQueuedSale(queueEntry, error)
-        if (manualSale) manualSale.error = error.message
-        continue
-      }
-    }
     if (classification.action === 'quarantine') {
       const error = Object.assign(new Error(`تعذر رفع مبيعة متعارضة: ${classification.reason}`), { code: classification.reason })
       if (queueEntry) retainQueuedSale(queueEntry, error)

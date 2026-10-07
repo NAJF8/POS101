@@ -110,7 +110,10 @@ export const quarantineSale = (sale, quarantineReason, raw = sale) => {
   return entry
 }
 
-const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale) && isSaleIdentityComplete(entry.sale))
+// Legacy queue rows may predate operationKey/businessDate persistence. They
+// remain real sale entries when their sale payload is otherwise valid; the
+// sync layer normalizes the missing identity fields before writing.
+const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale))
 const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
   const pending = pendingSale(sale, error)
   const attempts = Number(existing?.attempts)
