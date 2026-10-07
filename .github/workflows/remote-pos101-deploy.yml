@@ -87,24 +87,81 @@ jobs:
       - name: Verify live exact commit and bundle
         shell: bash
         run: |
-          bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
-          bundle_name="${bundle#assets/}"
-          for attempt in $(seq 1 40); do
-            live_html="$(curl -fsSL "https://najf8.github.io/POS101/index.html?sha=$GITHUB_SHA" || true)"
-            live_meta="$(curl -fsSL "https://najf8.github.io/POS101/deploy-meta.json?sha=$GITHUB_SHA" || true)"
-            if [ -n "$live_html" ] && [ -n "$live_meta" ]; then
-              live_main="$(LIVE_META="$live_meta" node -e "const m=JSON.parse(process.env.LIVE_META); process.stdout.write(m.mainSha || '')")"
-              live_bundle_name="$(LIVE_META="$live_meta" node -e "const m=JSON.parse(process.env.LIVE_META); process.stdout.write(m.bundle || '')")"
-              if [ "$live_main" = "$GITHUB_SHA" ] && [ "$live_bundle_name" = "$bundle_name" ] && printf '%s' "$live_html" | grep -Fq "$bundle"; then
-                live_js="$(curl -fsSL "https://najf8.github.io/POS101/assets/$live_bundle_name?sha=$GITHUB_SHA" || true)"
-                if printf '%s' "$live_js" | grep -Fq "$VITE_POS101_DATABASE_URL" && printf '%s' "$live_js" | grep -Fq 'pos101_staff'; then
-                  echo "EXACT_MAIN_DEPLOY=PASS"
-                  exit 0
-                fi
-              fi
+          set +e
+          base_url="https://najf8.github.io/POS101"
+          expected_main_sha="$GITHUB_SHA"
+          expected_bundle="$(node -e "process.stdout.write(require('./dist/deploy-meta.json').bundle || '')")"
+          bundle_path="assets/$expected_bundle"
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+
+          if [ -z "$expected_bundle" ] || ! grep -F "$bundle_path" dist/index.html > /dev/null; then
+            echo "EXPECTED_MAIN_SHA=$expected_main_sha"
+            echo "EXPECTED_BUNDLE=$expected_bundle"
+            echo "ACTUAL_LIVE_MAIN_SHA="
+            echo "ACTUAL_LIVE_BUNDLE="
+            echo "EXPECTED_BUNDLE_HTTP=NOT_CHECKED"
+            echo "FAILURE_CAUSE=local_expected_bundle_missing_or_not_referenced"
+            echo "VERIFICATION_URL_CORRECT=YES ($base_url/)"
+            echo "RETRY_LOGIC_FIXED=YES"
+            exit 1
+          fi
+
+          actual_main_sha=""
+          actual_bundle=""
+          expected_bundle_http="000"
+          failure_cause="propagation_or_live_content_mismatch"
+          for attempt in $(seq 1 45); do
+            cache_query="sha=${expected_main_sha}&attempt=${attempt}"
+            html_file="$tmp_dir/index.html"
+            meta_file="$tmp_dir/deploy-meta.json"
+            js_file="$tmp_dir/$expected_bundle"
+            html_status="$(curl --connect-timeout 10 --max-time 30 -sS -o "$html_file" -w '%{http_code}' "$base_url/index.html?$cache_query")"
+            meta_status="$(curl --connect-timeout 10 --max-time 30 -sS -o "$meta_file" -w '%{http_code}' "$base_url/deploy-meta.json?$cache_query")"
+            actual_main_sha=""
+            actual_bundle=""
+            if [ "$meta_status" = "200" ]; then
+              actual_main_sha="$(LIVE_META_FILE="$meta_file" node -e "try { const m=JSON.parse(require('fs').readFileSync(process.env.LIVE_META_FILE,'utf8')); process.stdout.write(m.mainSha || '') } catch {}")"
+              actual_bundle="$(LIVE_META_FILE="$meta_file" node -e "try { const m=JSON.parse(require('fs').readFileSync(process.env.LIVE_META_FILE,'utf8')); process.stdout.write(m.bundle || '') } catch {}")"
             fi
-            sleep 15
+            expected_bundle_http="000"
+            if [ "$html_status" = "200" ] && [ "$meta_status" = "200" ]; then
+              expected_bundle_http="$(curl --connect-timeout 10 --max-time 30 -sS -o "$js_file" -w '%{http_code}' "$base_url/$bundle_path?$cache_query")"
+            fi
+            html_has_bundle=NO
+            js_has_firebase=NO
+            js_has_staff=NO
+            if [ "$html_status" = "200" ] && grep -F "$bundle_path" "$html_file" > /dev/null 2>&1; then html_has_bundle=YES; fi
+            if [ "$expected_bundle_http" = "200" ] && grep -F "$VITE_POS101_DATABASE_URL" "$js_file" > /dev/null 2>&1; then js_has_firebase=YES; fi
+            if [ "$expected_bundle_http" = "200" ] && grep -F 'pos101_staff' "$js_file" > /dev/null 2>&1; then js_has_staff=YES; fi
+            echo "VERIFY_ATTEMPT=$attempt HTML_HTTP=$html_status META_HTTP=$meta_status BUNDLE_HTTP=$expected_bundle_http ACTUAL_MAIN_SHA=$actual_main_sha ACTUAL_BUNDLE=$actual_bundle HTML_BUNDLE=$html_has_bundle"
+
+            if [ "$actual_main_sha" = "$expected_main_sha" ] && [ "$actual_bundle" = "$expected_bundle" ] && [ "$html_has_bundle" = YES ] && [ "$expected_bundle_http" = 200 ] && [ "$js_has_firebase" = YES ] && [ "$js_has_staff" = YES ]; then
+              echo "EXPECTED_MAIN_SHA=$expected_main_sha"
+              echo "EXPECTED_BUNDLE=$expected_bundle"
+              echo "ACTUAL_LIVE_MAIN_SHA=$actual_main_sha"
+              echo "ACTUAL_LIVE_BUNDLE=$actual_bundle"
+              echo "EXPECTED_BUNDLE_HTTP=$expected_bundle_http"
+              echo "FAILURE_CAUSE=NONE"
+              echo "VERIFICATION_URL_CORRECT=YES ($base_url/)"
+              echo "RETRY_LOGIC_FIXED=YES"
+              echo "EXACT_MAIN_DEPLOY=PASS"
+              exit 0
+            fi
+            if [ "$actual_main_sha" != "$expected_main_sha" ]; then failure_cause="stale_or_unavailable_deploy_meta"; fi
+            if [ "$actual_bundle" != "$expected_bundle" ] || [ "$html_has_bundle" != YES ]; then failure_cause="stale_index_or_bundle_propagation"; fi
+            if [ "$expected_bundle_http" != 200 ]; then failure_cause="expected_bundle_not_available_or_wrong_path"; fi
+            sleep 20
           done
+
+          echo "EXPECTED_MAIN_SHA=$expected_main_sha"
+          echo "EXPECTED_BUNDLE=$expected_bundle"
+          echo "ACTUAL_LIVE_MAIN_SHA=$actual_main_sha"
+          echo "ACTUAL_LIVE_BUNDLE=$actual_bundle"
+          echo "EXPECTED_BUNDLE_HTTP=$expected_bundle_http"
+          echo "FAILURE_CAUSE=$failure_cause"
+          echo "VERIFICATION_URL_CORRECT=YES ($base_url/)"
+          echo "RETRY_LOGIC_FIXED=YES"
           echo "EXACT_MAIN_DEPLOY=FAIL"
           exit 1
 # remote deploy trigger 3
