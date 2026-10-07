@@ -363,9 +363,21 @@ export async function saveAccSale(sale, profile) {
   const data = {
     saleId: sale.saleId || sale.id,
     operationKey: sale.operationKey || sale.operation_key,
-    date: sale.date || todayBaghdad(),
+    orderNumber: sale.orderNumber ?? sale.order_number ?? '',
+    businessDate: sale.businessDate,
+    createdAt: sale.createdAt ?? sale.created_at,
+    updatedAt: sale.updatedAt ?? sale.updated_at ?? sale.createdAt ?? sale.created_at,
+    cashierId: sale.cashierId ?? sale.cashier_id ?? '',
+    cashierName: sale.cashierName ?? sale.cashier_name ?? '',
+    shiftId: sale.shiftId ?? sale.shift_id ?? sale.operationalDayId ?? '',
+    deviceId: sale.deviceId ?? sale.device_id ?? '',
+    orderType: sale.orderType ?? sale.order_type ?? '',
+    status: sale.status,
+    subtotal: Number(sale.subtotal || 0),
     paymentMethod: sale.paymentMethod || 'cash',
-    discount: Number(sale.discount || 0),
+    discountAmount: Number(sale.discount ?? sale.discountAmount ?? 0),
+    discount: Number(sale.discount ?? sale.discountAmount ?? 0),
+    total: Number(sale.total ?? sale.subtotal ?? 0),
     items: (sale.items || []).map(item => ({
       productId: item.accProductId || item.product_id || item.id,
       quantity: Number(item.quantity || 0),
@@ -381,7 +393,44 @@ export async function saveAccExpense(expense, profile) {
   const user = await waitForAuthUser()
   if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
   const callable = httpsCallable(functions, 'createPosExpense')
-  return (await callable({ expenseId: expense.id, amount: expense.amount, category: expense.category, description: expense.notes, paymentMethod: 'cash' })).data
+  return (await callable({
+    expenseId: expense.id,
+    amount: Number(expense.amount),
+    category: expense.category || 'أخرى',
+    description: expense.description || expense.notes || expense.category || 'مصروف POS',
+    paymentMethod: expense.paymentMethod || expense.payment_method || 'cash',
+    businessDate: expense.businessDate,
+    createdAt: expense.createdAt ?? expense.created_at ?? expense.timestamp,
+    updatedAt: expense.updatedAt ?? expense.updated_at ?? expense.createdAt ?? expense.created_at,
+    status: expense.status || 'active',
+  })).data
+}
+
+export async function updateAccExpense(expense, profile) {
+  ensureConfigured()
+  if (!functions) throw new Error('ACC Functions غير مهيأة.')
+  const user = await waitForAuthUser()
+  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
+  const callable = httpsCallable(functions, 'updatePosExpense')
+  return (await callable({
+    expenseId: expense.id,
+    amount: Number(expense.amount),
+    category: expense.category || 'أخرى',
+    description: expense.description || expense.notes || expense.category || 'مصروف POS',
+    paymentMethod: expense.paymentMethod || expense.payment_method || 'cash',
+    businessDate: expense.businessDate,
+    updatedAt: expense.updatedAt ?? expense.updated_at ?? Date.now(),
+    status: expense.status || 'active',
+  })).data
+}
+
+export async function voidAccExpense(expense, profile) {
+  ensureConfigured()
+  if (!functions) throw new Error('ACC Functions غير مهيأة.')
+  const user = await waitForAuthUser()
+  if (!user || !profile?.id) throw new Error('انتهت جلسة الكاشير. سجّل الدخول مجدداً.')
+  const callable = httpsCallable(functions, 'voidPosExpense')
+  return (await callable({ expenseId: expense.id, businessDate: expense.businessDate, updatedAt: Date.now() })).data
 }
 
 export async function loadAccPurchaseCatalog() {
