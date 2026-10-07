@@ -600,12 +600,20 @@ export const mergeCentralSalesLocally = centralSales => {
 export const runCashierCentralSync = async ({ initial = false } = {}) => {
   await requireRole('cashier-sync')
   const localSales = readSales()
+  // The queue is durable evidence of a completed sale. Older cashier builds
+  // could persist the queue wrapper without retaining the matching ledger row,
+  // so the worker must include queue.sale as a candidate instead of silently
+  // treating that sale as nonexistent.
+  const queuedSales = readSaleQueue().map(entry => entry.sale).filter(Boolean)
+  const candidateByIdentity = new Map()
+  for (const sale of [...localSales, ...queuedSales]) {
+    const identity = String(saleIdOf(sale) || sale?.operationKey || sale?.operation_key || '')
+    if (identity && !candidateByIdentity.has(identity)) candidateByIdentity.set(identity, sale)
+  }
   const before = await get(salesRef())
   const beforeCentral = centralValues(before)
   const centralIds = new Set(beforeCentral.map(saleIdOf))
-  const candidates = (initial || readInitialSyncCompleted())
-    ? localSales.filter(isSaleEligibleForCentralUpload)
-    : []
+  const candidates = [...candidateByIdentity.values()].filter(isSaleEligibleForCentralUpload)
   const uploadable = candidates
   let uploaded = 0
   let updated = 0

@@ -338,8 +338,11 @@ export default function App() {
          if (mergedSales) setAdminCentralSales(mergedSales)
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
       })
-       if (isCentralCashierUser(user) && getCentralSyncState().initialSyncCompleted) {
-        void runCashierCentralSync().catch(error => console.error('SALES_AUTO_SYNC_ERROR', error))
+      if (isCentralCashierUser(user)) {
+        const sync = getCentralSyncState().initialSyncCompleted
+          ? runCashierCentralSync()
+          : runCashierCentralSync({ initial: true })
+        void sync.catch(error => console.error('SALES_AUTO_SYNC_ERROR', error))
       }
     })
     return () => {
@@ -592,17 +595,27 @@ export default function App() {
 
   useEffect(() => {
     const retry = () => {
-      if (isCentralCashierUser(centralAuth()?.currentUser) && getCentralSyncState().initialSyncCompleted) {
-        void runCashierCentralSync().catch(error => console.error('SALES_RETRY_SYNC_ERROR', error))
+      if (isCentralCashierUser(centralAuth()?.currentUser)) {
+        const sync = getCentralSyncState().initialSyncCompleted
+          ? runCashierCentralSync()
+          : runCashierCentralSync({ initial: true })
+        void sync.catch(error => console.error('SALES_RETRY_SYNC_ERROR', error))
       }
     }
+    const onVisibility = () => { if (!document.hidden) retry() }
     window.addEventListener('pos101-sale-created', retry)
     window.addEventListener('pos101-sale-updated', retry)
     window.addEventListener('online', retry)
+    window.addEventListener('focus', retry)
+    document.addEventListener('visibilitychange', onVisibility)
+    const timer = window.setInterval(retry, 30000)
     return () => {
       window.removeEventListener('pos101-sale-created', retry)
       window.removeEventListener('pos101-sale-updated', retry)
       window.removeEventListener('online', retry)
+      window.removeEventListener('focus', retry)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(timer)
     }
   }, [])
 
