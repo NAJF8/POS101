@@ -624,7 +624,7 @@ export function StaffPinDialog({ staff, systemCode, onClose, onSave }) {
 }
 
 /* ── Seller Selection ── */
-export function SellerSelection({ staff = [], onClose, onSelect }) {
+export function SellerSelection({ staff = [], staffStatus = { state: 'empty', error: '' }, onClose, onSelect }) {
   const sellers = sellerEligibleStaff(staff)
   const [busy, setBusy] = React.useState(false)
   const choose = async name => {
@@ -642,12 +642,14 @@ export function SellerSelection({ staff = [], onClose, onSelect }) {
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <h2>اختر اسم الكابتن</h2>
       <div className="type-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-        {sellers.length ? sellers.map(person => (
+        {staffStatus.state === 'loading' ? <p className="settings-readonly">جارٍ تحميل الموظفين من Firebase…</p>
+          : staffStatus.state === 'error' ? <p className="settings-readonly" role="alert">تعذر تحميل قائمة الموظفين المركزية: {staffStatus.error || 'خطأ غير معروف'}</p>
+            : sellers.length ? sellers.map(person => (
           <button disabled={busy} onClick={() => choose(person.name)} key={person.id}>
             <span><Icon name="user" size={27} /></span>
             <b>{busy ? 'جارٍ الحفظ…' : person.name}</b>
           </button>
-        )) : <p className="settings-readonly">لا يوجد موظفون حاليون</p>}
+        )) : <p className="settings-readonly">لا يوجد موظفون مؤهلون للبيع في بيانات الموظفين المركزية.</p>}
       </div>
     </Dialog>
   )

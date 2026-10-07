@@ -134,6 +134,7 @@ export default function App() {
   const cashboxListener = useRef(null)
   const settlementListener = useRef(null)
   const [staff, setStaff] = useState([])
+  const [staffStatus, setStaffStatus] = useState({ state: 'idle', error: '' })
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
   const settlementCorrectionListener = useRef(null)
@@ -329,8 +330,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!centralAuthUser || !canManageStaff(centralAuthUser, staffAuthorizationRecord)) return
+    if (!centralAuthUser || !canManageStaff(centralAuthUser, staffAuthorizationRecord)) {
+      setStaffStatus({ state: 'idle', error: '' })
+      return
+    }
     let active = true
+    setStaffStatus({ state: 'loading', error: '' })
     const loadStaff = async () => {
       try {
         const rows = await readCentralStaff()
@@ -339,14 +344,21 @@ export default function App() {
         console.info('STAFF_DIRECT_READ_COUNT', rows.length)
         console.info('STAFF_DIRECT_READ_NAMES', rows.map(row => row.name).join('، '))
         setStaff(rows)
+        setStaffStatus({ state: rows.length ? 'ready' : 'empty', error: '' })
         console.info('STAFF_SET_STATE_COUNT', rows.length)
         staffListener.current = subscribeCentralStaff(rows => {
           if (!active) return
           setStaff(rows)
+          setStaffStatus({ state: rows.length ? 'ready' : 'empty', error: '' })
           console.info('STAFF_SET_STATE_COUNT', rows.length)
+        }, error => {
+          if (!active) return
+          console.error('STAFF_SUBSCRIBE_ERROR', error?.code || 'UNKNOWN')
+          setStaffStatus({ state: 'error', error: error?.message || 'تعذر قراءة قائمة الموظفين المركزية.' })
         })
       } catch (error) {
         console.error('STAFF_DIRECT_READ_ERROR', error)
+        if (active) setStaffStatus({ state: 'error', error: error?.message || 'تعذر قراءة قائمة الموظفين المركزية.' })
       }
     }
     void loadStaff()
@@ -1056,7 +1068,7 @@ export default function App() {
       {modal === 'tables' && <TableSelection orders={orders} onClose={() => setModal(null)} onChoose={chooseTable} />}
       {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
-      {modal === 'seller-selection' && <SellerSelection staff={staff} onClose={() => setModal(null)} onSelect={finalizeSale} />}
+      {modal === 'seller-selection' && <SellerSelection staff={staff} staffStatus={staffStatus} onClose={() => setModal(null)} onSelect={finalizeSale} />}
       {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} discountPresets={discountPresets} onClose={() => setModal(null)} onApply={applyDiscount} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}
       {modal === 'single-history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}
