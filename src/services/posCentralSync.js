@@ -34,6 +34,8 @@ import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
 import { reconcileCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
+import { defaultSyncLockManager } from './syncLockManager.js'
+import { BUILD_SHA } from './versionUpdate.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -65,10 +67,8 @@ let auth = null
 let db = null
 let appCheck = null
 let authReady = Promise.resolve()
-let cashierSyncInFlight = null
-let cashierSyncInFlightStartedAt = 0
-let cashierSyncInFlightToken = 0
-const CASHIER_SYNC_LOCK_STALE_MS = 60 * 1000
+const syncLockManager = defaultSyncLockManager
+const SYNC_PROCESS_TIMEOUT_MS = 55 * 1000
 
 if (configured) {
   authDebug('POS_AUTH_INIT')
@@ -249,6 +249,7 @@ const saleReadbackMatches = (expected, actual) => {
     && String(actual?.orderNumber ?? actual?.order_number ?? '') === String(expected?.orderNumber ?? '')
     && String(actual?.businessDate || '') === String(expected?.businessDate || '')
     && String(actual?.operationalDayId || '') === String(expected?.operationalDayId || '')
+    && String(actual?.paymentMethod || actual?.payment?.method || '') === String(expected?.paymentMethod || expected?.payment?.method || '')
     && Number(actual?.total ?? actual?.subtotal) === Number(expected?.total ?? expected?.subtotal))
 }
 
@@ -260,8 +261,8 @@ const centralSaleMatches = (expected, actual) => Boolean(
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession()
-  if (expectedRole === 'cashier-sync') return requireKioskUser(user)
-  if (!await isAuthorizedPosSyncUser(user)) {
+  const permission = await canSyncPosSales(user)
+  if (!permission.allowed) {
     throw Object.assign(new Error(expectedRole === 'cashier-sync' ? 'هذا الحساب لا يملك صلاحية رفع المبيعات.' : 'تسجيل دخول الإدارة مطلوب للقراءة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
   }
   return user
@@ -365,11 +366,42 @@ export const canManageStaff = (user, authorizationRecord = null) => {
   return Boolean(record && record.active !== false && record.authorized !== false && STAFF_MANAGEMENT_ROLES.has(role))
 }
 
-export const isAuthorizedPosSyncUser = async user => {
-  if (!user?.uid) return false
-  if (await hydrateKioskClaims(user) && isKioskUser(user)) return true
-  return isActiveAuthorizedRecord(await readCentralAuthorizationRecord(user))
+// One structured gate shared by sale workers, manual recovery, diagnostics,
+// and readback. Kiosk claims are accepted, while authorized uid records are a
+// deliberate fallback for cashier/manager/admin accounts.
+export const canSyncPosSales = async (user = null) => {
+  const result = {
+    allowed: false,
+    uid: user?.uid || '',
+    email: user?.email || '',
+    role: 'blocked',
+    authReady: Boolean(user?.uid),
+    claimsReady: false,
+    authorizedUidExists: false,
+    missingReason: '',
+  }
+  if (!user?.uid) { result.missingReason = 'AUTH_REQUIRED'; return result }
+  const claims = await hydrateKioskClaims(user)
+  result.claimsReady = Boolean(claims)
+  if (claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId) {
+    result.allowed = true
+    result.role = 'cashier'
+    return result
+  }
+  const record = await readCentralAuthorizationRecord(user)
+  result.authorizedUidExists = Boolean(record)
+  const role = String(record?.role || '').trim().toLowerCase()
+  if (isActiveAuthorizedRecord(record) && SYNC_ROLES.has(role)) {
+    result.allowed = true
+    result.role = ['super_admin', 'admin', 'manager'].includes(role) ? role : 'cashier'
+    return result
+  }
+  result.role = role || 'blocked'
+  result.missingReason = !record ? 'AUTHORIZED_UID_MISSING' : record.active === false ? 'AUTHORIZED_UID_INACTIVE' : record.authorized === false ? 'AUTHORIZED_UID_DISABLED' : 'ROLE_NOT_ALLOWED'
+  return result
 }
+
+export const isAuthorizedPosSyncUser = async user => (await canSyncPosSales(user)).allowed
 
 export const hydrateCentralAuthorization = async user => {
   const allowed = await isAuthorizedPosSyncUser(user)
@@ -626,7 +658,7 @@ const logQueueDecision = (sale, reason = '', detail = '', fields = {}) => {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
 }
 
-const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = false } = {}) => {
+const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = false, manualReport = null } = {}) => {
   try { await requireRole('cashier-sync') } catch (error) {
     logQueueDecision(null, error?.code === 'KIOSK_AUTH_REQUIRED' ? 'auth claims missing' : 'auth required', error?.message || '')
     throw error
@@ -662,26 +694,58 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
   let updated = 0
   await retryAccSaleQueue()
   for (const sale of uploadable) {
+    syncLockManager.heartbeat({ trigger: queueOnly ? 'manual' : 'worker', processingSaleIds: [saleIdOf(sale)] })
     const queueEntry = readSaleQueue().find(entry => {
       const queued = entry.sale
       return saleIdOf(queued) === saleIdOf(sale)
         || String(queued?.operationKey || queued?.operation_key || '') === String(sale?.operationKey || sale?.operation_key || '')
     })
     const classification = classifyCentralSale(sale, beforeCentral)
+    const manualSale = manualReport ? {
+      orderNumber: sale?.orderNumber ?? null,
+      saleId: saleIdOf(sale),
+      operationKey: sale?.operationKey || sale?.operation_key || `pos101:${saleIdOf(sale)}`,
+      centralBefore: classification.action === 'duplicate',
+      writeAttempted: false,
+      writeResult: classification.action === 'duplicate' ? 'SKIPPED' : 'FAIL',
+      readbackResult: 'FAIL',
+      localUpdateResult: 'FAIL',
+      error: '',
+    } : null
+    if (manualSale) manualReport.salesToProcess.push(manualSale)
+    if (queueOnly) {
+      const missing = ['saleId', 'operationKey', 'businessDate', 'operationalDayId', 'total', 'paymentMethod'].filter(field => {
+        if (field === 'saleId') return !saleIdOf(sale)
+        if (field === 'operationKey') return !String(sale?.operationKey || sale?.operation_key || '')
+        if (field === 'businessDate') return !String(sale?.businessDate || '')
+        if (field === 'operationalDayId') return !String(sale?.operationalDayId || sale?.operational_day_id || '')
+        if (field === 'paymentMethod') return !String(sale?.paymentMethod || sale?.payment?.method || '')
+        return !Number.isFinite(Number(sale?.total ?? sale?.subtotal))
+      })
+      if (missing.length) {
+        const error = Object.assign(new Error(`بيانات المبيعة ناقصة: ${missing.join(',')}`), { code: 'SALE_VALIDATION_FAILED' })
+        if (queueEntry) retainQueuedSale(queueEntry, error)
+        if (manualSale) manualSale.error = error.message
+        continue
+      }
+    }
     if (classification.action === 'quarantine') {
       const error = Object.assign(new Error(`تعذر رفع مبيعة متعارضة: ${classification.reason}`), { code: classification.reason })
       if (queueEntry) retainQueuedSale(queueEntry, error)
+      if (manualSale) manualSale.error = classification.reason
       logQueueDecision(sale, 'duplicate guard', classification.reason, { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'blocked', readbackResult: 'not-required', localUpdateResult: 'retained-in-queue' })
       continue
     }
     if (classification.action === 'duplicate') {
       if (queueEntry) markSaleSynced(sale)
+      if (manualSale) { manualSale.readbackResult = 'PASS'; manualSale.localUpdateResult = queueEntry ? 'PASS' : 'FAIL' }
       logQueueDecision(sale, 'duplicate guard', 'central payload already matches', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'not-needed', readbackResult: 'verified', localUpdateResult: 'synced' })
       updated += 1
       continue
     }
     const attemptedEntry = queueEntry ? markSaleAttempt(queueEntry) : null
     const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
+    if (manualSale) { manualSale.writeAttempted = true; manualSale.writeResult = 'PASS' }
     try {
       await set(saleRef, serializeSale(sale))
     } catch (error) {
@@ -690,14 +754,17 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
       const readBack = await get(saleRef).catch(() => null)
       if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
         if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
+        if (manualSale) { manualSale.writeResult = 'FAIL'; manualSale.error = error?.message || String(error) }
         logQueueDecision(sale, 'Firebase error', error?.message || '', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'failed', readbackResult: 'failed', localUpdateResult: 'retained-in-queue' })
         continue
       }
+      if (manualSale) manualSale.writeResult = 'PASS'
     }
     const readBack = await get(saleRef).catch(() => null)
     if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
       const error = Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
       if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
+      if (manualSale) manualSale.error = error.message
       logQueueDecision(sale, 'Firebase error', error.message, { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'completed', readbackResult: 'mismatch', localUpdateResult: 'retained-in-queue' })
       continue
     }
@@ -707,7 +774,9 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
     // The local ledger and queue are changed only after the full central
     // payload has been read back and matched, including operationKey.
     markSaleSynced(sale)
+    if (manualSale) { manualSale.readbackResult = 'PASS'; manualSale.localUpdateResult = 'PASS' }
     logQueueDecision(sale, 'synced', 'central read-back verified', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'completed', readbackResult: 'verified', localUpdateResult: 'synced' })
+    syncLockManager.heartbeat({ trigger: queueOnly ? 'manual' : 'worker', processingSaleIds: [] })
   }
 
   const after = await get(salesRef())
@@ -729,36 +798,89 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
   }
 }
 
+const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = false, trigger = queueOnly ? 'manual' : 'worker', manualReport = null } = {}) => {
+  const queueBefore = readRawSaleQueue()
+  const lock = syncLockManager.acquire({ trigger, hasPendingQueue: queueBefore.length > 0 })
+  if (!lock.acquired) {
+    logQueueDecision(null, 'locked', `ownerId=${lock.before?.ownerId || ''}; trigger=${lock.before?.trigger || ''}`, { queueLength: queueBefore.length, locked: true })
+    throw Object.assign(new Error('المزامنة قيد التنفيذ. انتظر اكتمالها ثم أعد المحاولة.'), { code: 'SYNC_LOCK_ACTIVE', lock: lock.before })
+  }
+  let timeoutId
+  try {
+    syncLockManager.heartbeat({ trigger, processingSaleIds: [] })
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(Object.assign(new Error('انتهت مهلة المزامنة؛ بقيت العناصر الفاشلة في الطابور.'), { code: 'SYNC_PROCESS_TIMEOUT' })), SYNC_PROCESS_TIMEOUT_MS)
+    })
+    const result = await Promise.race([runCashierCentralSyncUnlocked({ initial, queueOnly, manualReport }), timeout])
+    clearTimeout(timeoutId)
+    return { ...result, lockAction: lock.action, lockBefore: lock.before || null }
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+    syncLockManager.release()
+  }
+}
+
 export const runCashierCentralSync = ({ initial = false } = {}) => {
-  if (cashierSyncInFlight) return cashierSyncInFlight
-  cashierSyncInFlightStartedAt = Date.now()
-  const token = ++cashierSyncInFlightToken
-  cashierSyncInFlight = runCashierCentralSyncInternal({ initial })
-    .finally(() => { if (cashierSyncInFlightToken === token) { cashierSyncInFlight = null; cashierSyncInFlightStartedAt = 0 } })
-  return cashierSyncInFlight
+  return runCashierCentralSyncInternal({ initial, trigger: 'worker' })
 }
 
 // Explicit user-triggered path. It reads the current tab's localStorage at
 // click time and processes existing queue entries, including entries created
 // by older bundles. It never closes the day or deletes an unverified queue row.
-export const runCashierCentralSyncNow = () => {
-  if (cashierSyncInFlight) {
-    const age = Date.now() - cashierSyncInFlightStartedAt
-    if (age > CASHIER_SYNC_LOCK_STALE_MS) {
-      logQueueDecision(null, 'stale lock released', `ageMs=${age}`, { locked: true })
-      cashierSyncInFlight = null
-    } else {
-      const error = Object.assign(new Error('المزامنة قيد التنفيذ. انتظر اكتمالها ثم أعد المحاولة.'), { code: 'SYNC_LOCK_ACTIVE' })
-      logQueueDecision(null, 'locked', `ageMs=${age}`, { locked: true })
-      return Promise.reject(error)
-    }
+export const manualCurrentTabQueueRecovery = async () => {
+  const permission = await canSyncPosSales(auth?.currentUser)
+  const report = {
+    bundle: typeof document !== 'undefined' ? document.querySelector('script[src*="assets/index-"]')?.src?.split('/').pop() || '' : '',
+    mainSha: BUILD_SHA,
+    user: { uid: permission.uid, email: permission.email },
+    permission: {
+      allowed: permission.allowed,
+      role: permission.role,
+      authReady: permission.authReady,
+      claimsReady: permission.claimsReady,
+      authorizedUidExists: permission.authorizedUidExists,
+      missingReason: permission.missingReason,
+    },
+    lockBefore: syncLockManager.describe(),
+    lockAction: 'none',
+    queueLengthBefore: readRawSaleQueue().length,
+    salesToProcess: [],
+    queueLengthAfter: null,
+    pendingQueueAfter: null,
+    result: 'FAIL',
+    errors: [],
   }
-  cashierSyncInFlightStartedAt = Date.now()
-  const token = ++cashierSyncInFlightToken
-  cashierSyncInFlight = runCashierCentralSyncInternal({ queueOnly: true })
-    .finally(() => { if (cashierSyncInFlightToken === token) { cashierSyncInFlight = null; cashierSyncInFlightStartedAt = 0 } })
-  return cashierSyncInFlight
+  if (!permission.allowed) {
+    report.errors.push(permission.missingReason || 'CENTRAL_ROLE_BLOCKED')
+    report.queueLengthAfter = report.queueLengthBefore
+    report.pendingQueueAfter = readSaleQueue().length
+    console.info('[POS101_MANUAL_QUEUE_FINAL]', JSON.stringify(report))
+    throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المبيعات.'), { code: 'CENTRAL_ROLE_BLOCKED', permission })
+  }
+  return runCashierCentralSyncInternal({ queueOnly: true, trigger: 'manual-recovery', manualReport: report })
+    .then(result => {
+      report.lockAction = result.lockAction || 'acquired'
+      report.queueLengthAfter = readRawSaleQueue().length
+      report.pendingQueueAfter = readSaleQueue().length
+      report.errors = report.salesToProcess.filter(item => item.error).map(item => item.error)
+      report.result = report.errors.length ? (report.salesToProcess.some(item => item.localUpdateResult === 'PASS') ? 'PARTIAL' : 'FAIL') : 'PASS'
+      console.info('[POS101_MANUAL_QUEUE_FINAL]', JSON.stringify(report))
+      return { ...result, manualReport: report }
+    })
+    .catch(error => {
+      report.lockAction = error?.code === 'SYNC_LOCK_ACTIVE' ? 'blocked_active' : report.lockAction
+      if (error?.lock) report.lockBefore = error.lock
+      report.errors.push(error?.message || String(error))
+      report.queueLengthAfter = readRawSaleQueue().length
+      report.pendingQueueAfter = readSaleQueue().length
+      console.info('[POS101_MANUAL_QUEUE_FINAL]', JSON.stringify(report))
+      throw error
+    })
 }
+
+// Compatibility export retained for existing UI callers; the button uses the
+// explicitly named direct current-tab recovery path above.
+export const runCashierCentralSyncNow = manualCurrentTabQueueRecovery
 
 export const subscribeCentralReconnect = callback => {
   if (!configured || !db || typeof callback !== 'function') return () => {}
@@ -1078,7 +1200,11 @@ const financialUser = async (write = false) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   await authReady
   const user = auth?.currentUser
-  if (!write && isCentralAdminUser(user)) return user
+  if (!write) {
+    const permission = await canSyncPosSales(user)
+    if (permission.allowed) return user
+    throw Object.assign(new Error('هذا الحساب غير مخول لقراءة البيانات المالية.'), { code: 'CENTRAL_ROLE_BLOCKED', permission })
+  }
   return requireKioskUser(user)
 }
 

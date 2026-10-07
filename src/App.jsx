@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, canSyncPosSales, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -603,8 +603,8 @@ export default function App() {
   }), [onCentralSyncStart, onCentralSyncSuccess, onCentralSyncError])
 
   useEffect(() => {
-    const retry = () => {
-      if (!isCentralCashierUser(centralAuth()?.currentUser)) return null
+    const retry = async () => {
+      if (!(await canSyncPosSales(centralAuth()?.currentUser)).allowed) return null
       const sync = getCentralSyncState().initialSyncCompleted
         ? runCashierCentralSync()
         : runCashierCentralSync({ initial: true })
@@ -613,7 +613,7 @@ export default function App() {
     }
     const worker = createCashierQueueWorker({
       processQueue: retry,
-      hasEligibleQueue: () => isCentralCashierUser(centralAuth()?.currentUser),
+      hasEligibleQueue: () => canSyncPosSales(centralAuth()?.currentUser).then(permission => permission.allowed),
       onDiagnostic: payload => window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload })),
     })
     const stopWorker = worker.start({ events: ['pos101-sale-created', 'pos101-sale-updated', 'online', 'focus', 'auth-ready', 'firebase-reconnect'], target: window })
@@ -627,7 +627,9 @@ export default function App() {
   // Re-emit the gate after React has committed the authenticated user so a
   // cold tab cannot miss the one-shot auth-ready event during startup.
   useEffect(() => {
-    if (centralAuthUser && isCentralCashierUser(centralAuthUser)) window.dispatchEvent(new Event('auth-ready'))
+    if (centralAuthUser) void canSyncPosSales(centralAuthUser).then(permission => {
+      if (permission.allowed) window.dispatchEvent(new Event('auth-ready'))
+    })
   }, [centralAuthUser?.uid])
 
   const refreshThermalStatus = useCallback(async settings => {

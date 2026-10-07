@@ -1,4 +1,4 @@
-import { isAuthorizedPosSyncUser } from './posCentralSync.js'
+import { canSyncPosSales } from './posCentralSync.js'
 
 // The Header and the Admin read-only panel both use this one controller. Role
 // resolution happens before either role-specific operation can run.
@@ -19,7 +19,8 @@ export const createCentralSyncClickHandler = ({
     onStart?.()
     try {
       const user = getCurrentUser() || await signIn()
-      if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول للمزامنة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+      const permission = await canSyncPosSales(user)
+      if (!permission.allowed) throw Object.assign(new Error(`هذا الحساب غير مخول للمزامنة: ${permission.missingReason}`), { code: 'CENTRAL_ROLE_BLOCKED', permission })
       const result = await runCashierSync()
       const role = 'pos-sync'
       onSuccess?.({ role, result })

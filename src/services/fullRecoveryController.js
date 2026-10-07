@@ -1,4 +1,4 @@
-import { centralAuth, ensureKioskFirebaseSession, isAuthorizedPosSyncUser, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending } from './posCentralSync.js'
+import { canSyncPosSales, centralAuth, ensureKioskFirebaseSession, readCentralExpensesForReports, readLocalExpenses, runExpenseCentralSync, runFullRecoverySync, saveLocalExpensePending } from './posCentralSync.js'
 import { areExpenseDuplicates, getExpensesForBusinessDate, getLocalDateKey, normalizeDateKey, normalizeExpense, normalizeTimestamp, resolveExpenseBusinessDate, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 
 const readJson = (key, fallback) => {
@@ -211,7 +211,7 @@ export const createMasterExpenseRecoveryHandler = ({
     try {
       onStatus?.('جاري التحقق من الصلاحيات...')
       const user = getCurrentUser() || await signIn()
-      if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+      if (!(await canSyncPosSales(user)).allowed) throw Object.assign(new Error('هذا الحساب غير مخول لمزامنة المصاريف.'), { code: 'CENTRAL_ROLE_BLOCKED' })
 
       onStatus?.('جاري فحص المصاريف المحلية...')
       const scan = scanAllExpenseBackups()
@@ -295,7 +295,7 @@ export const createFullRecoveryClickHandler = ({ getCurrentUser = () => centralA
     let backup = null
     try {
       const user = getCurrentUser() || await signIn()
-      if (!await isAuthorizedPosSyncUser(user)) throw Object.assign(new Error('هذا الحساب غير مخول لإصلاح ومزامنة بيانات POS.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+      if (!(await canSyncPosSales(user)).allowed) throw Object.assign(new Error('هذا الحساب غير مخول لإصلاح ومزامنة بيانات POS.'), { code: 'CENTRAL_ROLE_BLOCKED' })
       backup = createFullRecoveryBackup()
       onStart?.(backup)
       const result = await runRecovery()
