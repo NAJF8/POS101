@@ -15,6 +15,25 @@ const parseStored = raw => {
 }
 const rowsOf = value => Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : []
 const storageRead = (storage, key) => storage?.getItem?.(key) ?? null
+const readIndexedDbIdentity = async (indexedDb = globalThis.indexedDB) => {
+  if (!indexedDb?.databases || !indexedDb?.open) return {}
+  const databases = await indexedDb.databases()
+  if (!databases.some(row => row?.name === 'pos101-kiosk-auth')) return {}
+  const db = await new Promise((resolve, reject) => {
+    const request = indexedDb.open('pos101-kiosk-auth')
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error || new Error('تعذر قراءة هوية جهاز POS.'))
+    request.onupgradeneeded = () => { request.transaction?.abort() }
+  })
+  try {
+    const record = await new Promise((resolve, reject) => {
+      const request = db.transaction('device', 'readonly').objectStore('device').get('primary')
+      request.onsuccess = () => resolve(request.result || {})
+      request.onerror = () => reject(request.error || new Error('تعذر قراءة هوية جهاز POS.'))
+    })
+    return { deviceId: record?.deviceId || '', kioskId: record?.kioskId || '' }
+  } finally { db.close?.() }
+}
 const scriptBundle = documentImpl => {
   const scripts = documentImpl?.querySelectorAll?.('script[src]') || []
   const src = [...scripts].map(script => script.getAttribute('src') || '').find(value => /\/assets\/index-[^/]+\.js(?:\?|$)/.test(value))
@@ -32,6 +51,7 @@ export const createRecoverySnapshot = async ({
   buildSha = BUILD_SHA,
   documentImpl = globalThis.document,
   cryptoImpl = globalThis.crypto,
+  indexedDbImpl = globalThis.indexedDB,
 } = {}) => {
   const clock = now()
   const timestamp = clock instanceof Date ? clock.toISOString() : new Date(clock).toISOString()
@@ -43,10 +63,12 @@ export const createRecoverySnapshot = async ({
   const targetSales = sales.filter(row => targetSet.has(saleIdOf(row)))
   const targetQueueRecords = queue.filter(row => targetSet.has(saleIdOf(row?.sale || row)))
   const operationalDay = parsedStorage['pos101.operationalDay']
+  const kioskIdentity = await readIndexedDbIdentity(indexedDbImpl).catch(() => ({}))
   return {
     snapshotType: 'POS101_CASHIER_RECOVERY_READ_ONLY', timestamp,
     app: { mainSha: String(buildSha || ''), buildId: String(buildSha || ''), bundle: scriptBundle(documentImpl) },
-    kioskDeviceId: storageRead(storage, 'pos101.deviceId') || '',
+    kioskDeviceId: kioskIdentity.deviceId || storageRead(storage, 'pos101.deviceId') || '',
+    kioskId: kioskIdentity.kioskId || '',
     businessDate: operationalDay?.businessDate || targetSales.find(row => row.businessDate)?.businessDate || '',
     operationalDayId: operationalDay?.operationalDayId || operationalDay?.id || targetSales.find(row => row.operationalDayId)?.operationalDayId || '',
     localStorage: rawStorage,

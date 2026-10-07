@@ -9,7 +9,7 @@ const values = new Map([['pos101.sales', rawSales], ['pos101.syncQueue', rawQueu
 let writes = 0
 const storage = { getItem: key => values.get(key) ?? null, setItem: () => { writes += 1 }, removeItem: () => { writes += 1 } }
 const { createRecoverySnapshot } = await import('../src/services/recoverySnapshot.js')
-const snapshot = await createRecoverySnapshot({ storage, buildSha: 'abc1234', now: () => new Date('2026-10-07T19:00:00.000Z'), documentImpl: null })
+const snapshot = await createRecoverySnapshot({ storage, buildSha: 'abc1234', now: () => new Date('2026-10-07T19:00:00.000Z'), documentImpl: null, indexedDbImpl: null })
 assert.equal(snapshot.integrity.recordCount, 8)
 assert.equal(snapshot.integrity.queueCount, 8)
 assert.equal(snapshot.integrity.targetRecordsFound, 8)
