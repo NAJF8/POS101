@@ -72,3 +72,27 @@ export const calculateEmployeeExpenseReport = (expenses = [], transactions = [],
 }
 
 export const makeSettlementIdempotencyKey = operationalDayId => `settlement:${String(operationalDayId || '').trim()}`
+
+export const settlementStatusForDifference = difference => difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
+
+export const calculateSettlementCorrection = ({ settlement, correctedActualCash } = {}) => {
+  const expectedCash = amount(settlement?.expectedCash)
+  const correctedActual = Number(correctedActualCash)
+  if (!Number.isFinite(correctedActual) || correctedActual < 0) throw new Error('المبلغ الفعلي المصحح يجب أن يكون رقماً لا يقل عن صفر.')
+  const correctedDifference = correctedActual - expectedCash
+  return { correctedActualCash: correctedActual, correctedDifference, correctedStatus: settlementStatusForDifference(correctedDifference) }
+}
+
+export const latestActiveSettlementCorrection = (corrections = []) => corrections
+  .filter(row => row?.status === 'active')
+  .slice()
+  .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0) || String(a.id || '').localeCompare(String(b.id || '')))
+  .at(-1) || null
+
+export const getEffectiveSettlement = (settlement, corrections = []) => {
+  const correction = latestActiveSettlementCorrection(corrections)
+  if (!correction) return { settlement, correction: null, effectiveActualCash: amount(settlement?.actualCash), effectiveDifference: amount(settlement?.difference), effectiveStatus: settlementStatusForDifference(amount(settlement?.difference)) }
+  const effectiveActualCash = amount(correction.correctedActualCash)
+  const effectiveDifference = effectiveActualCash - amount(settlement?.expectedCash)
+  return { settlement, correction, effectiveActualCash, effectiveDifference, effectiveStatus: settlementStatusForDifference(effectiveDifference) }
+}

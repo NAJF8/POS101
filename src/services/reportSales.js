@@ -113,6 +113,28 @@ const centralClosedSalesForDate = (centralSales, date, days) => {
   })
 }
 
+export const getReportSalesForOperationalDay = ({ centralSales = [], operationalDayId = '', businessDate = '' } = {}) => {
+  const id = String(operationalDayId || '').trim()
+  const date = String(businessDate || '').trim()
+  return (Array.isArray(centralSales) ? centralSales : []).filter(sale => {
+    if (!isReportableSale(sale)) return false
+    const saleDayId = saleOperationalDayId(sale)
+    return saleDayId ? saleDayId === id : Boolean(date && businessDateForSale(sale) === date)
+  })
+}
+
+export const compareReportSalesToSettlement = ({ sales = [], settlement = null } = {}) => {
+  const rows = Array.isArray(sales) ? sales : []
+  const net = rows.reduce((sum, sale) => sum + numberValue(sale?.total ?? sale?.subtotal), 0)
+  return {
+    count: rows.length,
+    net,
+    settlementCount: Number(settlement?.orderCount || 0),
+    settlementNet: Number(settlement?.sales || 0),
+    drift: Boolean(settlement && (rows.length !== Number(settlement.orderCount || 0) || net !== Number(settlement.sales || 0))),
+  }
+}
+
 // Closed dates use the central ledger; the active open date may retain local
 // pending visibility. This function is shared by screen, print, and financial
 // summaries so they cannot silently choose different ledgers.
