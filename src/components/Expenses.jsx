@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
 import { getLocalDateKey, normalizeDateKey } from '../services/expenseReporting.js'
-import { deleteCentralExpense, findOperationalDayByBusinessDate, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, saveCentralExpense, saveCentralExpenseWithCashbox, saveCashboxTransaction, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { deleteCentralExpense, findOperationalDayByBusinessDate, readLocalExpenses, readLocalOperationalDay, saveCentralExpense, saveCentralExpenseWithCashbox, saveCashboxTransaction, subscribeCentralExpenses } from '../services/posCentralSync.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -28,12 +28,6 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       if (meta.centralCount !== undefined) setCentralCount(meta.centralCount)
       if (meta.centralExpenses) setCentralExpenses(meta.centralExpenses)
     })
-    void readCentralExpensesForReports({ includeAllLocal: true, persistCache: false, dispatchUpdate: false }).then(result => {
-      if (!result?.expenses) return
-      setExpenses(result.expenses)
-      setCentralExpenses(result.centralExpenses || result.expenses)
-      setCentralCount(result.centralCount ?? result.expenses.length)
-    }).catch(() => {})
     return () => { window.removeEventListener('pos101-expenses-updated', refresh); stop?.() }
   }, [])
   const [editingId, setEditingId] = useState(null)
