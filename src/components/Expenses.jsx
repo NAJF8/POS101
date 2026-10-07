@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
 import { getLocalDateKey, normalizeDateKey } from '../services/expenseReporting.js'
-import { deleteCentralExpense, findOperationalDayByBusinessDate, readCentralExpensesForReports, readLocalExpenses, readLocalOperationalDay, runExpenseCentralSync, saveCentralExpense, saveCentralExpenseWithCashbox, saveCashboxTransaction, saveLocalExpensePending, subscribeCentralExpenses } from '../services/posCentralSync.js'
-import { createExpenseRecoveryBackup, createMasterExpenseRecoveryHandler, parseManualExpenseBulk, recoverExpensesFromKnownBackups, scanAllExpenseBackups } from '../services/fullRecoveryController.js'
+import { deleteCentralExpense, findOperationalDayByBusinessDate, readLocalExpenses, readLocalOperationalDay, saveCentralExpense, saveCentralExpenseWithCashbox, saveCashboxTransaction, subscribeCentralExpenses } from '../services/posCentralSync.js'
 
 const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -15,7 +14,6 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [centralCount, setCentralCount] = useState(null)
   const [centralExpenses, setCentralExpenses] = useState([])
   const [localCount, setLocalCount] = useState(() => readLocalExpenses().length)
-  const [centralRefreshing, setCentralRefreshing] = useState(false)
   useEffect(() => {
     const refresh = () => {
       const latest = readLocalExpenses()
@@ -44,159 +42,16 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [payFromCashbox, setPayFromCashbox] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
-  const [recovering, setRecovering] = useState(false)
-  const [recoveryScan, setRecoveryScan] = useState(null)
-  const [selectedRecoveryIds, setSelectedRecoveryIds] = useState([])
-  const [manualOpen, setManualOpen] = useState(false)
-  const [manualText, setManualText] = useState('')
-  const [masterRecoveryBusy, setMasterRecoveryBusy] = useState(false)
-  const [masterRecoveryStatus, setMasterRecoveryStatus] = useState('')
-  const [masterRecoveryResult, setMasterRecoveryResult] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
-  const masterRecoveryHandler = useMemo(() => createMasterExpenseRecoveryHandler({ onStatus: setMasterRecoveryStatus }), [])
 
   const announceSuccess = message => {
     setSuccessMessage(message)
     window.setTimeout(() => setSuccessMessage(''), 3200)
   }
 
-  const runMasterRecovery = async () => {
-    if (masterRecoveryBusy) return
-    setMasterRecoveryBusy(true)
-    setMasterRecoveryResult(null)
-    try {
-      const result = await masterRecoveryHandler()
-      if (result?.skipped) return
-      setMasterRecoveryResult(result)
-      const latest = readLocalExpenses()
-      setExpenses(latest)
-      setLocalCount(latest.length)
-      setMasterRecoveryStatus('')
-    } catch (error) {
-      setMasterRecoveryStatus(error?.message || 'تعذر إكمال مزامنة واسترجاع المصاريف.')
-    } finally { setMasterRecoveryBusy(false) }
-  }
-
-  const refreshCentralExpenses = async () => {
-    if (centralRefreshing) return
-    setCentralRefreshing(true)
-    try {
-      const result = await readCentralExpensesForReports({ includeAllLocal: true })
-      setExpenses(result.expenses || [])
-      setCentralCount(result.centralCount ?? null)
-      setCentralExpenses(result.centralExpenses || [])
-      setLocalCount(result.localCount ?? readLocalExpenses().length)
-      setSyncMessage(`قراءة Firebase فقط: ${result.centralCount || 0} سجل مركزي، الدمج النهائي ${result.mergedCount || 0}.`)
-    } catch (error) {
-      setSyncMessage(error?.message || 'تعذر قراءة المصاريف من Firebase.')
-    } finally { setCentralRefreshing(false) }
-  }
-
   const resetForm = () => { const activePerson = staff.find(row => row.active) || null; setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(activePerson?.name || 'علي'); setPersonId(activePerson?.id || ''); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setPayFromCashbox(false) }
-  const syncNow = async () => {
-    if (syncing) return
-    setSyncing(true)
-    setSyncMessage('')
-    try {
-      let result
-      try {
-        result = await runExpenseCentralSync({ initial: true })
-      } catch (error) {
-        if (error?.code !== 'AUTH_REQUIRED') throw error
-        throw error
-      }
-      setSyncMessage(`تمت المزامنة: رفع ${result?.uploaded || 0}، تخطي ${result?.skipped || 0}، الإجمالي المركزي ${result?.centralCount || 0}`)
-    } catch (error) {
-      setSyncMessage(error?.message || 'تعذر تنفيذ المزامنة.')
-    } finally {
-      setSyncing(false)
-    }
-  }
-  const recoverOldExpenses = async () => {
-    if (recovering || syncing) return
-    setRecovering(true)
-    setSyncMessage('')
-    try {
-      const recovery = recoverExpensesFromKnownBackups()
-      const localAfterRecovery = readLocalExpenses()
-      setExpenses(localAfterRecovery)
-
-      let syncResult = null
-      if (recovery.recoveredCount > 0) {
-        try {
-          syncResult = await runExpenseCentralSync({ initial: true })
-        } catch (error) {
-          if (error?.code !== 'AUTH_REQUIRED') throw error
-          throw error
-        }
-      }
-
-      const sourceCount = recovery.sources?.length || 0
-      const uploaded = syncResult?.uploaded || 0
-      const centralCount = syncResult?.centralCount || 0
-      if (recovery.recoveredCount > 0) {
-        setSyncMessage(`تم الاسترجاع: ${recovery.recoveredCount} مصروف من ${sourceCount} نسخة احتياطية، وتم رفع ${uploaded}، والإجمالي المركزي ${centralCount}.`)
-      } else {
-        setSyncMessage(`تم فحص ${recovery.scannedBackups || 0} نسخة احتياطية محلية ولم يتم العثور على مصاريف إضافية قابلة للاسترجاع.`)
-      }
-    } catch (error) {
-      setSyncMessage(error?.message || 'تعذر استرجاع المصاريف القديمة.')
-    } finally {
-      setRecovering(false)
-    }
-  }
-  const scanOldExpenses = () => {
-    try {
-      const result = scanAllExpenseBackups()
-      setRecoveryScan(result)
-      setSelectedRecoveryIds(result.candidates.map(row => row.id))
-      setSyncMessage(`تم فحص ${result.scannedKeys} مفتاحًا محليًا واكتشاف ${result.newCount} سجل قابل للاسترجاع.`)
-    } catch (error) { setSyncMessage(error?.message || 'تعذر فحص النسخ القديمة.') }
-  }
-  const recoverSelected = async () => {
-    const selected = (recoveryScan?.candidates || []).filter(row => selectedRecoveryIds.includes(row.id))
-    if (!selected.length) return setSyncMessage('اختر سجلًا واحدًا على الأقل من Preview.')
-    setRecovering(true)
-    try {
-      createExpenseRecoveryBackup(selected)
-      selected.forEach(row => saveLocalExpensePending(row))
-      setExpenses(readLocalExpenses())
-      let uploaded = 0; let pending = selected.length
-      try {
-        const result = await runExpenseCentralSync({ initial: true })
-        uploaded = result?.uploaded || 0
-        pending = readLocalExpenses().filter(row => row.syncStatus === 'pending').length
-      } catch (error) {
-        if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) throw error
-      }
-      setSyncMessage(`تمت معالجة الاسترجاع: مستعاد ${selected.length}، مرفوع ${uploaded}، Pending ${pending}، متكرر متخطى ${recoveryScan.duplicateCount}.`)
-      setRecoveryScan(null); setSelectedRecoveryIds([])
-    } catch (error) { setSyncMessage(error?.message || 'تعذر استرجاع المحدد.') }
-    finally { setRecovering(false) }
-  }
-  const manualPreview = useMemo(() => parseManualExpenseBulk(manualText), [manualText])
-  const saveManualBulk = async () => {
-    const valid = manualPreview.filter(row => row.valid).map(row => row.expense)
-    if (!valid.length) return setSyncMessage('لا توجد أسطر صحيحة للحفظ.')
-    setRecovering(true)
-    try {
-      createExpenseRecoveryBackup(valid)
-      valid.forEach(row => saveLocalExpensePending(row))
-      setExpenses(readLocalExpenses())
-      let uploaded = 0
-      try { uploaded = (await runExpenseCentralSync({ initial: true }))?.uploaded || 0 } catch (error) {
-        if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) throw error
-      }
-      const pending = readLocalExpenses().filter(row => row.syncStatus === 'pending').length
-      setSyncMessage(`تم حفظ ${valid.length} مصروف يدوي، مرفوع ${uploaded}، Pending ${pending}.`)
-      setManualText(''); setManualOpen(false)
-    } catch (error) { setSyncMessage(error?.message || 'تعذر حفظ الاسترجاع اليدوي.') }
-    finally { setRecovering(false) }
-  }
-
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
@@ -329,12 +184,10 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       <div className="expenses-header">
         <div><h2>المصاريف</h2><p>سجّل مصروف اليوم أو أضف مصروفًا سابقًا مع الحفاظ على تاريخ الأعمال.</p></div>
         <div className="expenses-header-actions">
-          <button className="primary-action" type="button" onClick={runMasterRecovery} disabled={syncing || recovering || masterRecoveryBusy}>{masterRecoveryBusy ? 'جاري مزامنة واسترجاع المصاريف...' : 'مزامنة واسترجاع كل المصاريف'}</button>
           <button className="outline-btn" type="button" onClick={() => goBack?.('dashboard')}>العودة للرئيسية</button>
         </div>
       </div>
       {syncMessage && <div className="report-card" style={{ marginBottom: '1rem' }}><strong>{syncMessage}</strong></div>}
-      {masterRecoveryStatus && <div className="report-card" style={{ marginBottom: '1rem' }} role="status"><strong>{masterRecoveryStatus}</strong></div>}
       {successMessage && <div className="expense-success" role="status" aria-live="polite">{successMessage}</div>}
       <section className={`expense-entry-card${formOpen ? ' is-open' : ''}`}>
         <button type="button" className="expense-entry-toggle" aria-expanded={formOpen} onClick={() => setFormOpen(open => !open)}>
@@ -359,7 +212,6 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         {displayedExpenses.length === 0 ? <tr><td colSpan="6" className="empty-cell">لا توجد مصاريف ضمن الفترة المختارة</td></tr> : displayedExpenses.map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td><strong>{expense.description || expense.notes || '—'}</strong>{expense.notes && expense.notes !== expense.description && <small className="expense-row-note">{expense.notes}</small>}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.person || expense.employeeNameSnapshot || '—'}</td><td><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'محفوظ مركزيًا'}</span><small className="expense-entry-type">{expense.entryType === 'historical' ? 'مصروف سابق' : 'مصروف حالي'}</small></td><td className="expense-actions"><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" disabled={deleting === expense.id} onClick={() => deleteExpense(expense)}>{deleting === expense.id ? 'جارٍ الحذف…' : 'حذف'}</button></td></tr>)}
       </tbody></table></div>
       </section>
-      {masterRecoveryResult && <div className="overlay" role="dialog" aria-modal="true"><div className="dialog master-recovery-dialog" dir="rtl"><h2>اكتملت مزامنة المصاريف</h2><p>{masterRecoveryResult.message}</p><dl><div><dt>Local قبل</dt><dd>{masterRecoveryResult.localBefore}</dd></div><div><dt>المرشحون</dt><dd>{masterRecoveryResult.candidatesFound}</dd></div><div><dt>Unique</dt><dd>{masterRecoveryResult.uniqueCandidates}</dd></div><div><dt>Duplicates</dt><dd>{masterRecoveryResult.duplicateCandidates}</dd></div><div><dt>Invalid</dt><dd>{masterRecoveryResult.invalidCandidates}</dd></div><div><dt>Firebase قبل</dt><dd>{masterRecoveryResult.firebaseBefore}</dd></div><div><dt>المرفوع بعد read-back</dt><dd>{masterRecoveryResult.uploaded}</dd></div><div><dt>Pending محفوظ</dt><dd>{masterRecoveryResult.pendingRetained}</dd></div><div><dt>Firebase بعد</dt><dd>{masterRecoveryResult.firebaseAfter}</dd></div><div><dt>الدمج النهائي</dt><dd>{masterRecoveryResult.finalMergedCount}</dd></div><div><dt>الإجمالي</dt><dd>{format(masterRecoveryResult.totalAmount)}</dd></div><div><dt>أيام businessDate</dt><dd>{masterRecoveryResult.businessDateCount}</dd></div></dl><section className="recovery-diagnostics"><h3>السجلات المحلية حسب التاريخ</h3>{Object.entries(masterRecoveryResult.dateDiagnostics || {}).map(([date, row]) => <div key={`local-${date}`}>{date}: {row.local}</div>)}<h3>Firebase حسب التاريخ</h3>{Object.entries(masterRecoveryResult.dateDiagnostics || {}).map(([date, row]) => <div key={`firebase-${date}`}>{date}: قبل {row.firebaseBefore} · رفع {row.uploaded} · بعد {row.firebaseAfter}</div>)}<h3>تحقق التقرير 2026-09-27</h3><div>Local 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.local || 0} · Firebase before 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.firebaseBefore || 0} · Uploaded 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.uploaded || 0} · Firebase after 2026-09-27 = {masterRecoveryResult.dateDiagnostics?.['2026-09-27']?.firebaseAfter || 0} · التقرير: {masterRecoveryResult.reportVerification?.pass ? 'PASS' : 'FAIL'}</div><h3>تشخيص المرشحين</h3>{(masterRecoveryResult.candidateDiagnostics || []).map(row => <div key={`${row.id}-${row.recoverySource}`}><strong>{row.id}</strong> · {row.businessDate || 'بدون تاريخ'} · {format(row.amount)} · {row.source || row.recoverySource} · {row.candidateStatus} / {row.decision}: {row.reason}</div>)}</section><div className="dialog-actions"><button className="primary-action" type="button" onClick={() => setMasterRecoveryResult(null)}>إغلاق</button></div></div></div>}
     </div>
   )
 }

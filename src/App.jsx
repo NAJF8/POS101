@@ -22,9 +22,7 @@ import { getOpenOrders } from './services/orderState.js'
 import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
 import { calculateSettlement } from './services/financialCenter.js'
-import FullRecoveryDialog from './components/FullRecoveryDialog.jsx'
 import KioskActivation from './components/KioskActivation.jsx'
-import { createFullRecoveryClickHandler } from './services/fullRecoveryController.js'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -103,8 +101,6 @@ export default function App() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
-  const [fullRecoveryBusy, setFullRecoveryBusy] = useState(false)
-  const [fullRecoveryResult, setFullRecoveryResult] = useState(null)
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
@@ -556,12 +552,6 @@ export default function App() {
     onError: onCentralSyncError,
   }), [onCentralSyncStart, onCentralSyncSuccess, onCentralSyncError])
 
-  const handleFullRecovery = useMemo(() => createFullRecoveryClickHandler({
-    onStart: () => { setFullRecoveryBusy(true); setFullRecoveryResult(null) },
-    onSuccess: result => { setFullRecoveryBusy(false); setOperationalDay(result.operationalDay || readLocalOperationalDay()); setFullRecoveryResult(result) },
-    onError: result => { setFullRecoveryBusy(false); setFullRecoveryResult(result) },
-  }), [])
-
   useEffect(() => {
     const retry = () => {
       if (isCentralCashierUser(centralAuth()?.currentUser) && getCentralSyncState().initialSyncCompleted) {
@@ -952,11 +942,11 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
-        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} onPrepareEnd={prepareEndOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} />
+        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} onPrepareEnd={prepareEndOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onEndOperationalDay={handleEndOperationalDay} />
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} onFullRecovery={handleFullRecovery} fullRecoveryBusy={fullRecoveryBusy} staff={staff} onSaveStaff={saveCentralStaff} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
       {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} settlements={settlements} settlementCorrections={settlementCorrections} onSaveSettlementCorrection={saveSettlementCorrection} onSaveTransaction={saveCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
@@ -1100,7 +1090,6 @@ export default function App() {
           <button type="button" aria-label="إغلاق حالة تسجيل دخول المزامنة" onClick={() => setSyncAuthStatus(null)}>×</button>
         </div>
       )}
-      {fullRecoveryResult && <FullRecoveryDialog result={fullRecoveryResult} onClose={() => setFullRecoveryResult(null)} />}
     </main>
   )
 }

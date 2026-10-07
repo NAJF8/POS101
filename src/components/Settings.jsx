@@ -107,7 +107,7 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
   </div>
 }
 
-export default function Settings({ products, categories, canWrite, canManageStaff = canWrite, onStaffSignIn, staffAuthBusy = false, staffAuthError = '', onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets, onFullRecovery, fullRecoveryBusy, staff = [], onSaveStaff }) {
+export default function Settings({ products, categories, canWrite, canManageStaff = canWrite, onStaffSignIn, staffAuthBusy = false, staffAuthError = '', onSave, onNavigate, discountPresets = { baly: 26, toters: 25 }, onSaveDiscountPresets, staff = [], onSaveStaff }) {
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
   const [discountForm, setDiscountForm] = useState(() => ({ baly: String(discountPresets.baly), toters: String(discountPresets.toters) }))
@@ -135,7 +135,6 @@ export default function Settings({ products, categories, canWrite, canManageStaf
   const roleLabel = { cashier: 'كاشير', employee: 'موظف', manager: 'مدير' }
   const staffRow = row => <div className={`staff-settings-row ${row.active === false ? 'is-disabled' : ''}`} key={row.id}><div><b>{row.name}</b><small>{row.code || 'بدون كود'} · {roleLabel[row.role] || roleLabel.employee} · {row.canSell === false ? 'لا يظهر ككابتن' : 'يظهر ككابتن'}{row.active === false && row.deactivatedAt ? ` · عُطّل ${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date(row.deactivatedAt))}` : ''}</small></div><button type="button" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy} onClick={() => editStaff(row)}>تعديل</button><button type="button" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy} onClick={() => toggleStaff(row)}>{row.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button></div>
   return <section className="settings-page" dir="rtl">
-    <button className="full-recovery-action settings-recovery-action" type="button" onClick={onFullRecovery} disabled={fullRecoveryBusy}>{fullRecoveryBusy ? 'جارٍ إصلاح ومزامنة النظام...' : 'إصلاح ومزامنة النظام'}</button>
     <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات والموظفين</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
     <section className="settings-card"><div className="settings-card-heading"><div><h2>إدارة المنتجات</h2><p>{formatNumber(products.length)} منتج — الإخفاء لا يحذف المنتج أو المبيعات السابقة.</p></div><button type="button" className="primary-action" disabled={!canWrite} onClick={() => setEditing({})}><Icon name="plus" size={18} /> إضافة منتج</button></div>
       {!canWrite && <p className="settings-readonly" role="status">تسجيل دخول حساب POS مصرح به مطلوب لإضافة أو تعديل المنتجات.</p>}

@@ -36,11 +36,44 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Verify exact main and Firebase environment
+        shell: bash
+        run: |
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test -n "$VITE_POS101_API_KEY"
+          test -n "$VITE_POS101_AUTH_DOMAIN"
+          test -n "$VITE_POS101_DATABASE_URL"
+          test -n "$VITE_POS101_PROJECT_ID"
+          test -n "$VITE_POS101_STORAGE_BUCKET"
+          test -n "$VITE_POS101_MESSAGING_SENDER_ID"
+          test -n "$VITE_POS101_APP_ID"
+          test "$VITE_POS101_DATABASE_URL" = "https://cmms-37512-default-rtdb.asia-southeast1.firebasedatabase.app"
+          echo "MISSING_FIREBASE_ENV_BLOCKS_DEPLOY=PASS"
       - run: npm run test:report-open-orders
       - run: npm run test:comprehensive-report
       - run: node scripts/central-firebase-regression.mjs
+      - run: node scripts/ui-hardening-regression.mjs
+      - run: node scripts/stale-cache-regression.mjs
+      - run: node scripts/staff-eligibility-regression.mjs
+      - run: node scripts/sales-sync-queue-regression.mjs
+      - run: node scripts/expense-business-date-regression.mjs
+      - run: node scripts/expense-edit-delete-regression.mjs
+      - run: node scripts/expense-ui-regression.mjs
+      - run: node scripts/operational-day-close-regression.mjs
+      - run: node scripts/pre-close-reconciliation-regression.mjs
+      - run: node scripts/closed-day-report-regression.mjs
+      - run: node scripts/settlement-correction-regression.mjs
+      - run: node scripts/financial-center-regression.mjs
+      - run: node scripts/comprehensive-report-regression.mjs
+      - run: git diff --check
       - run: npm run build
       - run: node scripts/central-firebase-regression.mjs --build
+      - name: Stamp exact build identity
+        shell: bash
+        run: |
+          bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
+          test -n "$bundle"
+          printf '{"mainSha":"%s","bundle":"%s"}\n' "$GITHUB_SHA" "$bundle" > dist/deploy-meta.json
       - name: Deploy dist to gh-pages
         run: |
           git config user.name "github-actions[bot]"
@@ -51,10 +84,24 @@ jobs:
           cp -a dist/. /tmp/pos101-gh-pages/
           cd /tmp/pos101-gh-pages
           git add -A
-          if git diff --cached --quiet; then
-            echo "No deployment changes."
-            exit 0
-          fi
           git commit -m "deploy: POS101 remote update"
           git push origin gh-pages
+      - name: Verify live exact commit and bundle
+        shell: bash
+        run: |
+          bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
+          for attempt in $(seq 1 12); do
+            live_html="$(curl -fsSL "https://najf8.github.io/POS101/index.html?sha=$GITHUB_SHA" || true)"
+            live_meta="$(curl -fsSL "https://najf8.github.io/POS101/deploy-meta.json?sha=$GITHUB_SHA" || true)"
+            if printf '%s' "$live_html" | grep -Fq "$bundle" && printf '%s' "$live_meta" | grep -Fq "\"mainSha\":\"$GITHUB_SHA\""; then
+              live_js="$(curl -fsSL "https://najf8.github.io/POS101/$bundle?sha=$GITHUB_SHA")"
+              printf '%s' "$live_js" | grep -Fq "$VITE_POS101_DATABASE_URL"
+              printf '%s' "$live_js" | grep -Fq 'pos101_staff'
+              echo "EXACT_MAIN_DEPLOY=PASS"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "EXACT_MAIN_DEPLOY=FAIL"
+          exit 1
 # remote deploy trigger 3
