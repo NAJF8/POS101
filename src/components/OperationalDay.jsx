@@ -14,6 +14,11 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const [openingCash, setOpeningCash] = useState('')
   const [openingNote, setOpeningNote] = useState('')
   const [openingSuggestion, setOpeningSuggestion] = useState(null)
+  React.useEffect(() => {
+    const dirty = Boolean(startOpen || endOpen || openingCash || openingNote || actualCash)
+    window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty } }))
+    return () => window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty: false } }))
+  }, [startOpen, endOpen, openingCash, openingNote, actualCash])
   const open = day?.status === 'open'
   const forgotten = open && day.startedAt && new Date(day.startedAt).toDateString() !== new Date().toDateString()
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])

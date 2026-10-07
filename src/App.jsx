@@ -19,6 +19,7 @@ import { activateKioskWithCode, canManageStaff, centralAuth, ensureKioskFirebase
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
+import { VERSION_CHECK_INTERVAL_MS, createVersionController, installServiceWorker } from './services/versionUpdate.js'
 import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
 import { calculateSettlement } from './services/financialCenter.js'
@@ -97,6 +98,8 @@ export default function App() {
   const [discountPresets, setDiscountPresets] = useState(() => normalizeDiscountPresets(read('pos101.discountPresets', DEFAULT_DISCOUNT_PRESETS)))
   const [printerSettings, setPrinterSettings] = useState(() => ({ ...defaultThermalSettings, ...read('pos101.printerSettings', {}) }))
   const [thermalStatus, setThermalStatus] = useState(null)
+  const [versionStatus, setVersionStatus] = useState('idle')
+  const [dirtyFinancialForm, setDirtyFinancialForm] = useState(false)
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
@@ -157,6 +160,35 @@ export default function App() {
   const total = Math.max(0, subtotal - activeDiscount)
 
   const openOrdersCount = getOpenOrders(orders).length
+
+  const versionBlocked = Boolean(activeOrder?.items?.length || dirtyFinancialForm)
+  const versionBlockedRef = useRef(versionBlocked)
+  versionBlockedRef.current = versionBlocked
+  useEffect(() => {
+    let alive = true
+    let controller
+    let timer
+    const check = () => { void controller?.check() }
+    const onFormDirty = event => setDirtyFinancialForm(Boolean(event.detail?.dirty))
+    const onVisibility = () => { if (!document.hidden) check() }
+    const onFocus = () => check()
+    const onSafe = () => { void controller?.applyWhenSafe() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('pos101-form-dirty', onFormDirty)
+    window.addEventListener('pos101-update-safe', onSafe)
+    void (async () => {
+      const registration = await installServiceWorker()
+      if (!alive) return
+      controller = createVersionController({ registration, getBlocked: () => versionBlockedRef.current, setStatus: status => alive && setVersionStatus(status) })
+      await controller.check()
+      timer = window.setInterval(check, VERSION_CHECK_INTERVAL_MS)
+    })()
+    return () => { alive = false; if (timer) window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('focus', onFocus); window.removeEventListener('pos101-form-dirty', onFormDirty); window.removeEventListener('pos101-update-safe', onSafe) }
+  }, [])
+
+  useEffect(() => { window.dispatchEvent(new CustomEvent('pos101-update-guard', { detail: { blocked: versionBlocked } })) }, [versionBlocked])
+  useEffect(() => { if (!versionBlocked) window.dispatchEvent(new Event('pos101-update-safe')) }, [versionBlocked])
 
   const catalogProducts = useMemo(() => {
     const merged = new Map(products.map(product => [String(product.id), product]))
@@ -932,6 +964,8 @@ export default function App() {
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''}`}>
+      {versionStatus === 'updating' && <div className="pos101-update-status" role="status" aria-live="polite">جاري تحديث النظام...</div>}
+      {(versionStatus === 'deferred' || versionStatus === 'pending') && versionBlocked && <div className="pos101-update-notice" role="status" aria-live="polite">يتوفر تحديث للنظام وسيتم تطبيقه بعد إكمال الطلب الحالي.</div>}
       {session && (
         <Header
           session={session}

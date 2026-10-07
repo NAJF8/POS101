@@ -25,6 +25,11 @@ export default function FinancialCenter({ transactions = [], centralSales = [], 
   const [correctionReason, setCorrectionReason] = useState('')
   const [correctionNotes, setCorrectionNotes] = useState('')
   const [correctionError, setCorrectionError] = useState('')
+  useEffect(() => {
+    const dirty = Boolean(editingTransactionId || txAmount || txReason || countAmount || systemCode || correctedActualCash || correctionReason || correctionNotes)
+    window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty } }))
+    return () => window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty: false } }))
+  }, [editingTransactionId, txAmount, txReason, countAmount, systemCode, correctedActualCash, correctionReason, correctionNotes])
   const localSales = useMemo(() => readLocalSales(), [])
   const sales = useMemo(() => getReportSalesForPeriod({ localSales, centralSales, operationalDays, from, to, currentOperationalDay: operationalDay }), [localSales, centralSales, operationalDays, from, to, operationalDay])
   const [expenses, setExpenses] = useState(() => readLocalExpenses())

@@ -183,6 +183,11 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const setQuickFilter = days => { const today = getLocalDateKey(Date.now()); const from = days === 0 ? today : getLocalDateKey(Date.now() - days * 86400000); setDateFrom(from); setDateTo(today) }
   const goBack = onNavigate || onBack
   const selectedPerson = person || staff.find(row => row.active)?.name || 'غير محدد'
+  useEffect(() => {
+    const dirty = formOpen && Boolean(editingId || amount || description || notes || historicalDate)
+    window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty } }))
+    return () => window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty: false } }))
+  }, [formOpen, editingId, amount, description, notes, historicalDate])
 
   return (
     <div className="expenses-container" dir="rtl">

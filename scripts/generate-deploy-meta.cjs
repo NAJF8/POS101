@@ -1,0 +1,17 @@
+const fs = require('node:fs')
+const path = require('node:path')
+const { execFileSync } = require('node:child_process')
+
+const root = path.resolve(__dirname, '..')
+const dist = path.join(root, 'dist')
+const html = fs.readFileSync(path.join(dist, 'index.html'), 'utf8')
+const bundleMatch = html.match(/assets\/(index-[^"']+\.js)/)
+if (!bundleMatch) throw new Error('DEPLOY_META_BUNDLE_NOT_FOUND')
+const mainSha = process.env.VITE_BUILD_SHA || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+if (!/^[0-9a-f]{7,64}$/i.test(mainSha)) throw new Error('DEPLOY_META_SHA_INVALID')
+const builtAt = new Date().toISOString()
+const meta = { mainSha, buildId: mainSha, builtAt, bundle: bundleMatch[1] }
+fs.writeFileSync(path.join(dist, 'deploy-meta.json'), `${JSON.stringify(meta, null, 2)}\n`)
+const swTemplate = fs.readFileSync(path.join(root, 'public', 'sw.js'), 'utf8')
+fs.writeFileSync(path.join(dist, 'sw.js'), swTemplate.replaceAll('__POS101_BUILD_SHA__', mainSha))
+console.log(`DEPLOY_META_GENERATED=PASS ${JSON.stringify(meta)}`)

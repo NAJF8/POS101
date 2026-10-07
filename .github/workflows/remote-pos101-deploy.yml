@@ -61,14 +61,17 @@ jobs:
       - name: Remove any stale build output
         shell: bash
         run: rm -rf dist
-      - run: npm run build
+      - name: Build exact deployed version
+        env:
+          VITE_BUILD_SHA: ${{ github.sha }}
+        run: npm run build
       - run: node scripts/central-firebase-regression.mjs --build
-      - name: Stamp exact build identity
+      - name: Verify generated deploy metadata
         shell: bash
         run: |
-          bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
-          test -n "$bundle"
-          printf '{"mainSha":"%s","bundle":"%s"}\n' "$GITHUB_SHA" "$bundle" > dist/deploy-meta.json
+          test "$(node -e "console.log(require('./dist/deploy-meta.json').mainSha)")" = "$GITHUB_SHA"
+          test -f dist/sw.js
+          grep -Fq "$GITHUB_SHA" dist/sw.js
       - name: Deploy dist to gh-pages
         run: |
           git config user.name "github-actions[bot]"
@@ -85,10 +88,11 @@ jobs:
         shell: bash
         run: |
           bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
+          bundle_name="${bundle#assets/}"
           for attempt in $(seq 1 24); do
             live_html="$(curl -fsSL "https://najf8.github.io/POS101/index.html?sha=$GITHUB_SHA" || true)"
             live_meta="$(curl -fsSL "https://najf8.github.io/POS101/deploy-meta.json?sha=$GITHUB_SHA" || true)"
-            if printf '%s' "$live_html" | grep -Fq "$bundle" && printf '%s' "$live_meta" | grep -Fq "\"mainSha\":\"$GITHUB_SHA\""; then
+            if printf '%s' "$live_html" | grep -Fq "$bundle" && printf '%s' "$live_meta" | grep -Fq "\"mainSha\": \"$GITHUB_SHA\"" && printf '%s' "$live_meta" | grep -Fq "\"bundle\": \"$bundle_name\""; then
               live_js="$(curl -fsSL "https://najf8.github.io/POS101/$bundle?sha=$GITHUB_SHA")"
               printf '%s' "$live_js" | grep -Fq "$VITE_POS101_DATABASE_URL"
               printf '%s' "$live_js" | grep -Fq 'pos101_staff'
