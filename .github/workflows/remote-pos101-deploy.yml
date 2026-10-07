@@ -89,15 +89,19 @@ jobs:
         run: |
           bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
           bundle_name="${bundle#assets/}"
-          for attempt in $(seq 1 24); do
+          for attempt in $(seq 1 40); do
             live_html="$(curl -fsSL "https://najf8.github.io/POS101/index.html?sha=$GITHUB_SHA" || true)"
             live_meta="$(curl -fsSL "https://najf8.github.io/POS101/deploy-meta.json?sha=$GITHUB_SHA" || true)"
-            if printf '%s' "$live_html" | grep -Fq "$bundle" && printf '%s' "$live_meta" | grep -Fq "\"mainSha\": \"$GITHUB_SHA\"" && printf '%s' "$live_meta" | grep -Fq "\"bundle\": \"$bundle_name\""; then
-              live_js="$(curl -fsSL "https://najf8.github.io/POS101/$bundle?sha=$GITHUB_SHA")"
-              printf '%s' "$live_js" | grep -Fq "$VITE_POS101_DATABASE_URL"
-              printf '%s' "$live_js" | grep -Fq 'pos101_staff'
-              echo "EXACT_MAIN_DEPLOY=PASS"
-              exit 0
+            if [ -n "$live_html" ] && [ -n "$live_meta" ]; then
+              live_main="$(LIVE_META="$live_meta" node -e "const m=JSON.parse(process.env.LIVE_META); process.stdout.write(m.mainSha || '')")"
+              live_bundle_name="$(LIVE_META="$live_meta" node -e "const m=JSON.parse(process.env.LIVE_META); process.stdout.write(m.bundle || '')")"
+              if [ "$live_main" = "$GITHUB_SHA" ] && [ "$live_bundle_name" = "$bundle_name" ] && printf '%s' "$live_html" | grep -Fq "$bundle"; then
+                live_js="$(curl -fsSL "https://najf8.github.io/POS101/assets/$live_bundle_name?sha=$GITHUB_SHA" || true)"
+                if printf '%s' "$live_js" | grep -Fq "$VITE_POS101_DATABASE_URL" && printf '%s' "$live_js" | grep -Fq 'pos101_staff'; then
+                  echo "EXACT_MAIN_DEPLOY=PASS"
+                  exit 0
+                fi
+              fi
             fi
             sleep 15
           done
