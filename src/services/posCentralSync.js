@@ -370,34 +370,53 @@ export const canManageStaff = (user, authorizationRecord = null) => {
 // and readback. Kiosk claims are accepted, while authorized uid records are a
 // deliberate fallback for cashier/manager/admin accounts.
 export const canSyncPosSales = async (user = null) => {
+  let authResolved = false
+  if (!user) {
+    try {
+      await authReady
+      authResolved = true
+      user = auth?.currentUser || null
+    } catch {}
+  } else {
+    try { await authReady; authResolved = true } catch {}
+  }
   const result = {
     allowed: false,
     uid: user?.uid || '',
     email: user?.email || '',
     role: 'blocked',
-    authReady: Boolean(user?.uid),
+    authReady: authResolved && Boolean(user?.uid),
     claimsReady: false,
+    claims: null,
+    cashierId: '',
+    cashierName: '',
     authorizedUidExists: false,
+    authorizedPathChecked: false,
     missingReason: '',
   }
   if (!user?.uid) { result.missingReason = 'AUTH_REQUIRED'; return result }
   const claims = await hydrateKioskClaims(user)
   result.claimsReady = Boolean(claims)
-  if (claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId) {
-    result.allowed = true
-    result.role = 'cashier'
-    return result
-  }
+  result.claims = claims || null
+  result.cashierId = String(claims?.cashierId || claims?.pos101_cashierId || claims?.staffId || '')
+  result.cashierName = String(claims?.cashierName || claims?.pos101_cashierName || claims?.name || '')
+  const claimsRole = String(claims?.role || claims?.pos101_role || claims?.userRole || '').trim().toLowerCase()
   const record = await readCentralAuthorizationRecord(user)
+  result.authorizedPathChecked = Boolean(db)
   result.authorizedUidExists = Boolean(record)
-  const role = String(record?.role || '').trim().toLowerCase()
-  if (isActiveAuthorizedRecord(record) && SYNC_ROLES.has(role)) {
+  result.cashierId ||= String(record?.cashierId || record?.staffId || '')
+  result.cashierName ||= String(record?.cashierName || record?.name || '')
+  const role = String(record?.role || claimsRole || '').trim().toLowerCase()
+  const roleAllowed = new Set(['cashier', 'cashier-sync', 'employee', 'manager', 'admin', 'super_admin', 'admin-viewer']).has(role)
+  const recordAllowed = Boolean(record && record.active !== false && record.authorized !== false)
+  const kioskAllowed = claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId
+  if (kioskAllowed || recordAllowed || roleAllowed) {
     result.allowed = true
     result.role = ['super_admin', 'admin', 'manager'].includes(role) ? role : 'cashier'
     return result
   }
   result.role = role || 'blocked'
-  result.missingReason = !record ? 'AUTHORIZED_UID_MISSING' : record.active === false ? 'AUTHORIZED_UID_INACTIVE' : record.authorized === false ? 'AUTHORIZED_UID_DISABLED' : 'ROLE_NOT_ALLOWED'
+  result.missingReason = !record && !claimsRole ? 'AUTHORIZED_UID_MISSING' : record?.active === false ? 'AUTHORIZED_UID_INACTIVE' : record?.authorized === false ? 'AUTHORIZED_UID_DISABLED' : 'ROLE_NOT_ALLOWED'
   return result
 }
 
@@ -838,8 +857,16 @@ export const manualCurrentTabQueueRecovery = async () => {
       role: permission.role,
       authReady: permission.authReady,
       claimsReady: permission.claimsReady,
+      claims: permission.claims,
+      cashierId: permission.cashierId,
+      cashierName: permission.cashierName,
       authorizedUidExists: permission.authorizedUidExists,
+      authorizedPathChecked: permission.authorizedPathChecked,
       missingReason: permission.missingReason,
+      canSyncPosSales: {
+        allowed: permission.allowed,
+        missingReason: permission.missingReason,
+      },
     },
     lockBefore: syncLockManager.describe(),
     lockAction: 'none',
