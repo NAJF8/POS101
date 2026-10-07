@@ -1,13 +1,13 @@
+import { isCashboxExpense, isManagementExpense } from './expenseReporting.js'
+
 const amount = value => {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : 0
 }
-
 export const normalizeBusinessDate = (value, fallback = '') => {
   const text = String(value || '').trim()
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : fallback
 }
-
 export const resolveFinancialBusinessDate = (record, operationalDayDates = {}) => {
   const explicit = normalizeBusinessDate(record?.businessDate || record?.business_date || record?.shiftBusinessDate)
   if (explicit) return explicit
@@ -37,7 +37,7 @@ export const calculateCashboxBalance = transactions => (Array.isArray(transactio
   const value = amount(transaction?.amount)
   if (['deposit', 'return'].includes(transaction?.type)) return balance + value
   if (transaction?.type === 'withdrawal') return isCashboxWithdrawal(transaction) ? balance - value : balance
-  if (transaction?.type === 'expense') return balance - value
+  if (transaction?.type === 'expense') return transaction?.fundingSource === 'management' ? balance : balance - value
   if (transaction?.type === 'adjustment') return balance + amount(transaction?.signedAmount ?? transaction?.amount)
   return balance
 }, 0)
@@ -46,7 +46,10 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
   const validSales = sales.filter(sale => !isVoided(sale))
   const cashSales = validSales.filter(sale => paymentMethod(sale) === 'cash').reduce((sum, sale) => sum + saleAmount(sale), 0)
   const electronicSales = validSales.filter(sale => paymentMethod(sale) === 'electronic').reduce((sum, sale) => sum + saleAmount(sale), 0)
-  const expenseTotal = expenses.filter(expense => !isVoided(expense)).reduce((sum, expense) => sum + amount(expense?.amount), 0)
+  const validExpenses = expenses.filter(expense => !isVoided(expense))
+  const cashboxExpenses = validExpenses.filter(isCashboxExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
+  const managementExpenses = validExpenses.filter(isManagementExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
+  const expenseTotal = cashboxExpenses + managementExpenses
   const movementTransactions = transactions.filter(row => !isSettlementBookkeeping(row))
   const withdrawalRows = movementTransactions.filter(row => row?.type === 'withdrawal' && !isVoided(row))
   const cashboxWithdrawals = withdrawalRows.filter(isCashboxWithdrawal).reduce((sum, row) => sum + amount(row.amount), 0)
@@ -54,11 +57,11 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
   const withdrawals = cashboxWithdrawals + managementWithdrawals
   const deposits = movementTransactions.filter(row => row?.type === 'deposit' && !isVoided(row)).reduce((sum, row) => sum + amount(row.amount), 0)
   const adjustments = movementTransactions.filter(row => row?.type === 'adjustment' && !isVoided(row)).reduce((sum, row) => sum + amount(row.signedAmount ?? row.amount), 0)
-  const dailyCashMovement = cashSales + deposits - expenseTotal - cashboxWithdrawals + adjustments
+  const dailyCashMovement = cashSales + deposits - cashboxExpenses - cashboxWithdrawals + adjustments
   const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
   const openingValue = openingKnown ? Number(openingCashBalance) : null
   const expectedClosingCash = openingKnown ? openingValue + dailyCashMovement : dailyCashMovement
-  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0 }
+  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0 }
 }
 
 export const calculateCashboxDay = ({ openingCashBalance, actualCash, sales = [], expenses = [], transactions = [] } = {}) => {
@@ -82,7 +85,6 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
     return { day, settlement, effective, ...summary, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
   })
 }
-
 export const calculateFinancialReport = ({ sales = [], expenses = [], transactions = [], from, to } = {}) => {
   const inRange = row => { const date = resolveFinancialBusinessDate(row); return (!from || date >= from) && (!to || date <= to) }
   const filteredSales = sales.filter(inRange)
@@ -92,7 +94,7 @@ export const calculateFinancialReport = ({ sales = [], expenses = [], transactio
   const byDay = new Map()
   const ensure = date => { if (!byDay.has(date)) byDay.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, net: 0, orders: 0 }); return byDay.get(date) }
   filteredSales.forEach(sale => { const row = ensure(resolveFinancialBusinessDate(sale)); const value = saleAmount(sale); row.sales += value; row.orders += 1; if (paymentMethod(sale) === 'cash') row.cash += value; if (paymentMethod(sale) === 'electronic') row.electronic += value })
-  filteredExpenses.forEach(expense => { ensure(resolveFinancialBusinessDate(expense)).expenses += amount(expense.amount) })
+  filteredExpenses.forEach(expense => { const row = ensure(resolveFinancialBusinessDate(expense)); if (isCashboxExpense(expense)) row.expenses += amount(expense.amount) })
   filteredTransactions.forEach(transaction => { const row = ensure(resolveFinancialBusinessDate(transaction)); if (isCashboxWithdrawal(transaction)) row.withdrawals += amount(transaction.amount); if (transaction.type === 'deposit' || transaction.type === 'return') row.deposits += amount(transaction.amount) })
   for (const row of byDay.values()) row.net = row.cash - row.expenses - row.withdrawals + row.deposits
   return { ...summary, daily: [...byDay.values()].sort((a, b) => a.businessDate.localeCompare(b.businessDate)), filteredSales, filteredExpenses, filteredTransactions }

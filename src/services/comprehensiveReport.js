@@ -1,4 +1,4 @@
-import { sumExpenses } from './expenseReporting.js'
+import { isCashboxExpense, isManagementExpense, sumExpenses } from './expenseReporting.js'
 import { calculateSettlement } from './financialCenter.js'
 
 const amount = value => {
@@ -17,6 +17,8 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
     return sum + (method === 'electronic' ? amount(sale.total) : 0)
   }, 0)
   const expensesTotal = sumExpenses(expenses)
+  const cashboxExpenses = expenses.filter(isCashboxExpense).reduce((sum, expense) => sum + amount(expense.amount), 0)
+  const managementExpenses = expenses.filter(isManagementExpense).reduce((sum, expense) => sum + amount(expense.amount), 0)
   const netAfterDiscount = grossSales - discounts
   const netAfterExpenses = grossSales - expensesTotal
   const netAfterExpensesAndDiscount = grossSales - expensesTotal - discounts
@@ -27,6 +29,8 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
     grossSales,
     discounts,
     expenses: expensesTotal,
+    cashboxExpenses,
+    managementExpenses,
     electronicSales,
     netAfterDiscount,
     netAfterExpenses,

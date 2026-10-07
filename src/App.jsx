@@ -463,6 +463,7 @@ export default function App() {
     const dayId = operationalDay?.id
     const dayDate = operationalDay?.businessDate
     return freshSettlementPreview || calculateSettlement({
+      openingCashBalance: operationalDay?.openingCashBalance || 0,
       sales: readLocalSales().filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate)),
       expenses: readLocalExpenses().filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate)),
       transactions: cashboxTransactions.filter(row => row.businessDate === dayDate && row.status !== 'voided'),

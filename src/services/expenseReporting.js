@@ -3,6 +3,12 @@ const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/
 
 const firstValue = (...values) => values.find(value => value !== undefined && value !== null && value !== '')
 
+export const LEGACY_EXPENSE_DEFAULT = 'cashbox'
+export const normalizeFundingSource = value => value === 'management' ? 'management' : LEGACY_EXPENSE_DEFAULT
+export const fundingSourceLabel = value => normalizeFundingSource(value) === 'management' ? 'من الإدارة' : 'من الصندوق'
+export const isCashboxExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'cashbox'
+export const isManagementExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'management'
+
 const normalizeDigits = value => String(value ?? '').replace(/[٠-٩۰-۹]/g, digit => {
   const digits = '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'
   const index = digits.indexOf(digit)
@@ -80,6 +86,7 @@ export const normalizeExpense = (expense, options = {}) => {
     createdAt: timestamp,
     timestamp,
     businessDate: resolveExpenseBusinessDate(raw, options),
+    fundingSource: normalizeFundingSource(firstValue(raw.fundingSource, raw.paymentSource)),
     shift: firstValue(raw.shift, raw.shiftName, raw.shift_id, raw.shiftId, ''),
     shiftId: firstValue(raw.shiftId, raw.shift_id, ''),
   }

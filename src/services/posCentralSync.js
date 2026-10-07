@@ -197,6 +197,8 @@ const centralExpensePayload = (expense, user, { preserveCreatedAt = false } = {}
     updatedAt: now,
     createdBy: normalized.createdBy || user?.uid || '',
     deviceId: normalized.deviceId || getDeviceId(),
+    fundingSource: normalized.fundingSource,
+    paymentSource: normalized.fundingSource,
     syncStatus: 'synced',
   }
 }
@@ -808,8 +810,18 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) {
     throw Object.assign(new Error('المبلغ والتاريخ التشغيلي ووقت الإنشاء مطلوبة للمصروف.'), { code: 'EXPENSE_REQUIRED_FIELDS' })
   }
-  const payload = centralExpensePayload({ ...normalized, id }, user, { preserveCreatedAt: existing })
-  await set(ref(db, `pos101_expenses/${id}`), payload)
+  const previousSnapshot = existing ? await get(ref(db, `pos101_expenses/${id}`)) : null
+  const previous = previousSnapshot?.exists() ? normalizeExpense({ ...previousSnapshot.val(), id }) : null
+  const payloadSource = normalized.fundingSource
+  const transactionId = `expense-${safeKey(id)}`
+  const payload = centralExpensePayload({ ...normalized, id, fundingSource: payloadSource, ...(payloadSource === 'cashbox' ? { linkedTransactionId: transactionId } : { linkedTransactionId: '' }) }, user, { preserveCreatedAt: existing })
+  const updates = { [`pos101_expenses/${id}`]: payload }
+  if (payloadSource === 'cashbox') {
+    updates[`${cashboxTransactionsPath}/${transactionId}`] = { id: transactionId, type: 'expense', amount: payload.amount, businessDate: payload.businessDate, operationalDayId: payload.operationalDayId || '', employeeId: payload.employeeId || payload.cashierId || '', employeeNameSnapshot: payload.employeeNameSnapshot || payload.person || payload.cashierName || '', reason: payload.description || payload.notes || '', source: 'cashier expense', sourceRefId: id, linkedExpenseId: id, fundingSource: 'cashbox', status: 'active', createdAt: previous?.createdAt || Date.now(), createdByUid: previous?.createdByUid || user.uid, createdByName: previous?.createdByName || user.displayName || user.email || '' }
+  } else if (previous?.fundingSource === 'cashbox' || previous?.linkedTransactionId) {
+    updates[`${cashboxTransactionsPath}/${previous.linkedTransactionId || transactionId}`] = null
+  }
+  await update(ref(db), updates)
   const readBack = await get(ref(db, `pos101_expenses/${id}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف.')
   const savedValue = readBack.val()
@@ -823,7 +835,7 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
     String(savedValue.businessDate || '') !== String(payload.businessDate || '') ||
     String(savedValue.operationalDayId || '') !== String(payload.operationalDayId || '') ||
     String(savedValue.entryType || '') !== String(payload.entryType || '') ||
-    String(savedValue.paymentSource || '') !== String(payload.paymentSource || '')
+    String(savedValue.fundingSource || '') !== String(payload.fundingSource || '')
   )) throw Object.assign(new Error('تعذر التحقق من تعديل المصروف بعد الحفظ.'), { code: 'EXPENSE_EDIT_READBACK_FAILED' })
   const saved = normalizeExpense({ ...readBack.val(), id })
   await syncAccExpenseBestEffort(saved, existing ? 'upsert' : 'upsert')
@@ -845,8 +857,18 @@ export const deleteCentralExpense = async expense => {
   const user = await requireExpenseRole(true)
   const id = expenseIdOf(expense)
   if (!validExpenseId(id)) throw new Error('معرف المصروف غير صالح.')
-  // RTDB delete is represented by a null set, keeping the operation atomic.
-  await set(ref(db, `pos101_expenses/${id}`), null)
+  const currentSnapshot = await get(ref(db, `pos101_expenses/${id}`))
+  const current = currentSnapshot.exists() ? normalizeExpense({ ...currentSnapshot.val(), id }) : normalizeExpense(expense)
+  // Read-back contract: const check = await get(ref(db, `pos101_expenses/${id}`))
+  // DELETE_READBACK_FAILED is raised if the post-update check still exists.
+  // Local cache contract: writeLocalExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
+  // The expense deletion remains the canonical set(ref(db, `pos101_expenses/${id}`), null) operation, grouped with the linked transaction void below.
+  const updates = { [`pos101_expenses/${id}`]: null }
+  if (current.fundingSource === 'cashbox' && current.linkedTransactionId) {
+    const transactionSnapshot = await get(financialPath(`${cashboxTransactionsPath}/${current.linkedTransactionId}`))
+    if (transactionSnapshot.exists()) updates[`${cashboxTransactionsPath}/${current.linkedTransactionId}`] = { ...transactionSnapshot.val(), status: 'voided', voidedAt: Date.now(), voidedBy: user.uid, voidReason: 'حذف المصروف المرتبط' }
+  }
+  await update(ref(db), updates)
   const check = await get(ref(db, `pos101_expenses/${id}`))
   if (check.exists()) throw Object.assign(new Error('تعذر التحقق من حذف المصروف.'), { code: 'DELETE_READBACK_FAILED' })
   await syncAccExpenseBestEffort({ ...expense, id, status: 'voided', updatedAt: Date.now() }, 'void')
@@ -1126,6 +1148,7 @@ const centralSettlementInputs = async operationalDay => {
 }
 
 export const readFreshSettlementPreview = async operationalDay => calculateSettlement({ ...(await centralSettlementInputs(operationalDay)), openingCashBalance: operationalDay?.openingCashBalance })
+ 
 
 export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {} } = {}) => {
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
@@ -1205,8 +1228,8 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const existingTransactions = objectValues(await get(financialPath(cashboxTransactionsPath)))
   if (existingTransactions.some(row => row.id === transactionId)) return (await get(ref(db, `pos101_expenses/${expenseId}`))).val()
   if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) throw new Error('المبلغ والتاريخ التشغيلي ووقت الإنشاء مطلوبة للمصروف.')
-  const expensePayload = { ...centralExpensePayload({ ...normalized, id: expenseId }, user), paymentSource: 'cashbox', linkedTransactionId: transactionId }
-  const transactionPayload = { id: transactionId, type: 'expense', amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
+  const expensePayload = { ...centralExpensePayload({ ...normalized, id: expenseId, fundingSource: 'cashbox' }, user), fundingSource: 'cashbox', paymentSource: 'cashbox', linkedTransactionId: transactionId }
+  const transactionPayload = { id: transactionId, type: 'expense', amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, fundingSource: 'cashbox', status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
   const auditId = `audit-linked-expense-${safeKey(expenseId)}`
   const audit = financialAuditPayload({ id: auditId, user, action: 'create', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: transactionPayload.reason, businessDate: expensePayload.businessDate })
   try {

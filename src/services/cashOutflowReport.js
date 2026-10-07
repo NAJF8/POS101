@@ -1,4 +1,4 @@
-import { normalizeExpense } from './expenseReporting.js'
+import { isManagementExpense, normalizeExpense, fundingSourceLabel } from './expenseReporting.js'
 import { resolveFinancialBusinessDate } from './financialCenter.js'
 import { employeeCodeOf, employeeNameOf, matchEmployeeRecord } from './employeeReport.js'
 
@@ -11,6 +11,7 @@ const CASH_OUTFLOW_TYPES = new Set(['withdrawal', 'expense', 'cash out', 'cashou
 const NON_OUTFLOW_TYPES = new Set(['deposit', 'return', 'sale', 'cash sale', 'cash_sale', 'electronic sale', 'electronic_sale', 'settlement', 'cash count', 'cash_count', 'count', 'income', 'transfer in', 'transfer_in'])
 const markerOf = row => keyText(row?.paymentSource || row?.payment_source || row?.paymentMethod || row?.payment_method || row?.paidFrom || row?.paid_from || row?.sourceType)
 const isCashExpense = row => {
+  if (isManagementExpense(row)) return false
   if (row?.isCash === false || row?.cash === false || row?.cashPaid === false) return false
   const marker = markerOf(row)
   if (NON_CASH_MARKERS.has(marker)) return false
@@ -31,13 +32,14 @@ const isCashOutflowTransaction = row => {
 }
 
 export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], staff = [], operationalDayDates = {} } = {}) => {
-  const expenseRows = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates })).filter(row => !isVoided(row) && amount(row.amount) > 0 && isCashExpense(row))
+  const normalizedExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates })).filter(row => !isVoided(row) && amount(row.amount) > 0)
+  const expenseRows = normalizedExpenses.filter(row => isCashExpense(row) || isManagementExpense(row))
   const expenseRefs = new Set(expenseRows.flatMap(refsOf))
   const expenseMirrorKeys = new Set(expenseRows.map(mirrorKeyOf))
   const rows = expenseRows.map(row => {
     const person = matchEmployeeRecord(row, staff)
     const salary = text(row.category || row.expenseCategory) === 'راتب'
-    return { id: text(row.id) || `expense:${mirrorKeyOf(row)}`, source: 'expense', sourceType: 'expense', typeLabel: salary ? 'راتب' : text(row.category) || 'أخرى', amount: amount(row.amount), employeeId: text(person?.id || row.employeeId || row.staffId), employeeName: text(person?.name || employeeNameOf(row) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(row)), description: descriptionOf(row), notes: text(row.notes || row.description), businessDate: dateOf(row, operationalDayDates), createdAt: row.createdAt || row.created_at || row.timestamp || row.date || 0, operationalDayId: text(row.operationalDayId || row.operational_day_id || row.shiftId), original: row }
+    return { id: text(row.id) || `expense:${mirrorKeyOf(row)}`, source: 'expense', sourceType: 'expense', sourceLabel: fundingSourceLabel(row.fundingSource), fundingSource: row.fundingSource, typeLabel: salary ? 'راتب' : text(row.category) || 'أخرى', amount: amount(row.amount), employeeId: text(person?.id || row.employeeId || row.staffId), employeeName: text(person?.name || employeeNameOf(row) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(row)), description: descriptionOf(row), notes: text(row.notes || row.description), businessDate: dateOf(row, operationalDayDates), createdAt: row.createdAt || row.created_at || row.timestamp || row.date || 0, operationalDayId: text(row.operationalDayId || row.operational_day_id || row.shiftId), original: row }
   })
   for (const transaction of (Array.isArray(transactions) ? transactions : []).filter(isCashOutflowTransaction)) {
     const refs = refsOf(transaction)
