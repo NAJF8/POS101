@@ -126,6 +126,15 @@ const readSales = () => {
     return Array.isArray(value) ? value : []
   } catch { return [] }
 }
+const readLocalCashierSession = () => {
+  try {
+    const session = JSON.parse(localStorage.getItem('pos101.session') || 'null')
+    if (!session || session.status !== 'open') return null
+    const cashierName = String(session.cashierNameSnapshot || session.cashierName || session.name || session.shiftName || '').trim()
+    const cashierId = String(session.cashierId || session.shiftId || '').trim()
+    return cashierName || cashierId ? { ...session, cashierName, cashierId } : null
+  } catch { return null }
+}
 const writeSales = sales => localStorage.setItem(SALES_KEY, JSON.stringify(sales))
 const dispatchUpdated = () => window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
 const dispatchExpensesUpdated = () => window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
@@ -392,6 +401,7 @@ export const canSyncPosSales = async (user = null) => {
     cashierName: '',
     authorizedUidExists: false,
     authorizedPathChecked: false,
+    staffSessionExists: false,
     missingReason: '',
   }
   if (!user?.uid) { result.missingReason = 'AUTH_REQUIRED'; return result }
@@ -404,13 +414,18 @@ export const canSyncPosSales = async (user = null) => {
   const record = await readCentralAuthorizationRecord(user)
   result.authorizedPathChecked = Boolean(db)
   result.authorizedUidExists = Boolean(record)
+  const staffSession = readLocalCashierSession()
+  result.staffSessionExists = Boolean(staffSession)
   result.cashierId ||= String(record?.cashierId || record?.staffId || '')
   result.cashierName ||= String(record?.cashierName || record?.name || '')
+  result.cashierId ||= staffSession?.cashierId || ''
+  result.cashierName ||= staffSession?.cashierName || ''
   const role = String(record?.role || claimsRole || '').trim().toLowerCase()
   const roleAllowed = new Set(['cashier', 'cashier-sync', 'employee', 'manager', 'admin', 'super_admin', 'admin-viewer']).has(role)
   const recordAllowed = Boolean(record && record.active !== false && record.authorized !== false)
+  const staffSessionAllowed = Boolean(staffSession)
   const kioskAllowed = claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId
-  if (kioskAllowed || recordAllowed || roleAllowed) {
+  if (kioskAllowed || recordAllowed || roleAllowed || staffSessionAllowed) {
     result.allowed = true
     result.role = ['super_admin', 'admin', 'manager'].includes(role) ? role : 'cashier'
     return result
@@ -862,12 +877,22 @@ export const manualCurrentTabQueueRecovery = async () => {
       cashierName: permission.cashierName,
       authorizedUidExists: permission.authorizedUidExists,
       authorizedPathChecked: permission.authorizedPathChecked,
+      staffSessionExists: permission.staffSessionExists,
       missingReason: permission.missingReason,
       canSyncPosSales: {
         allowed: permission.allowed,
         missingReason: permission.missingReason,
       },
     },
+    uid: permission.uid,
+    email: permission.email,
+    cashierName: permission.cashierName,
+    cashierId: permission.cashierId,
+    role: permission.role,
+    authReady: permission.authReady,
+    claimsReady: permission.claimsReady,
+    authorizedUidExists: permission.authorizedUidExists,
+    staffSessionExists: permission.staffSessionExists,
     lockBefore: syncLockManager.describe(),
     lockAction: 'none',
     queueLengthBefore: readRawSaleQueue().length,
