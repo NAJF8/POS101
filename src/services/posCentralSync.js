@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrec
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { isSaleSyncEligible, markSaleSynced, readSaleQueue, retainQueuedSale } from './salesSyncQueue.js'
+import { isSaleSyncEligible, markSaleSynced, readSaleQueue, reconcileSalesAgainstCentral, retainQueuedSale } from './salesSyncQueue.js'
 import { getReportSalesForOperationalDay, isReportableSale } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
@@ -483,6 +483,9 @@ export const readCentralSalesForOperationalDay = async day => {
 export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0 } = {}) => {
   await financialUser(false)
   const centralSales = centralValues(await get(salesRef()))
+  // Readback is also the restart repair path. Persist only sync metadata after
+  // exact payload verification; never resend or rewrite the central sale.
+  reconcileSalesAgainstCentral(centralSales)
   return reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay, openOrderCount })
 }
 
@@ -571,6 +574,9 @@ export const mergeCentralSalesLocally = centralSales => {
     writeSales(merged)
     dispatchUpdated()
   }
+  // Run after the merge so a legacy central status (including null) cannot
+  // overwrite the durable local verification metadata on restart.
+  reconcileSalesAgainstCentral(centralSales)
   return merged
 }
 

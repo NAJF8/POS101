@@ -124,7 +124,7 @@ export default function App() {
   const [operationalDay, setOperationalDay] = useState(() => readCachedOperationalDay())
   const [operationalDayLoading, setOperationalDayLoading] = useState(false)
   const [operationalDayError, setOperationalDayError] = useState('')
-  const [preCloseGuard, setPreCloseGuard] = useState({ loading: false, allowed: true, message: '' })
+  const [preCloseGuard, setPreCloseGuard] = useState({ loading: false, state: 'unknown', allowed: true, message: '' })
   const [freshSettlementPreview, setFreshSettlementPreview] = useState(null)
   const [ledgerVersion, setLedgerVersion] = useState(0)
   const operationalDayListener = useRef(null)
@@ -427,17 +427,17 @@ export default function App() {
 
   useEffect(() => {
     if (!operationalDay?.id || operationalDay.status !== 'open') {
-      setPreCloseGuard({ loading: false, allowed: true, message: '' })
+      setPreCloseGuard({ loading: false, state: 'unknown', allowed: true, message: '' })
       return undefined
     }
     let active = true
-    setPreCloseGuard({ loading: true, allowed: false, message: '' })
+    setPreCloseGuard({ loading: true, state: 'loading', allowed: false, message: '' })
     void readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount }).then(result => {
       if (!active) return
-      setPreCloseGuard({ ...result, loading: false, allowed: Boolean(result?.allowed), message: result?.allowed ? '' : (result?.message || 'تعذر التحقق من حالة الإغلاق.') })
+      setPreCloseGuard({ ...result, loading: false, state: result?.allowed ? 'verified' : 'real-pending', allowed: Boolean(result?.allowed), message: result?.allowed ? '' : (result?.message || 'تعذر التحقق من حالة الإغلاق.') })
     }).catch(error => {
       if (!active) return
-      setPreCloseGuard({ loading: false, allowed: false, message: error?.message || 'تعذر التحقق من مزامنة المبيعات.' })
+      setPreCloseGuard({ loading: false, state: 'real-pending', allowed: false, message: error?.message || 'تعذر التحقق من مزامنة المبيعات.' })
     })
     return () => { active = false }
   }, [operationalDay?.id, operationalDay?.status, ledgerVersion, centralAuthUser?.uid, openOrdersCount])

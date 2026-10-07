@@ -145,7 +145,7 @@ export const readPendingSaleCount = () => {
   return readJson(SALES_KEY, []).reduce((count, sale) => {
     const saleId = saleIdOf(sale)
     const operationKey = operationKeyOf(sale)
-    if (!isSaleSyncEligible(sale) || seenIds.has(saleId) || (operationKey && seenOperationKeys.has(operationKey)) || sale.status === 'synced' || sale.syncConfirmedAt) return count
+    if (!isSaleSyncEligible(sale) || seenIds.has(saleId) || (operationKey && seenOperationKeys.has(operationKey)) || sale.status === 'synced' || sale.syncStatus === 'synced' || sale.centralVerified === true || sale.syncConfirmedAt) return count
     seenIds.add(saleId)
     if (operationKey) seenOperationKeys.add(operationKey)
     return count + 1
@@ -161,25 +161,18 @@ const centralIdentity = sale => ({
 // sale content; it marks a local row synced only after the same central
 // saleId/operationKey was independently read from Firebase.
 export const reconcileSalesAgainstCentral = centralSales => {
-  const central = new Map()
-  for (const sale of centralSales || []) {
-    const identity = centralIdentity(sale)
-    if (identity.saleId) central.set(`id:${identity.saleId}`, sale)
-    if (identity.operationKey) central.set(`op:${identity.operationKey}`, sale)
-  }
   const sales = readJson(SALES_KEY, [])
   const queue = readJson(QUEUE_KEY, [])
   const reconciledIds = new Set()
   for (const sale of sales) {
-    if (!isSaleSyncEligible(sale)) continue
-    const identity = centralIdentity(sale)
-    if ((identity.saleId && central.has(`id:${identity.saleId}`)) || (identity.operationKey && central.has(`op:${identity.operationKey}`))) {
-      reconciledIds.add(identity.saleId)
-    }
+    if (!isSaleSyncEligible(sale) || sale.syncStatus === 'synced' || sale.centralVerified === true || sale.syncConfirmedAt) continue
+    // Identity alone is not sufficient: a collision must remain blocked. A
+    // local sale is verified only after the complete financial payload matches.
+    if ((centralSales || []).some(remote => salePayloadMatches(sale, remote))) reconciledIds.add(saleIdOf(sale))
   }
   if (!reconciledIds.size) return { reconciled: 0, remaining: readPendingSaleCount() }
   writeJson(SALES_KEY, sales.map(sale => reconciledIds.has(saleIdOf(sale))
-    ? { ...sale, status: 'synced', syncConfirmedAt: Date.now(), syncSource: 'firebase-readback' }
+    ? { ...sale, syncStatus: 'synced', centralVerified: true, centralVerifiedAt: Date.now(), syncConfirmedAt: Date.now(), syncSource: 'firebase-readback' }
     : sale))
   writeJson(QUEUE_KEY, queue.filter(entry => !isSaleEntry(entry) || !reconciledIds.has(saleIdOf(entry.sale))))
   return { reconciled: reconciledIds.size, remaining: readPendingSaleCount() }
@@ -266,7 +259,7 @@ export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
   const saleId = saleIdOf(sale)
   const sales = readJson(SALES_KEY, [])
   writeJson(SALES_KEY, sales.map(row => sameSale(row, saleId)
-    ? { ...row, status: 'synced', syncStatus: 'synced', syncConfirmedAt }
+    ? { ...row, status: 'synced', syncStatus: 'synced', centralVerified: true, centralVerifiedAt: syncConfirmedAt, syncConfirmedAt }
     : row))
   writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => !entry?.sale || !sameSaleIdentity(entry.sale, sale)))
 }

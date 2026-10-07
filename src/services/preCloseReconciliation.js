@@ -20,16 +20,23 @@ export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], cen
   const centrallyVerified = sale => centralRows.some(remote => salePayloadMatches(sale, remote))
   const missingLocal = localCandidates.filter(sale => !centrallyVerified(sale))
   const missingQueue = queueCandidates.filter(sale => !centrallyVerified(sale))
+  const pendingKeys = new Set()
+  const pendingSales = [...missingLocal, ...missingQueue].filter(sale => {
+    const key = identityKeys(sale).join('|')
+    if (pendingKeys.has(key)) return false
+    pendingKeys.add(key)
+    return true
+  })
   return {
     localCompletedCount: localCandidates.length,
     queuePendingCompletedCount: queueCandidates.length,
     centralCompletedCount: centralKeys.size,
     missingLocal,
     missingQueue,
-    pendingQueue: missingQueue.length,
+    pendingQueue: pendingSales.length,
     openOrderCount: Number(openOrderCount) || 0,
-    validCurrentDayPendingSyncCount: missingQueue.length,
-    message: pendingMessage({ openOrderCount: Number(openOrderCount) || 0, pendingQueue: missingQueue.length }),
-    allowed: (Number(openOrderCount) || 0) === 0 && missingQueue.length === 0,
+    validCurrentDayPendingSyncCount: pendingSales.length,
+    message: pendingMessage({ openOrderCount: Number(openOrderCount) || 0, pendingQueue: pendingSales.length }),
+    allowed: (Number(openOrderCount) || 0) === 0 && pendingSales.length === 0,
   }
 }
