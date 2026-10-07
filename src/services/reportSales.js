@@ -153,7 +153,12 @@ export const getReportSalesForPeriod = ({ localSales = [], centralSales = [], op
     const closedDays = days.filter(day => day.businessDate === date && day.status === 'closed')
     if (closedDays.length) result.push(...centralClosedSalesForDate(centralSales, date, days))
     else if (openId && currentOperationalDay?.businessDate === date) {
-      result.push(...(Array.isArray(localSales) ? localSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date))
+      const localRows = (Array.isArray(localSales) ? localSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date)
+      const centralRows = (Array.isArray(centralSales) ? centralSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date)
+      const merged = new Map()
+      for (const sale of localRows) merged.set(String(sale?.saleId || sale?.id || sale?.operationKey || sale?.orderNumber || ''), sale)
+      for (const sale of centralRows) merged.set(String(sale?.saleId || sale?.id || sale?.operationKey || sale?.orderNumber || ''), sale)
+      result.push(...merged.values())
     } else {
       result.push(...(Array.isArray(centralSales) ? centralSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date))
     }

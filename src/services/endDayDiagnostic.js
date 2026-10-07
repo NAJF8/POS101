@@ -1,5 +1,6 @@
 import { financialFingerprint, isSaleSyncEligible, salePayloadMatches } from './salesSyncQueue.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
+import { reconcileCanonicalSales } from './canonicalSales.js'
 
 const text = value => String(value ?? '').trim()
 const number = value => Number.isFinite(Number(value)) ? Number(value) : 0
@@ -51,6 +52,7 @@ export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], cent
   const queue = (Array.isArray(queueEntries) ? queueEntries : []).filter(entry => entry?.sale && belongsToCurrentDay(entry.sale, operationalDay) && isSaleSyncEligible(entry.sale))
   const central = Array.isArray(centralSales) ? centralSales : []
   const reconciliation = reconcilePreCloseSales({ localSales: local, queueEntries: queue, centralSales: central, operationalDay, openOrderCount })
+  const financialReconciliation = reconcileCanonicalSales({ localSales, centralSales, operationalDay })
   const centrallyVerified = sale => central.some(remote => salePayloadMatches(sale, remote))
   const candidates = [...local, ...queue.map(entry => entry.sale)].filter(sale => !centrallyVerified(sale))
   const seen = new Set()
@@ -95,6 +97,7 @@ export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], cent
     openOrderFlag: (Number(openOrderCount) || 0) > 0,
     reconciliationState: preCloseGuard?.loading ? 'loading' : 'completed',
     blockers,
+    financialReconciliation,
   }
 }
 

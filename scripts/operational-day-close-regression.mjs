@@ -16,7 +16,7 @@ assert.match(sync, /DAY_CLOSE_INCONSISTENT/)
 assert.doesNotMatch(sync, /if \(existing\.exists\(\)\) return \{ settlement: existing\.val\(\), day: \{ \.\.\.day, status: 'closed' \}/)
 assert.match(app, /const reopened = await readOpenOperationalDay\(\)/)
 assert.match(app, /setOperationalDay\(reopened\)/)
-assert.match(ui, /disabled=\{busy \|\| actualCash === ''\}/)
+assert.match(ui, /disabled=\{busy \|\| actualCash === '' \|\| preCloseGuard\?\.loading \|\| preCloseGuard\?\.allowed === false\}/)
 assert.match(rules.pos101_cashbox_settlements['.read'], /auth\.token\.pos101_kiosk === true/)
 assert.match(rules.pos101_cashbox_settlements['.write'], /child\('active'\)\.val\(\) === true/)
 
