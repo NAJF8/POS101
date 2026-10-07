@@ -7,7 +7,7 @@ const format = formatMoney
 const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.now()}-${Math.random().toString(36).slice(2)}`
 const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'راتب', 'سحوبات', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
-const centralExpensesLabel = 'مزامنة واسترجاع كل المصاريف'
+const centralExpensesLabel = 'بيانات المصاريف المركزية'
 
 export function Expenses({ onNavigate, onBack, session, operationalDay = null, staff = [] }) {
   const effectiveOperationalDay = operationalDay?.status === 'open' ? operationalDay : readLocalOperationalDay()
