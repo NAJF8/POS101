@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
+import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/recoverySnapshot.js'
 
 const money = value => formatMoney(Number(value || 0))
 
@@ -21,6 +22,9 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const [diagnosticBusy, setDiagnosticBusy] = useState(false)
   const [diagnosticReport, setDiagnosticReport] = useState(null)
   const [diagnosticCopied, setDiagnosticCopied] = useState(false)
+  const [diagnosticAuthorized, setDiagnosticAuthorized] = useState(false)
+  const [recoveryExportBusy, setRecoveryExportBusy] = useState(false)
+  const [recoveryExported, setRecoveryExported] = useState('')
   React.useEffect(() => {
     const dirty = Boolean(startOpen || endOpen || openingCash || openingNote || actualCash)
     window.dispatchEvent(new CustomEvent('pos101-form-dirty', { detail: { dirty } }))
@@ -68,12 +72,15 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
     setDiagnosticCode('')
     setDiagnosticError('')
     setDiagnosticCopied(false)
+    setDiagnosticAuthorized(false)
+    setRecoveryExported('')
   }
   const runDiagnostic = async () => {
     if (!verifySystemAdminCode(diagnosticCode)) {
       setDiagnosticError('رمز التشخيص غير صحيح.')
       return
     }
+    setDiagnosticAuthorized(true)
     setDiagnosticBusy(true)
     setDiagnosticError('')
     setDiagnosticCopied(false)
@@ -82,6 +89,17 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
     } catch (diagnosticFailure) {
       setDiagnosticError(diagnosticFailure?.message || 'تعذر قراءة تشخيص المزامنة.')
     } finally { setDiagnosticBusy(false) }
+  }
+  const exportRecoverySnapshot = async () => {
+    if (recoveryExportBusy || !diagnosticAuthorized) return
+    setRecoveryExportBusy(true)
+    setDiagnosticError('')
+    try {
+      const snapshot = await createRecoverySnapshot()
+      setRecoveryExported(downloadRecoverySnapshot(snapshot))
+    } catch (exportFailure) {
+      setDiagnosticError(exportFailure?.message || 'تعذر تصدير نسخة الاستعادة.')
+    } finally { setRecoveryExportBusy(false) }
   }
   const diagnosticText = report => {
     if (!report) return ''
@@ -142,7 +160,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         <p>هذا التقرير للقراءة فقط ولا يغيّر المبيعات أو الطابور.</p>
         <label>رمز النظام<input autoFocus type="password" inputMode="numeric" value={diagnosticCode} onChange={event => setDiagnosticCode(event.target.value)} /></label>
         {diagnosticError && <p className="form-error" role="alert">{diagnosticError}</p>}
-        <div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setDiagnosticOpen(false)}>إلغاء</button><button className="primary-action" type="button" disabled={diagnosticBusy} onClick={runDiagnostic}>{diagnosticBusy ? 'جارٍ القراءة…' : 'فتح التشخيص'}</button></div>
+        <div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setDiagnosticOpen(false)}>إلغاء</button>{diagnosticAuthorized && <button className="secondary-action" type="button" disabled={recoveryExportBusy} onClick={exportRecoverySnapshot}>{recoveryExportBusy ? 'جارٍ التصدير…' : 'تصدير نسخة الاستعادة'}</button>}<button className="primary-action" type="button" disabled={diagnosticBusy} onClick={runDiagnostic}>{diagnosticBusy ? 'جارٍ القراءة…' : 'فتح التشخيص'}</button></div>
       </>}
       {diagnosticReport && <>
         <div className="diagnostic-runtime" aria-label="قيم حارس إنهاء اليوم">
@@ -160,7 +178,8 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         </article>)}
         {diagnosticReport.blockers?.length === 0 && <p role="status">لا توجد مبيعات حالية محسوبة كمانع.</p>}
         {diagnosticError && <p className="form-error" role="alert">{diagnosticError}</p>}
-        <div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setDiagnosticOpen(false)}>إغلاق</button><button className="primary-action" type="button" onClick={copyDiagnostic}>{diagnosticCopied ? 'تم النسخ' : 'نسخ تقرير التشخيص'}</button></div>
+        <div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setDiagnosticOpen(false)}>إغلاق</button><button className="secondary-action" type="button" disabled={recoveryExportBusy} onClick={exportRecoverySnapshot}>{recoveryExportBusy ? 'جارٍ التصدير…' : 'تصدير نسخة الاستعادة'}</button><button className="primary-action" type="button" onClick={copyDiagnostic}>{diagnosticCopied ? 'تم النسخ' : 'نسخ تقرير التشخيص'}</button></div>
+        {recoveryExported && <p role="status">تم تصدير: {recoveryExported}</p>}
       </>}
     </div></div>}
 
