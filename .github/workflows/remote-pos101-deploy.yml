@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           bundle="$(grep -o 'assets/index-[^\"]*\.js' dist/index.html | head -n 1)"
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 24); do
             live_html="$(curl -fsSL "https://najf8.github.io/POS101/index.html?sha=$GITHUB_SHA" || true)"
             live_meta="$(curl -fsSL "https://najf8.github.io/POS101/deploy-meta.json?sha=$GITHUB_SHA" || true)"
             if printf '%s' "$live_html" | grep -Fq "$bundle" && printf '%s' "$live_meta" | grep -Fq "\"mainSha\":\"$GITHUB_SHA\""; then
@@ -100,7 +100,7 @@ jobs:
               echo "EXACT_MAIN_DEPLOY=PASS"
               exit 0
             fi
-            sleep 10
+            sleep 15
           done
           echo "EXACT_MAIN_DEPLOY=FAIL"
           exit 1
