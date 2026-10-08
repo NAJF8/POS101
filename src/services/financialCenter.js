@@ -80,7 +80,9 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
   return days.map(day => {
     const settlement = settlements.find(row => String(row.operationalDayId || '') === String(day.id)) || null
     const effective = settlement ? getEffectiveSettlement(settlement, settlementCorrections.filter(row => String(row.settlementId || '') === String(settlement.id))) : null
-    const opening = settlement && Number.isFinite(Number(settlement.openingCashBalance)) ? Number(settlement.openingCashBalance) : null
+    const opening = settlement && Number.isFinite(Number(settlement.openingCashBalance))
+      ? Number(settlement.openingCashBalance)
+      : Number.isFinite(Number(day.openingCashBalance)) ? Number(day.openingCashBalance) : null
     const summary = calculateCashboxDay({ openingCashBalance: opening, actualCash: effective?.effectiveActualCash, sales: rowsForDay(sales, day), expenses: rowsForDay(expenses, day), transactions: rowsForDay(transactions, day) })
     return { day, settlement, effective, ...summary, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
   })
