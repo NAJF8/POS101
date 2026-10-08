@@ -3,8 +3,8 @@
 // only; it never contains sale payloads and is never used to delete queue data.
 export const SYNC_LOCK_KEY = 'pos101.syncLock'
 export const SYNC_LOCK_VERSION = 1
-export const SYNC_LOCK_STALE_MS = 60 * 1000
-export const SYNC_LOCK_HEARTBEAT_STALE_MS = 30 * 1000
+export const SYNC_LOCK_STALE_MS = 30 * 1000
+export const SYNC_LOCK_HEARTBEAT_STALE_MS = 15 * 1000
 export const REPAIR_LOCK_KEY = 'pos101.repairLock'
 export const EMERGENCY_REPAIR_KEY = 'pos101.emergencyRepairActive'
 
@@ -81,6 +81,7 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
       startedAt: timestamp,
       expiresAt: timestamp + SYNC_LOCK_STALE_MS,
       heartbeatAt: timestamp,
+      processingStarted: false,
       trigger,
       processingSaleIds: [...processingSaleIds],
       version: SYNC_LOCK_VERSION,
@@ -91,11 +92,11 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
     return { acquired: true, action: before ? 'released_stale' : 'acquired', before, lock: confirmed }
   }
 
-  const heartbeat = ({ processingSaleIds = [], trigger } = {}) => {
+  const heartbeat = ({ processingSaleIds = [], trigger, processingStarted = true } = {}) => {
     const current = read(storage)
     if (!current || current.ownerId !== ownerId) return false
     const heartbeatAt = now()
-    write(storage, { ...current, heartbeatAt, expiresAt: heartbeatAt + SYNC_LOCK_STALE_MS, trigger: trigger || current.trigger, processingSaleIds: [...processingSaleIds] })
+    write(storage, { ...current, heartbeatAt, expiresAt: heartbeatAt + SYNC_LOCK_STALE_MS, trigger: trigger || current.trigger, processingStarted: processingStarted || current.processingStarted === true, processingSaleIds: [...processingSaleIds] })
     return true
   }
 

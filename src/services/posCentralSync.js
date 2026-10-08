@@ -1066,6 +1066,29 @@ const logQueueDecision = (sale, reason = '', detail = '', fields = {}) => {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
 }
 
+const logQueueItemDiagnostic = ({ index, sale, entry, firebaseExists, action, detail = '' } = {}) => {
+  const items = Array.isArray(sale?.items) ? sale.items : Array.isArray(sale?.order?.items) ? sale.order.items : []
+  const payload = {
+    event: 'QUEUE_ITEM_DIAGNOSTIC',
+    QUEUE_ITEM_INDEX: index,
+    saleId: saleIdOf(sale),
+    orderNumber: sale?.orderNumber ?? entry?.orderNumber ?? null,
+    total: Number(sale?.total ?? sale?.subtotal ?? entry?.total ?? 0),
+    businessDate: sale?.businessDate || entry?.businessDate || '',
+    operationalDayId: sale?.operationalDayId || sale?.operational_day_id || entry?.operationalDayId || '',
+    items: items.map(item => `${item?.name || item?.id || 'item'}×${item?.quantity ?? 0}`).join(', '),
+    attempts: Number(entry?.attemptCount ?? entry?.attempts ?? 0),
+    lastAttemptAt: entry?.lastAttemptAt || null,
+    lastError: entry?.lastError || sale?.syncError || '',
+    firebaseExists: Boolean(firebaseExists),
+    action,
+    detail,
+  }
+  console.info('[POS101_QUEUE_ITEM]', JSON.stringify(payload))
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
+  return payload
+}
+
 const normalizeQueuedSaleForCurrentDay = sale => {
   const currentDay = readCachedOperationalDay()
   const saleId = String(saleIdOf(sale) || '').trim()
@@ -1157,7 +1180,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   let uploaded = 0
   let updated = 0
   await retryAccSaleQueue()
-  for (const sale of uploadable) {
+  for (const [index, sale] of uploadable.entries()) {
     syncLockManager.heartbeat({ trigger: queueOnly ? 'manual' : 'worker', processingSaleIds: [saleIdOf(sale)] })
     const queueEntry = readSaleQueue().find(entry => {
       const queued = entry.sale
@@ -1165,6 +1188,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
         || String(queued?.operationKey || queued?.operation_key || '') === String(sale?.operationKey || sale?.operation_key || '')
     })
     const classification = classifyCentralSale(sale, beforeCentral)
+    logQueueItemDiagnostic({ index, sale, entry: queueEntry, firebaseExists: Boolean(classification.central), action: classification.action, detail: classification.reason })
     const manualSale = manualReport ? {
       orderNumber: sale?.orderNumber ?? null,
       saleId: saleIdOf(sale),
@@ -1180,6 +1204,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     const orderNumberCollision = findActiveOrderNumberCollision(sale, beforeCentral)
     if (orderNumberCollision) {
       const error = Object.assign(new Error(`رقم الطلب مستخدم في مبيعة مركزية أخرى: ${sale.orderNumber}`), { code: 'ORDER_NUMBER_COLLISION_MANUAL_REVIEW' })
+      logQueueItemDiagnostic({ index, sale, entry: queueEntry, firebaseExists: true, action: 'quarantine', detail: error.code })
       quarantineSale(sale, error.code, { sale, centralMatch: orderNumberCollision })
       if (queueEntry) retainQueuedSale(queueEntry, error)
       if (manualSale) manualSale.error = error.code
@@ -1311,7 +1336,11 @@ export const processSaleSyncQueue = ({ reason = 'worker', initial = false } = {}
 // click time and processes existing queue entries, including entries created
 // by older bundles. It never closes the day or deletes an unverified queue row.
 export const manualCurrentTabQueueRecovery = async () => {
+  // A manual click in the same tab must join the active worker promise. It
+  // must never acquire a second lock and then report its own worker as locked.
+  if (activeSaleSyncPromise) return activeSaleSyncPromise
   const permission = await canSyncPosSales(auth?.currentUser)
+  if (activeSaleSyncPromise) return activeSaleSyncPromise
   const report = {
     bundle: typeof document !== 'undefined' ? document.querySelector('script[src*="assets/index-"]')?.src?.split('/').pop() || '' : '',
     mainSha: BUILD_SHA,

@@ -606,7 +606,10 @@ export default function App() {
     setSyncBusy(false)
     const user = centralAuth()?.currentUser
     const providerId = user?.providerData?.[0]?.providerId || 'google.com'
-    setSyncLabel('تمت المزامنة')
+    const pending = readPendingSaleDiagnostics().length
+    const uploaded = Number(result?.uploaded || 0) + Number(result?.updated || 0)
+    const failed = Math.max(0, Number(result?.skipped || 0))
+    setSyncLabel(`تم رفع ${uploaded} طلب · فشل ${failed} طلب · المتبقي ${pending}`)
     setSyncAuthStatus({ ok: true, uid: user?.uid, email: user?.email, providerId, uploaded: result.uploaded, centralCount: result.centralCount, expenseUploaded: result.expenseUploaded, expenseCentralCount: result.expenseCentralCount })
   }, [])
 
