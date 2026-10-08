@@ -5,6 +5,9 @@ const saleIdOf = sale => text(sale?.saleId || sale?.id)
 const operationKeyOf = sale => text(sale?.operationKey || sale?.operation_key)
 const rowsOf = value => Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : []
 
+export const ORDER_1309_SALE_ID = '809aa958-256d-44a8-83bd-33c8b82dca56'
+export const ORDER_1309_NUMBER = 1309
+
 const parseMaybeJson = value => {
   if (typeof value !== 'string') return value
   try { return JSON.parse(value) } catch { return null }

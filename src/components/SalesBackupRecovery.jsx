@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { formatMoney, formatNumber } from '../utils.js'
-import { classifyBackupSale, parseBackupSales, summarizeBackupSales } from '../services/backupSalesRecovery.js'
+import { classifyBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID, parseBackupSales, summarizeBackupSales } from '../services/backupSalesRecovery.js'
 
 const DEFAULT_DATE = '2026-10-08'
 const statusLabel = {
@@ -10,7 +10,7 @@ const statusLabel = {
   SKIP: 'تخطي',
 }
 
-export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal, onRecover, canRecover = false }) {
+export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal, onRecover, canRecover = false, canReadback = false }) {
   const [fileName, setFileName] = useState('')
   const [sales, setSales] = useState([])
   const [selectedDate, setSelectedDate] = useState(DEFAULT_DATE)
@@ -24,7 +24,7 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
   const dates = useMemo(() => summary.days.map(day => day.businessDate), [summary.days])
   const visibleRows = useMemo(() => sales.filter(sale => !selectedDate || sale.businessDate === selectedDate), [sales, selectedDate])
   const resultById = useMemo(() => new Map((inspection?.results || []).map(result => [result.sale.saleId, result])), [inspection])
-  const reportSale = useMemo(() => sales.find(sale => Number(sale.orderNumber) === 1309) || sales.find(sale => sale.syncStatus === 'pending' || sale.centralVerified !== true), [sales])
+  const reportSale = useMemo(() => sales.find(sale => Number(sale.orderNumber) === ORDER_1309_NUMBER) || sales.find(sale => sale.syncStatus === 'pending' || sale.centralVerified !== true), [sales])
 
   const chooseFile = event => {
     const file = event.target.files?.[0]
@@ -82,7 +82,7 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
     setBusy(true); setError(''); setNotice('')
     try {
       const outcome = await onMarkLocal({ sale: result.sale, centralSale: result.centralSale })
-      setNotice(outcome.updated ? 'تم تحديث readback المحلي فقط.' : 'المبيعة غير موجودة في localStorage الحالي؛ لم يحدث تغيير.')
+      setNotice(outcome.updated ? 'تم تحديث readback المحلي فقط.' : 'المبيعة موجودة في Firebase لكنها غير موجودة محليًا؛ لا حاجة للاسترداد، وسيتم اعتماد Firebase في التقارير.')
     } catch (markError) { setError(markError?.message || 'تعذر تحديث الحالة المحلية.') }
     finally { setBusy(false) }
   }
@@ -109,7 +109,8 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
       <div className="financial-table-wrap backup-table-wrap"><table className="financial-table"><thead><tr><th>الطلب</th><th>saleId</th><th>الكاشير</th><th>المبلغ</th><th>الدفع</th><th>الحالة</th><th>centralVerified</th><th>النتيجة</th><th>إجراء</th></tr></thead><tbody>{visibleRows.map(sale => {
         const result = resultById.get(sale.saleId)
         const classification = result?.classification || '—'
-        return <tr key={`${sale.saleId}|${sale.orderNumber}`}><td>{sale.orderNumber || '—'}</td><td dir="ltr"><small>{sale.saleId || '—'}</small></td><td>{sale.cashierNameSnapshot || sale.cashierName || sale.seller || '—'}</td><td>{formatMoney(sale.total)}</td><td>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</td><td>{sale.syncStatus || sale.status || '—'}</td><td>{String(sale.centralVerified === true)}</td><td><span className={`backup-status backup-status-${classification.toLowerCase()}`}>{statusLabel[classification] || (inspection ? 'غير مفحوصة' : 'بانتظار الفحص')}</span></td><td>{canRecover && result?.classification === 'EXISTS_EXACT_MATCH' ? <button type="button" className="secondary-action" disabled={busy} onClick={() => markLocal(result)}>تحديث محلي فقط</button> : canRecover && result?.classification === 'MISSING_SAFE_TO_RECOVER' ? <button type="button" className="primary-action" disabled={busy} onClick={() => { setRecovery(result); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }}>استرداد هذه المبيعة</button> : 'موقوف حتى موافقة المالك'}</td></tr>
+        const isTargetReadback = Number(sale.orderNumber) === ORDER_1309_NUMBER && sale.saleId === ORDER_1309_SALE_ID
+        return <tr key={`${sale.saleId}|${sale.orderNumber}`}><td>{sale.orderNumber || '—'}</td><td dir="ltr"><small>{sale.saleId || '—'}</small></td><td>{sale.cashierNameSnapshot || sale.cashierName || sale.seller || '—'}</td><td>{formatMoney(sale.total)}</td><td>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</td><td>{sale.syncStatus || sale.status || '—'}</td><td>{String(sale.centralVerified === true)}</td><td><span className={`backup-status backup-status-${classification.toLowerCase()}`}>{statusLabel[classification] || (inspection ? 'غير مفحوصة' : 'بانتظار الفحص')}</span></td><td>{canReadback && isTargetReadback && result?.classification === 'EXISTS_EXACT_MATCH' ? <button type="button" className="secondary-action" disabled={busy} onClick={() => markLocal(result)}>تحديث محلي فقط</button> : canRecover && result?.classification === 'MISSING_SAFE_TO_RECOVER' ? <button type="button" className="primary-action" disabled={busy} onClick={() => { setRecovery(result); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }}>استرداد هذه المبيعة</button> : 'موقوف حتى موافقة المالك'}</td></tr>
       })}</tbody></table></div>
     </>}
     {sales.length === 0 && <p className="settings-readonly">اختر نسخة مبيعات JSON لعرض ملخصها وفحصها.</p>}

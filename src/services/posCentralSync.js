@@ -38,7 +38,7 @@ import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, ret
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
 import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
-import { classifyBackupSale, normalizeBackupSale } from './backupSalesRecovery.js'
+import { classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -1404,9 +1404,9 @@ export const inspectBackupSales = async ({ sales = [] } = {}) => {
 }
 
 export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) => {
-  await requireAdminViewer()
-  if (!BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED) throw Object.assign(new Error('تحديث readback المحلي متوقف لحين موافقة صاحب النظام.'), { code: 'OWNER_APPROVAL_REQUIRED' })
   const expected = normalizeBackupSale(sale)
+  await requireAuthenticatedBackupViewer()
+  if (Number(expected.orderNumber) !== ORDER_1309_NUMBER || expected.saleId !== ORDER_1309_SALE_ID) throw Object.assign(new Error('التحديث المحلي متاح حاليًا للطلب 1309 المطابق فقط.'), { code: 'READBACK_TARGET_REQUIRED' })
   if (!salePayloadMatches(expected, centralSale)) throw Object.assign(new Error('لا يمكن تحديث الحالة المحلية قبل تطابق readback الكامل.'), { code: 'BACKUP_READBACK_MISMATCH' })
   const localSales = readLocalSalesForBackupTool()
   const index = localSales.findIndex(row => saleIdOf(row) === saleIdOf(expected))
@@ -1426,6 +1426,7 @@ export const recoverBackupSale = async ({ sale, recoverySourceFile = '', recover
   const reason = String(recoveryReason || '').trim()
   if (!actor || !reason) throw Object.assign(new Error('اسم المسؤول وسبب الاسترداد مطلوبان.'), { code: 'RECOVERY_REASON_REQUIRED' })
   const candidate = normalizeBackupSale(sale)
+  if (Number(candidate.orderNumber) === ORDER_1309_NUMBER && candidate.saleId === ORDER_1309_SALE_ID) throw Object.assign(new Error('الطلب 1309 مطابق مركزيًا؛ التحديث المحلي فقط مسموح.'), { code: 'ORDER_1309_READBACK_ONLY' })
   const centralSnapshot = await get(salesRef())
   const daySnapshot = await get(ref(db, `pos101_operational_days/${candidate.operationalDayId}`))
   const centralSales = centralValues(centralSnapshot)
