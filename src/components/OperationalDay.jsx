@@ -3,13 +3,13 @@ import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/recoverySnapshot.js'
-import { calculateEndDayCashAnalysis } from '../services/financialCenter.js'
+import { calculateEndDayCashAnalysis, toMoneyNumber } from '../services/financialCenter.js'
 
-const money = value => formatMoney(Number(value || 0))
-const displayMoney = value => value === null || value === undefined ? '—' : money(value)
-const differenceLabel = value => value === null || value === undefined ? '' : value === 0 ? 'مطابق' : value < 0 ? 'نقص' : 'زيادة'
+const money = value => formatMoney(toMoneyNumber(value, 0))
+const displayMoney = value => value === null || value === undefined || value === '' ? '—' : money(value)
+const differenceLabel = value => value === null || value === undefined || value === '' ? '' : toMoneyNumber(value, 0) === 0 ? 'مطابق' : toMoneyNumber(value, 0) < 0 ? 'نقص' : 'زيادة'
 
-export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
+export default function OperationalDay({ day = {}, summary = {}, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
@@ -41,15 +41,16 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const forgotten = open && day.startedAt && new Date(day.startedAt).toDateString() !== new Date().toDateString()
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])
   const startedTime = useMemo(() => day?.startedAt ? formatTime(day.startedAt, { hour: '2-digit', minute: '2-digit', hour12: true }) : '—', [day?.startedAt])
-  const expectedCashOpening = settlementPreview?.openingCashBalanceOrZero ?? (settlementPreview?.openingCashBalance == null ? 0 : settlementPreview.openingCashBalance)
+  const safeSettlementPreview = settlementPreview ?? {}
+  const expectedCashOpening = toMoneyNumber(safeSettlementPreview.openingCashBalance ?? safeSettlementPreview.openingBalance ?? safeSettlementPreview.openingCashBalanceOrZero, 0)
   const endDayAnalysis = useMemo(() => calculateEndDayCashAnalysis({
-    openingCashBalance: settlementPreview?.openingCashBalance,
-    cashSales: settlementPreview?.cashSales,
-    expenses: settlementPreview?.expenses,
-    withdrawals: settlementPreview?.withdrawals,
-    expectedCash: settlementPreview?.expectedClosingCash,
+    openingCashBalance: safeSettlementPreview.openingCashBalance ?? safeSettlementPreview.openingBalance ?? day?.openingCashBalance,
+    cashSales: safeSettlementPreview.cashSales,
+    expenses: safeSettlementPreview.expenses,
+    withdrawals: safeSettlementPreview.withdrawals,
+    expectedCash: safeSettlementPreview.expectedClosingCash ?? safeSettlementPreview.expectedCash,
     actualCash,
-  }), [settlementPreview, actualCash])
+  }), [safeSettlementPreview, day?.openingCashBalance, actualCash])
 
   const start = async () => {
     if (busy || startBusy) return
@@ -246,13 +247,13 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
           {preCloseGuard?.allowed === false && <p className="form-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
           <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>
           <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
-          <span>الرصيد الافتتاحي <b>{displayMoney(settlementPreview.openingCashBalance)}</b></span>
-          <span>مبيعات الكاش <b>{money(settlementPreview.cashSales)}</b></span>
-          <span>مبيعات إلكترونية <b>{money(settlementPreview.electronicSales)}</b></span>
-          <span>المصاريف <b>{money(settlementPreview.expenses)}</b></span>
-          <span>السحوبات <b>{money(settlementPreview.withdrawals)}</b></span>
-          <span>الرصيد المتوقع بالصندوق <b>{money(settlementPreview.expectedClosingCash ?? (expectedCashOpening + settlementPreview.dailyCashMovement))}</b></span>
-          {settlementPreview.openingCashBalance == null && <small role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
+           <span>الرصيد الافتتاحي <b>{displayMoney(safeSettlementPreview.openingCashBalance ?? safeSettlementPreview.openingBalance ?? day?.openingCashBalance)}</b></span>
+           <span>مبيعات الكاش <b>{money(safeSettlementPreview.cashSales)}</b></span>
+           <span>مبيعات إلكترونية <b>{money(safeSettlementPreview.electronicSales)}</b></span>
+           <span>المصاريف <b>{money(safeSettlementPreview.expenses)}</b></span>
+           <span>السحوبات <b>{money(safeSettlementPreview.withdrawals)}</b></span>
+           <span>الرصيد المتوقع بالصندوق <b>{money(safeSettlementPreview.expectedClosingCash ?? (expectedCashOpening + toMoneyNumber(safeSettlementPreview.dailyCashMovement, 0)))}</b></span>
+           {(safeSettlementPreview.openingCashBalance == null && safeSettlementPreview.openingBalance == null && day?.openingCashBalance == null) && <small role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
           <label className="settlement-actual-cash">الكاش الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل الكاش الفعلي" /></label>
           {actualCash !== '' && <span>الفرق <b>{displayMoney(endDayAnalysis.difference)} {differenceLabel(endDayAnalysis.difference)}</b></span>}
           <span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي <b>{displayMoney(endDayAnalysis.netDrawerMovement)}</b></span>

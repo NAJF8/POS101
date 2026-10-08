@@ -6,7 +6,7 @@ import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.
 import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { isCashboxExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
-import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement } from '../services/financialCenter.js'
+import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, toMoneyNumber } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
@@ -180,7 +180,7 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], settlements = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], settlements = [], settlementCorrections = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
   const [reportType, setReportType] = useState(initialReportType)
   const [employeeQuery, setEmployeeQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -283,11 +283,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     if (periodFrom !== periodTo) return null
     const day = selectedClosedDay || (operationalDay?.businessDate === periodFrom ? operationalDay : null)
     if (!day) return null
-    const settlement = storedSettlement
+    const settlement = storedSettlement ?? null
     const effective = settlement ? getEffectiveSettlement(settlement, (Array.isArray(settlementCorrections) ? settlementCorrections : []).filter(row => row.settlementId === settlement.id)) : null
     return calculateCashboxDay({
-      openingCashBalance: settlement?.openingCashBalance ?? day.openingCashBalance,
-      actualCash: effective?.effectiveActualCash,
+      openingCashBalance: settlement?.openingCashBalance ?? day?.openingCashBalance ?? day?.openingBalance,
+      actualCash: effective?.effectiveActualCash ?? settlement?.actualCash,
       sales: filteredSales,
       expenses: filteredExpenses,
       transactions: filteredTransactions,

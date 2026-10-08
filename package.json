@@ -49,6 +49,7 @@
     ,"test:pending-tables": "node scripts/pending-tables-regression.mjs"
     ,"test:backup-sales-recovery": "node scripts/backup-sales-recovery-regression.mjs"
     ,"test:end-day-opening-balance-report": "node scripts/end-day-opening-balance-report-regression.mjs"
+    ,"test:report-page-crash": "node scripts/report-page-crash-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

@@ -1,5 +1,5 @@
 import { isCashboxExpense, isManagementExpense, sumExpenses } from './expenseReporting.js'
-import { calculateSettlement } from './financialCenter.js'
+import { calculateEndDayCashAnalysis, calculateSettlement, toMoneyNumber } from './financialCenter.js'
 
 const amount = value => {
   const numeric = Number(value)
@@ -24,6 +24,19 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
   const netAfterExpensesAndDiscount = grossSales - expensesTotal - discounts
   const financial = calculateSettlement({ sales, expenses, transactions })
   const netCashAfterAll = financial.expectedCash
+  const report = endDay?.summary ?? endDay ?? null
+  const rawOpening = report?.openingCashBalance ?? report?.openingBalance
+  const openingCashBalance = rawOpening === null || rawOpening === undefined || rawOpening === '' || !Number.isFinite(Number(rawOpening)) ? null : toMoneyNumber(rawOpening, 0)
+  const cashSales = toMoneyNumber(report?.cashSales ?? financial.cashSales, 0)
+  const expensesForAnalysis = toMoneyNumber(report?.expenses ?? financial.expenses, 0)
+  const withdrawalsForAnalysis = toMoneyNumber(report?.withdrawals ?? financial.withdrawals, 0)
+  const expectedClosingCash = report
+    ? toMoneyNumber(report.expectedClosingCash ?? report.expectedCash ?? (openingCashBalance ?? 0) + cashSales - expensesForAnalysis - withdrawalsForAnalysis, 0)
+    : null
+  const actualCash = report && report.actualCash !== null && report.actualCash !== undefined && report.actualCash !== '' && Number.isFinite(Number(report.actualCash))
+    ? toMoneyNumber(report.actualCash, 0)
+    : null
+  const analysis = calculateEndDayCashAnalysis({ openingCashBalance, cashSales, expenses: expensesForAnalysis, withdrawals: withdrawalsForAnalysis, expectedCash: expectedClosingCash, actualCash })
 
   return {
     grossSales,
@@ -36,20 +49,20 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
     netAfterExpenses,
     netAfterExpensesAndDiscount,
     netCashAfterAll,
-    cashSales: financial.cashSales,
+    cashSales,
     cashboxWithdrawals: financial.cashboxWithdrawals,
     managementWithdrawals: financial.managementWithdrawals,
     withdrawals: financial.withdrawals,
     deposits: financial.deposits,
     finalAfterAllSettlements: financial.finalAfterAllSettlements,
     orderCount: financial.orderCount,
-    openingCashBalance: endDay?.openingCashBalance ?? null,
-    expectedClosingCash: endDay?.expectedClosingCash ?? null,
-    actualCash: endDay?.actualCash ?? null,
-    endDayDifference: endDay?.difference ?? null,
-    netDrawerMovement: endDay?.netDrawerMovement ?? null,
-    netCashSalesFromDrawer: endDay?.netCashSalesFromDrawer ?? null,
-    cashSalesDifference: endDay?.cashSalesDifference ?? null,
-    cashSalesDifferenceStatus: endDay?.cashSalesDifferenceStatus ?? 'unknown',
+    openingCashBalance,
+    expectedClosingCash,
+    actualCash,
+    endDayDifference: analysis.difference,
+    netDrawerMovement: analysis.netDrawerMovement,
+    netCashSalesFromDrawer: analysis.netCashSalesFromDrawer,
+    cashSalesDifference: analysis.cashSalesDifference,
+    cashSalesDifferenceStatus: analysis.cashSalesDifferenceStatus,
   }
 }

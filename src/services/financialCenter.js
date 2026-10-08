@@ -1,9 +1,11 @@
 import { isCashboxExpense, isManagementExpense } from './expenseReporting.js'
 
-const amount = value => {
+export const toMoneyNumber = (value, fallback = 0) => {
+  if (value === null || value === undefined || value === '') return fallback
   const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : 0
+  return Number.isFinite(numeric) ? numeric : fallback
 }
+const amount = value => toMoneyNumber(value, 0)
 export const normalizeBusinessDate = (value, fallback = '') => {
   const text = String(value || '').trim()
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : fallback
@@ -41,9 +43,9 @@ export const cashAnalysisStatus = difference => difference === null || differenc
 export const calculateEndDayCashAnalysis = ({ openingCashBalance, cashSales = 0, expenses = 0, withdrawals = 0, expectedCash = null, actualCash = null } = {}) => {
   const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
   const actualKnown = actualCash !== null && actualCash !== undefined && actualCash !== '' && Number.isFinite(Number(actualCash))
-  const opening = openingKnown ? Number(openingCashBalance) : 0
-  const actual = actualKnown ? Number(actualCash) : null
-  const difference = actualKnown && Number.isFinite(Number(expectedCash)) ? actual - Number(expectedCash) : null
+  const opening = toMoneyNumber(openingCashBalance, 0)
+  const actual = actualKnown ? toMoneyNumber(actualCash, 0) : null
+  const difference = actualKnown && Number.isFinite(Number(expectedCash)) ? actual - toMoneyNumber(expectedCash, 0) : null
   const netDrawerMovement = actualKnown && openingKnown ? actual - opening : null
   const netCashSalesFromDrawer = netDrawerMovement === null ? null : netDrawerMovement + amount(expenses) + amount(withdrawals)
   const cashSalesDifference = netCashSalesFromDrawer === null ? null : netCashSalesFromDrawer - amount(cashSales)

@@ -1129,6 +1129,7 @@ export default function App() {
           centralSales={centralSales}
           operationalDays={centralOperationalDays}
           settlements={settlements}
+           settlementCorrections={settlementCorrections}
           cashboxTransactions={cashboxTransactions}
           staff={staff}
           salesOverride={adminReady ? adminCentralSales : null}
