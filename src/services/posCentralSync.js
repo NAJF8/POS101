@@ -1369,6 +1369,15 @@ const requireAdminViewer = async () => {
   return user
 }
 
+const requireAuthenticatedBackupViewer = async () => {
+  return ensurePosFirebaseSession('تسجيل الدخول مطلوب لفحص نسخة المبيعات.')
+}
+
+// Recovery/readback writes stay disabled until the owner explicitly enables
+// this release-gated mode. UI visibility and read-only inspection do not imply
+// permission to mutate Firebase or the cashier ledger.
+export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = false
+
 const readLocalSalesForBackupTool = () => {
   try {
     const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
@@ -1377,7 +1386,7 @@ const readLocalSalesForBackupTool = () => {
 }
 
 export const inspectBackupSales = async ({ sales = [] } = {}) => {
-  await requireAdminViewer()
+  await requireAuthenticatedBackupViewer()
   const centralSnapshot = await get(salesRef())
   const centralSales = centralValues(centralSnapshot)
   const normalized = (Array.isArray(sales) ? sales : []).map(normalizeBackupSale)
@@ -1396,6 +1405,7 @@ export const inspectBackupSales = async ({ sales = [] } = {}) => {
 
 export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) => {
   await requireAdminViewer()
+  if (!BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED) throw Object.assign(new Error('تحديث readback المحلي متوقف لحين موافقة صاحب النظام.'), { code: 'OWNER_APPROVAL_REQUIRED' })
   const expected = normalizeBackupSale(sale)
   if (!salePayloadMatches(expected, centralSale)) throw Object.assign(new Error('لا يمكن تحديث الحالة المحلية قبل تطابق readback الكامل.'), { code: 'BACKUP_READBACK_MISMATCH' })
   const localSales = readLocalSalesForBackupTool()
@@ -1410,6 +1420,7 @@ export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) 
 
 export const recoverBackupSale = async ({ sale, recoverySourceFile = '', recoveredByName = '', recoveryReason = '', recoveryCode = '' } = {}) => {
   const user = await requireAdminViewer()
+  if (!BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED) throw Object.assign(new Error('الاسترداد متوقف لحين موافقة صاحب النظام.'), { code: 'OWNER_APPROVAL_REQUIRED' })
   if (!verifySystemAdminCode(recoveryCode)) throw Object.assign(new Error('رمز الاسترداد الإداري غير صحيح.'), { code: 'RECOVERY_CODE_INVALID' })
   const actor = String(recoveredByName || user.displayName || user.email || '').trim()
   const reason = String(recoveryReason || '').trim()

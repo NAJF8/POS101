@@ -39,16 +39,25 @@ assert.match(service, /runTransaction\(saleRef/)
 assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
 assert.match(service, /audit-backup-recovery/)
 assert.match(app, /currentView === 'backup-recovery'/)
-assert.match(app, /backupRecoveryAuthorized/)
+assert.match(app, /backupRecoveryVisible = Boolean\(session \|\| adminReady \|\| staffManagerReady\)/)
+assert.match(app, /canAccessBackupRecovery=\{backupRecoveryVisible\}/)
+assert.match(app, /canRecover=\{backupRecoveryCanWrite\}/)
 assert.match(dashboard, /فحص واسترداد نسخة المبيعات/)
 assert.match(settings, /onNavigate\('backup-recovery'\)/)
 assert.doesNotMatch(app, /adminReady && !session && currentView === 'backup-recovery'/)
 assert.match(app, /غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية/)
 assert.match(app, /<SalesBackupRecovery adminUser=/)
+assert.match(component, /الفحص متاح للجميع، لكن الاسترداد متوقف لحين موافقة صاحب النظام/)
+assert.match(component, /نسخ تقرير الفحص/)
+assert.match(component, /navigator\.clipboard\.writeText/)
+assert.match(component, /canRecover && result\?\.classification === 'MISSING_SAFE_TO_RECOVER'/)
+assert.match(service, /requireAuthenticatedBackupViewer/)
+assert.match(service, /export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = false/)
+assert.match(service, /OWNER_APPROVAL_REQUIRED/)
 
 console.log(JSON.stringify({
   BACKUP_FILE_UPLOAD_UI: 'PASS', BACKUP_JSON_PARSE: 'PASS', BACKUP_SUMMARY: 'PASS', PENDING_SALES_DETECTED: 'PASS', SALE_1309_DETECTED_FROM_BACKUP: 'PASS', AUTH_FIREBASE_CHECK_WIRING: 'PASS',
-  BACKUP_RECOVERY_VISIBLE_FOR_ADMIN: 'PASS', BACKUP_RECOVERY_HIDDEN_FOR_CASHIER: 'PASS', BACKUP_RECOVERY_ROUTE_WORKS: 'PASS', NO_REQUIRE_NOT_SESSION: 'PASS', SAFETY_GUARDS_UNCHANGED: 'PASS',
+  BACKUP_RECOVERY_CARD_VISIBLE_FOR_CASHIER: 'PASS', BACKUP_RECOVERY_CARD_VISIBLE_FOR_ADMIN: 'PASS', BACKUP_RECOVERY_ROUTE_WORKS_WITH_ACTIVE_SESSION: 'PASS', CASHIER_CAN_UPLOAD_AND_PARSE_BACKUP: 'PASS', CASHIER_CAN_SEE_PENDING_SALES: 'PASS', CASHIER_CANNOT_RECOVER: 'PASS', CASHIER_CANNOT_MARK_LOCAL_READBACK: 'PASS', ADMIN_RECOVERY_STILL_PROTECTED: 'PASS', COPY_INSPECTION_REPORT: 'PASS', SAFETY_GUARDS_UNCHANGED: 'PASS',
   EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
   CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
 }, null, 2))

@@ -30,7 +30,7 @@ import KioskActivation from './components/KioskActivation.jsx'
 import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
-import { inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale } from './services/posCentralSync.js'
+import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale } from './services/posCentralSync.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -992,13 +992,14 @@ export default function App() {
   // Use the hydrated current user here: adminAuthUser was captured before the
   // async authorization record loaded, so it could permanently miss admin-viewer.
   const adminReady = isCentralAdminUser(adminAuthUser) || isCentralAdminUser(centralAuthUser)
-  const backupRecoveryAuthorized = adminReady
   const saveSaleEdit = useCallback((sale, changes) => changes?.itemCorrection ? correctCentralSaleItems(sale, changes) : updateCentralSale(sale, changes), [])
   const inspectBackup = useCallback(({ sales }) => inspectBackupSales({ sales }), [])
   const markBackupLocal = useCallback(({ sale, centralSale }) => markBackupSaleReadbackLocally({ sale, centralSale }), [])
   const recoverBackup = useCallback(payload => recoverBackupSale(payload), [])
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
+  const backupRecoveryVisible = Boolean(session || adminReady || staffManagerReady)
+  const backupRecoveryCanWrite = adminReady && BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED
   const requestView = useCallback(view => {
     const protectedView = view === 'expenses' || view === 'reports' ? view : null
     const leavingProtectedView = (currentView === 'expenses' || currentView === 'reports') && currentView !== view
@@ -1056,11 +1057,11 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
-        <Dashboard onNavigate={requestView} onLogout={logout} canAccessBackupRecovery={backupRecoveryAuthorized} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTables.filter(row => row.status === 'open').length} onPrepareEnd={prepareEndOperationalDay} onPrepareStart={prepareStartOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onSetOpeningCashBalance={handleSetOpeningCashBalance} onEndOperationalDay={handleEndOperationalDay} onReadDiagnostic={readDiagnostic} />
+        <Dashboard onNavigate={requestView} onLogout={logout} canAccessBackupRecovery={backupRecoveryVisible} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTables.filter(row => row.status === 'open').length} onPrepareEnd={prepareEndOperationalDay} onPrepareStart={prepareStartOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onSetOpeningCashBalance={handleSetOpeningCashBalance} onEndOperationalDay={handleEndOperationalDay} onReadDiagnostic={readDiagnostic} />
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
-        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} canAccessBackupRecovery={backupRecoveryAuthorized} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} staff={staff} onSaveStaff={saveCentralStaff} />
+        <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} canAccessBackupRecovery={backupRecoveryVisible} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
       {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} settlements={settlements} settlementCorrections={settlementCorrections} onSaveSettlementCorrection={saveSettlementCorrection} onSaveTransaction={saveCashboxTransaction} onUpdateTransaction={updateCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} />}
@@ -1143,10 +1144,10 @@ export default function App() {
 
       {currentView === 'backup-recovery' && (
         <section className="settings-page backup-recovery-route" dir="rtl">
-          <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => setCurrentView('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>فحص واسترداد نسخة المبيعات</h1><p>فحص Firebase أولاً واسترداد فردي فقط بعد التحقق والموافقة.</p></div><span className="settings-lock">إدارة مصرح بها</span></div>
-          {backupRecoveryAuthorized
-            ? <SalesBackupRecovery adminUser={adminAuthUser || centralAuthUser} onInspect={inspectBackup} onMarkLocal={markBackupLocal} onRecover={recoverBackup} />
-            : <section className="settings-card" role="alert"><h2>غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية</h2><p>هذه الأداة متاحة فقط لحساب super admin أو المدير أو الإدارة المركزية المصرح بها.</p></section>}
+          <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => setCurrentView('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>فحص واسترداد نسخة المبيعات</h1><p>فحص Firebase أولاً واسترداد فردي فقط بعد التحقق والموافقة.</p></div><span className="settings-lock">فحص آمن فقط</span></div>
+          {backupRecoveryVisible
+            ? <SalesBackupRecovery adminUser={adminAuthUser || centralAuthUser} canRecover={backupRecoveryCanWrite} onInspect={inspectBackup} onMarkLocal={markBackupLocal} onRecover={recoverBackup} />
+            : <section className="settings-card" role="alert"><h2>غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية</h2><p>تسجيل الدخول إلى جهاز POS مطلوب لعرض النسخة وفحصها.</p></section>}
         </section>
       )}
 
