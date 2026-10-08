@@ -159,6 +159,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         ? <div className="operational-day-warning" role="status">
             <span>اليوم السابق ما زال مفتوحاً</span>
             <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
+            <button type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button>
             <button type="button" onClick={openDiagnostic}>تشخيص المزامنة</button>
           </div>
         : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>تشخيص المزامنة</button></div>}
