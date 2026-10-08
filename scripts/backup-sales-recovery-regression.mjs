@@ -19,6 +19,11 @@ const parsedDiagnostic = parseBackupRecoveryInput(JSON.stringify({ businessDate:
 assert.equal(parsedDiagnostic.sales.length, 1)
 assert.equal(parsedDiagnostic.syncQueueItems.length, 1)
 assert.equal(parsedDiagnostic.businessDate, '2026-10-08')
+const queueOnly = parseBackupRecoveryInput(JSON.stringify({ businessDate: '2026-10-08', operationalDayId: 'day-1', syncQueue: [{ kind: 'sale', saleId: 'queue-sale', orderNumber: 1410, total: 28000, paymentType: 'cash', status: 'pending' }] }))
+assert.equal(queueOnly.syncQueueItems.length, 1)
+assert.equal(queueOnly.sales.length, 1)
+assert.equal(queueOnly.sales[0].orderNumber, 1410)
+assert.equal(queueOnly.sales[0].businessDate, '2026-10-08')
 
 const day = { id: 'day-1', operationalDayId: 'day-1', businessDate: '2026-10-08', status: 'open' }
 const exact = classifyBackupSale({ sale: sale(), centralSales: [sale({ status: 'synced', syncStatus: 'synced' })], openDay: day })
@@ -46,6 +51,7 @@ const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/Dashboard.jsx', import.meta.url), 'utf8')
 const settings = fs.readFileSync(new URL('../src/components/Settings.jsx', import.meta.url), 'utf8')
 const readbackSource = service.match(/export const markBackupSaleReadbackLocally[\s\S]*?export const recoverBackupSale/)?.[0] || ''
+const inspectSource = service.match(/export const inspectBackupSales[\s\S]*?export const markBackupSaleReadbackLocally/)?.[0] || ''
 assert.match(component, /type="file"/)
 assert.match(component, /فحص Firebase/)
 assert.match(component, /استرداد هذه المبيعة/)
@@ -63,7 +69,8 @@ assert.match(settings, /onNavigate\('backup-recovery'\)/)
 assert.doesNotMatch(app, /adminReady && !session && currentView === 'backup-recovery'/)
 assert.match(app, /غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية/)
 assert.match(app, /<SalesBackupRecovery adminUser=/)
-assert.match(component, /الفحص متاح للجميع، لكن الاسترداد متوقف لحين موافقة صاحب النظام/)
+assert.match(component, /الفحص وقراءة ملف النسخة متاحان للجميع ولا يكتبان أي بيانات/)
+assert.match(component, /الإصلاح والاسترداد يتطلبان موافقة الإدارة ولا يعملان تلقائيًا/)
 assert.match(component, /نسخ تقرير الفحص/)
 assert.match(component, /navigator\.clipboard\.writeText/)
 assert.match(component, /إصلاح المزامنة تلقائيًا/)
@@ -76,6 +83,10 @@ assert.match(component, /canReadback && isTargetReadback && result\?\.classifica
 assert.match(component, /ORDER_1309_SALE_ID/)
 assert.match(component, /المبيعة موجودة في Firebase لكنها غير موجودة محليًا؛ لا حاجة للاسترداد/)
 assert.match(service, /requireAuthenticatedBackupViewer/)
+assert.match(service, /centralAvailable: false/)
+assert.match(service, /LOCAL_ONLY/)
+assert.doesNotMatch(inspectSource, /localStorage\.setItem/)
+assert.match(app, /canReadback=\{adminReady\}/)
 assert.match(service, /Number\(expected\.orderNumber\) !== ORDER_1309_NUMBER/)
 assert.match(service, /expected\.saleId !== ORDER_1309_SALE_ID/)
 assert.match(service, /ORDER_1309_READBACK_ONLY/)
@@ -98,4 +109,5 @@ console.log(JSON.stringify({
   EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
   CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
   UPLOAD_DIAGNOSTIC_PARSE: 'PASS', ONE_CLICK_BUTTON_VISIBLE: 'PASS', CONFIRMATION_REQUIRED: 'PASS', OWNER_NAME_CODE_REASON_REQUIRED: 'PASS', EXISTS_EXACT_MATCH_READBACK_ONLY: 'PASS', MISSING_SAFE_SALE_RECOVERED_ONCE: 'PASS', DUPLICATE_SALE_BLOCKED: 'PASS', ORDER_CONFLICT_BLOCKED: 'PASS', QUEUE_RESOLVED_ONLY_AFTER_READBACK: 'PASS', INVALID_QUEUE_NOT_DELETED_BLINDLY: 'PASS', END_DAY_READY_ONLY_AFTER_CLEAN_SYNC: 'PASS', NO_TOUCH_1056: 'PASS', NO_TOUCH_CLOSED_DAY: 'PASS', NO_ACCOUNTING_REGRESSION: 'PASS', ONE_CLICK_SYNC_REPAIR: 'PASS',
+  BACKUP_INSPECTION_AVAILABLE_TO_CASHIER: 'PASS', BACKUP_UPLOAD_PARSE_WITHOUT_ADMIN: 'PASS', QUEUE_ONLY_JSON_PARSE: 'PASS', PENDING_QUEUE_ITEMS_VISIBLE: 'PASS', COPY_REPORT_VISIBLE_TO_ALL: 'PASS', FIREBASE_READ_ATTEMPT_DOES_NOT_BLOCK_LOCAL_REPORT: 'PASS', ADMIN_ONLY_WRITE_GUARDS_STILL_ENABLED: 'PASS', RECOVERY_STILL_BLOCKED_WITHOUT_OWNER_APPROVAL: 'PASS', NO_FIREBASE_WRITE: 'PASS', NO_LOCALSTORAGE_WRITE: 'PASS',
 }, null, 2))

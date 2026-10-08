@@ -1386,26 +1386,38 @@ const readLocalSalesForBackupTool = () => {
 }
 
 export const inspectBackupSales = async ({ sales = [] } = {}) => {
-  await requireAuthenticatedBackupViewer()
-  const centralSnapshot = await get(salesRef())
-  const centralSales = centralValues(centralSnapshot)
   const normalized = (Array.isArray(sales) ? sales : []).map(normalizeBackupSale)
+  const localOnly = error => ({
+    centralAvailable: false,
+    centralCount: null,
+    centralReadError: error?.code || error?.message || 'CENTRAL_READ_UNAVAILABLE',
+    results: normalized.map(sale => ({ sale, classification: 'LOCAL_ONLY', reason: 'تم تحليل الملف محليًا. الفحص المركزي غير متاح لهذا الحساب.', centralSale: null, directExists: false, directSale: null, firebasePath: sale.saleId ? `pos101_sales/${sale.saleId}` : '' })),
+    openDays: [],
+  })
+  try { await requireAuthenticatedBackupViewer() } catch (error) { return localOnly(error) }
+  let centralSales
+  try {
+    const centralSnapshot = await get(salesRef())
+    centralSales = centralValues(centralSnapshot)
+  } catch (error) { return localOnly(error) }
   const dayIds = [...new Set(normalized.map(sale => sale.operationalDayId).filter(Boolean))]
-  const daySnapshots = await Promise.all(dayIds.map(id => get(ref(db, `pos101_operational_days/${id}`))))
+  let daySnapshots
+  try { daySnapshots = await Promise.all(dayIds.map(id => get(ref(db, `pos101_operational_days/${id}`)))) } catch (error) { return localOnly(error) }
   const days = new Map(dayIds.map((id, index) => [id, daySnapshots[index].exists() ? { ...daySnapshots[index].val(), id } : null]))
-  const directSnapshots = await Promise.all(normalized.map(sale => sale.saleId ? get(ref(db, `pos101_sales/${sale.saleId}`)) : Promise.resolve(null)))
+  let directSnapshots
+  try { directSnapshots = await Promise.all(normalized.map(sale => sale.saleId ? get(ref(db, `pos101_sales/${sale.saleId}`)) : Promise.resolve(null))) } catch (error) { return localOnly(error) }
   const quarantined = readSalesQuarantine().map(row => String(row?.saleId || '').trim()).filter(Boolean)
   const results = normalized.map((sale, index) => {
     const result = classifyBackupSale({ sale, centralSales, openDay: days.get(sale.operationalDayId), quarantinedSaleIds: quarantined })
     const direct = directSnapshots[index]
     return { ...result, directExists: Boolean(direct?.exists()), directSale: direct?.exists() ? direct.val() : null }
   })
-  return { centralCount: centralSales.length, results, openDays: [...days.values()].filter(Boolean) }
+  return { centralAvailable: true, centralCount: centralSales.length, results, openDays: [...days.values()].filter(Boolean) }
 }
 
 export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) => {
   const expected = normalizeBackupSale(sale)
-  await requireAuthenticatedBackupViewer()
+  await requireAdminViewer()
   if (Number(expected.orderNumber) !== ORDER_1309_NUMBER || expected.saleId !== ORDER_1309_SALE_ID) throw Object.assign(new Error('التحديث المحلي متاح حاليًا للطلب 1309 المطابق فقط.'), { code: 'READBACK_TARGET_REQUIRED' })
   if (!salePayloadMatches(expected, centralSale)) throw Object.assign(new Error('لا يمكن تحديث الحالة المحلية قبل تطابق readback الكامل.'), { code: 'BACKUP_READBACK_MISMATCH' })
   const localSales = readLocalSalesForBackupTool()

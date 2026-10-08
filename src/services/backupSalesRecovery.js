@@ -28,6 +28,7 @@ export const parseBackupSales = input => {
   if (!parsed) throw new Error('ملف النسخة الاحتياطية ليس JSON صالحاً.')
   const localStorage = parsed?.localStorage || parsed?.storage || {}
   const candidates = [
+    Array.isArray(parsed) ? parsed : null,
     parsed?.sales,
     parsed?.['pos101.sales'],
     parseMaybeJson(localStorage?.['pos101.sales']),
@@ -51,10 +52,16 @@ export const parseBackupRecoveryInput = input => {
   const localStorage = parsed?.localStorage || parsed?.storage || {}
   const localSalesRaw = parseMaybeJson(localStorage?.['pos101.sales'])
   const queueRaw = parseMaybeJson(localStorage?.['pos101.syncQueue'])
-  const sales = parseBackupSales(parsed)
-  const syncQueueItems = firstArray(parsed?.syncQueueItems, parsed?.syncQueue, parsed?.['pos101.syncQueue'], parsed?.data?.syncQueue, localSalesRaw?.syncQueue, queueRaw)
-  const businessDate = String(parsed?.businessDate || parsed?.operationalDay?.businessDate || sales.find(sale => sale.businessDate)?.businessDate || '').trim()
-  const operationalDayId = String(parsed?.operationalDayId || parsed?.operationalDay?.id || sales.find(sale => sale.operationalDayId)?.operationalDayId || '').trim()
+  const syncQueueItems = firstArray(Array.isArray(parsed) ? parsed : null, parsed?.syncQueueItems, parsed?.syncQueue, parsed?.['pos101.syncQueue'], parsed?.data?.syncQueue, localSalesRaw?.syncQueue, queueRaw)
+  const sourceBusinessDate = String(parsed?.businessDate || parsed?.operationalDay?.businessDate || '').trim()
+  const sourceOperationalDayId = String(parsed?.operationalDayId || parsed?.operationalDay?.id || '').trim()
+  const parsedSales = parseBackupSales(parsed)
+  const queueSales = syncQueueItems
+    .map(entry => ({ ...(entry?.sale || entry?.payload || entry), businessDate: (entry?.sale || entry?.payload || entry)?.businessDate || sourceBusinessDate, operationalDayId: (entry?.sale || entry?.payload || entry)?.operationalDayId || sourceOperationalDayId }))
+    .filter(row => row && typeof row === 'object' && (saleIdOf(row) || row.orderNumber != null || row.total != null))
+  const sales = parsedSales.length ? parsedSales : parseBackupSales({ sales: queueSales })
+  const businessDate = String(sourceBusinessDate || sales.find(sale => sale.businessDate)?.businessDate || '').trim()
+  const operationalDayId = String(sourceOperationalDayId || sales.find(sale => sale.operationalDayId)?.operationalDayId || '').trim()
   return { sales, syncQueueItems, businessDate, operationalDayId, source: parsed }
 }
 

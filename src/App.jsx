@@ -1147,7 +1147,7 @@ export default function App() {
         <section className="settings-page backup-recovery-route" dir="rtl">
           <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => setCurrentView('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>فحص واسترداد نسخة المبيعات</h1><p>فحص Firebase أولاً واسترداد فردي فقط بعد التحقق والموافقة.</p></div><span className="settings-lock">فحص آمن فقط</span></div>
           {backupRecoveryVisible
-            ? <SalesBackupRecovery adminUser={adminAuthUser || centralAuthUser} canReadback={backupRecoveryVisible} canRecover={backupRecoveryCanWrite} canRepair={adminReady} onInspect={inspectBackup} onMarkLocal={markBackupLocal} onRecover={recoverBackup} onRepair={repairBackup} />
+            ? <SalesBackupRecovery adminUser={adminAuthUser || centralAuthUser} canReadback={adminReady} canRecover={backupRecoveryCanWrite} canRepair={adminReady} onInspect={inspectBackup} onMarkLocal={markBackupLocal} onRecover={recoverBackup} onRepair={repairBackup} />
             : <section className="settings-card" role="alert"><h2>غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية</h2><p>تسجيل الدخول إلى جهاز POS مطلوب لعرض النسخة وفحصها.</p></section>}
         </section>
       )}

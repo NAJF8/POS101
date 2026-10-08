@@ -8,6 +8,7 @@ const statusLabel = {
   MISSING_SAFE_TO_RECOVER: 'مفقودة — مؤهلة للاسترداد اليدوي',
   CONFLICT: 'تعارض — مراجعة يدوية',
   SKIP: 'تخطي',
+  LOCAL_ONLY: 'تحليل محلي فقط',
 }
 
 export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal, onRecover, onRepair, canRecover = false, canReadback = false, canRepair = false }) {
@@ -23,6 +24,7 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
   const [repairReport, setRepairReport] = useState(null)
   const [recoveryForm, setRecoveryForm] = useState({ name: adminUser?.displayName || '', code: '', reason: '' })
   const summary = useMemo(() => summarizeBackupSales(sales), [sales])
+  const hasInspectionContent = sales.length > 0 || repairInput.syncQueueItems.length > 0
   const dates = useMemo(() => summary.days.map(day => day.businessDate), [summary.days])
   const visibleRows = useMemo(() => sales.filter(sale => !selectedDate || sale.businessDate === selectedDate), [sales, selectedDate])
   const resultById = useMemo(() => new Map((inspection?.results || []).map(result => [result.sale.saleId, result])), [inspection])
@@ -49,13 +51,15 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
   }
 
   const inspect = async () => {
-    if (!sales.length || busy) return
+    if (!hasInspectionContent || busy) return
     setBusy(true); setError(''); setNotice('')
-    try { setInspection(await onInspect({ sales })) }
+    try {
+      const outcome = await onInspect({ sales })
+      setInspection(outcome)
+      if (outcome?.centralAvailable === false) setNotice('تم تحليل الملف محليًا. الفحص المركزي غير متاح لهذا الحساب.')
+    }
     catch (inspectError) {
-      setError(inspectError?.code === 'ADMIN_ROLE_REQUIRED' || inspectError?.code === 'PERMISSION_DENIED'
-        ? 'الفحص المركزي يحتاج صلاحية مدير أو إدارة'
-        : inspectError?.message || 'تعذر فحص Firebase المصادق عليه.')
+      setNotice('تم تحليل الملف محليًا. الفحص المركزي غير متاح لهذا الحساب.')
     }
     finally { setBusy(false) }
   }
@@ -73,6 +77,8 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
       `total=${summary.total}`,
       `pendingCount=${pending.length}`,
       `pendingOrders=${pending.map(sale => sale.orderNumber || '').join(',')}`,
+      `syncQueueCount=${repairInput.syncQueueItems.length}`,
+      `syncQueueItems=${repairInput.syncQueueItems.map(item => `${item?.orderNumber || item?.sale?.orderNumber || ''}:${item?.saleId || item?.sale?.saleId || ''}:${item?.total || item?.sale?.total || ''}`).join('|')}`,
       ...selectedDetails,
     ].join('\n')
     try {
@@ -119,10 +125,11 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
   }
 
   return <section className="settings-card backup-recovery-card" dir="rtl" aria-label="فحص واسترداد نسخة المبيعات">
-    <div className="settings-card-heading"><div><h2>فحص واسترداد نسخة المبيعات</h2><p>الفحص متاح للجميع، لكن الاسترداد متوقف لحين موافقة صاحب النظام.</p><p>الإصلاح المؤتمت يتطلب حساب إدارة وتأكيدًا صريحًا من صاحب النظام.</p></div><span className="settings-lock">فحص آمن أولاً</span></div>
+    <div className="settings-card-heading"><div><h2>فحص واسترداد نسخة المبيعات</h2><p>الفحص وقراءة ملف النسخة متاحان للجميع ولا يكتبان أي بيانات.</p><p>الإصلاح والاسترداد يتطلبان موافقة الإدارة ولا يعملان تلقائيًا.</p></div><span className="settings-lock">فحص آمن أولاً</span></div>
     <label className="backup-file-picker">اختيار ملف النسخة الاحتياطية<input type="file" accept="application/json,.json" onChange={chooseFile} disabled={busy} /><span>{fileName || 'اختر ملف JSON'}</span></label>
-    {sales.length > 0 && <>
+    {hasInspectionContent && <>
       <div className="backup-summary-grid"><span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span><span>المجموع <b>{formatMoney(summary.total)}</b></span><span>synced <b>{formatNumber(summary.synced)}</b></span><span>pending <b>{formatNumber(summary.pending)}</b></span><span>voided <b>{formatNumber(summary.voided)}</b></span><span>غير موثق <b>{formatNumber(summary.unverified)}</b></span></div>
+      <div className="settings-readonly">عناصر syncQueue: <b>{formatNumber(repairInput.syncQueueItems.length)}</b>{repairInput.syncQueueItems.length > 0 && <ul>{repairInput.syncQueueItems.map((item, index) => { const row = item?.sale || item?.payload || item; return <li key={`${row?.saleId || row?.orderNumber || index}-${index}`}>order {row?.orderNumber || '—'} · saleId {row?.saleId || row?.id || '—'} · {formatMoney(row?.total ?? row?.subtotal ?? 0)} · {row?.businessDate || repairInput.businessDate || '—'} · {row?.operationalDayId || repairInput.operationalDayId || '—'}</li> })}</ul>}</div>
       <div className="backup-toolbar"><label>تاريخ العمل<select value={selectedDate} onChange={event => setSelectedDate(event.target.value)}>{dates.map(date => <option key={date} value={date}>{date}</option>)}</select></label><div className="backup-toolbar-actions"><button type="button" className="primary-action" onClick={inspect} disabled={busy}>{busy ? 'جارٍ الفحص…' : 'فحص Firebase'}</button><button type="button" className="secondary-action" onClick={copyInspectionReport} disabled={busy}>نسخ تقرير الفحص</button>{canRepair && <button type="button" className="primary-action" onClick={() => { setRecovery({ mode: 'one-click' }); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }} disabled={busy}>إصلاح المزامنة تلقائيًا</button>}</div></div>
       <div className="financial-table-wrap backup-table-wrap"><table className="financial-table"><thead><tr><th>الطلب</th><th>saleId</th><th>الكاشير</th><th>المبلغ</th><th>الدفع</th><th>الحالة</th><th>centralVerified</th><th>النتيجة</th><th>إجراء</th></tr></thead><tbody>{visibleRows.map(sale => {
         const result = resultById.get(sale.saleId)
@@ -131,7 +138,7 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
         return <tr key={`${sale.saleId}|${sale.orderNumber}`}><td>{sale.orderNumber || '—'}</td><td dir="ltr"><small>{sale.saleId || '—'}</small></td><td>{sale.cashierNameSnapshot || sale.cashierName || sale.seller || '—'}</td><td>{formatMoney(sale.total)}</td><td>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</td><td>{sale.syncStatus || sale.status || '—'}</td><td>{String(sale.centralVerified === true)}</td><td><span className={`backup-status backup-status-${classification.toLowerCase()}`}>{statusLabel[classification] || (inspection ? 'غير مفحوصة' : 'بانتظار الفحص')}</span></td><td>{canReadback && isTargetReadback && result?.classification === 'EXISTS_EXACT_MATCH' ? <button type="button" className="secondary-action" disabled={busy} onClick={() => markLocal(result)}>تحديث محلي فقط</button> : canRecover && result?.classification === 'MISSING_SAFE_TO_RECOVER' ? <button type="button" className="primary-action" disabled={busy} onClick={() => { setRecovery(result); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }}>استرداد هذه المبيعة</button> : 'موقوف حتى موافقة المالك'}</td></tr>
       })}</tbody></table></div>
     </>}
-    {sales.length === 0 && <p className="settings-readonly">اختر نسخة مبيعات JSON لعرض ملخصها وفحصها.</p>}
+    {!hasInspectionContent && <p className="settings-readonly">اختر ملف JSON لعرض تحليله المحلي وفحصه.</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {notice && <p className="settings-notice" role="status">{notice}</p>}
     {repairReport && <div className="settings-notice" role="status">نتيجة الإصلاح: readback فقط {repairReport.readbackOnly?.length || 0}، استرداد آمن {repairReport.recoveredOnce?.length || 0}، عناصر الطابور المعالجة {repairReport.queueItemsResolved || 0}، المتبقي {repairReport.activeSyncQueueLengthAfter ?? '—'}، جاهزية إنهاء اليوم {repairReport.endDayReady ? 'نعم' : 'لا'}.</div>}
