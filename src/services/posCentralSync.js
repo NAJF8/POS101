@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrec
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
@@ -1056,6 +1056,9 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
   const beforeCentral = centralValues(before)
+  const known1056 = beforeCentral.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
+  const local1056 = localSales.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
+  if (known1056 || local1056) restoreManualReviewQuarantineMarker({ saleId: KNOWN_MANUAL_REVIEW_SALE_1056, orderNumber: 1056, reason: KNOWN_MANUAL_REVIEW_REASON_1056, centralExists: Boolean(known1056) })
   const recovery = reconcileSalesQueue(beforeCentral, {
     onStrandedSale: sale => logQueueDecision(sale, 'STRANDED_SALE_FOUND', 'local ledger row was absent from the active queue', { queueLength: readRawSaleQueue().length, eligible: true, processingStarted: false, firebaseWriteResult: 'not-started', readbackResult: 'not-started', localUpdateResult: 'recovery-enqueued' }),
   })
@@ -1068,7 +1071,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   // is read once; reconciliation itself performs zero Firebase writes and
   // removes only entries proven against that snapshot.
   const queueCleanup = reconcileLocalQueueAgainstCentral(beforeCentral)
-  const activeQueueAfterCleanup = readRawSaleQueue()
+  const activeQueueAfterCleanup = readSaleQueue()
   const queuedSales = []
   for (const rawEntry of activeQueueAfterCleanup) {
     const rawSale = rawEntry?.sale
@@ -1094,6 +1097,10 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   }
   const centralIds = new Set(beforeCentral.map(saleIdOf))
   const candidates = [...candidateByIdentity.values()].filter(sale => {
+    if (isManualReviewQuarantined(saleIdOf(sale))) {
+      logQueueDecision(sale, 'manual-review-required', KNOWN_MANUAL_REVIEW_REASON_1056, { queueLength: activeQueueAfterCleanup.length, eligible: false })
+      return false
+    }
     if (!isSaleSyncEligible(sale)) { logQueueDecision(sale, 'missing:validSalePayload', 'queue entry is not recoverable', { queueLength: rawQueue.length, eligible: false }); return false }
     return true
   })
@@ -1210,6 +1217,7 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
     throw Object.assign(new Error('المزامنة قيد التنفيذ. انتظر اكتمالها ثم أعد المحاولة.'), { code: 'SYNC_LOCK_ACTIVE', lock: lock.before })
   }
   let timeoutId
+  const heartbeatId = setInterval(() => syncLockManager.heartbeat({ trigger, processingSaleIds: [] }), 10000)
   try {
     syncLockManager.heartbeat({ trigger, processingSaleIds: [] })
     const timeout = new Promise((_, reject) => {
@@ -1220,9 +1228,12 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
     return { ...result, lockAction: lock.action, lockBefore: lock.before || null }
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
+    clearInterval(heartbeatId)
     syncLockManager.release()
   }
 }
+
+export const recoverStaleSyncLock = () => syncLockManager.recoverStale()
 
 export const runCashierCentralSync = ({ initial = false } = {}) => {
   return runCashierCentralSyncInternal({ initial, trigger: 'worker' })
@@ -1452,6 +1463,7 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   authDebug('POS_EXPENSE_MIGRATION_START', { localCount: localExpenses.length, initial: Boolean(initial) })
   const snapshot = await get(expensesRef())
   const centralExpenses = expenseValues(snapshot)
+  const legacyExpenseQueue = resolveLegacyExpenseQueueEntries(centralExpenses)
   let uploaded = 0
   let skipped = 0
   const retainedPending = []
@@ -1484,7 +1496,7 @@ export const runExpenseCentralSync = async ({ initial = false } = {}) => {
   }
   const merged = cacheCentralExpenses([...centralExpenses, ...retainedPending])
   authDebug('POS_EXPENSE_MIGRATION_DONE', { uploaded, skipped, centralCount: centralExpenses.length, retainedPending: retainedPending.length, initial: Boolean(initial) })
-  return { uploaded, skipped, centralCount: centralExpenses.length, retainedPending: retainedPending.length, mergedCount: merged.length, initial: Boolean(initial) }
+  return { uploaded, skipped, centralCount: centralExpenses.length, retainedPending: retainedPending.length, mergedCount: merged.length, initial: Boolean(initial), legacyExpenseQueue }
 }
 
 export const saveCentralExpense = async (expense, { existing = false } = {}) => {

@@ -38,11 +38,26 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
     }
   }
 
+  const isStale = lock => Boolean(lock && (
+    ageOf(now(), lock.startedAt) > SYNC_LOCK_STALE_MS
+    || ageOf(now(), lock.heartbeatAt) > SYNC_LOCK_HEARTBEAT_STALE_MS
+  ))
+
+  const recoverStale = () => {
+    const before = describe()
+    if (!isStale(before)) return { recovered: false, before }
+    const current = read(storage)
+    if (!current || current.ownerId !== before.ownerId || current.heartbeatAt !== before.heartbeatAt) {
+      return { recovered: false, before: describe(), raced: true }
+    }
+    remove(storage)
+    return { recovered: !read(storage), before }
+  }
+
   const acquire = ({ trigger = 'manual', processingSaleIds = [], hasPendingQueue = false } = {}) => {
     const before = describe()
     if (before) {
-      const stale = ageOf(now(), before.startedAt) > SYNC_LOCK_STALE_MS
-        || ageOf(now(), before.heartbeatAt) > SYNC_LOCK_HEARTBEAT_STALE_MS
+      const stale = isStale(before)
       // Lock data is coordination metadata only. A stale lock can therefore
       // always be released safely, including when the queue is currently
       // empty or malformed.
@@ -80,7 +95,7 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
     return true
   }
 
-  return { acquire, heartbeat, release, describe, ownerId, tabId, deviceId }
+  return { acquire, heartbeat, release, recoverStale, describe, ownerId, tabId, deviceId }
 }
 
 export const defaultSyncLockManager = createSyncLockManager()

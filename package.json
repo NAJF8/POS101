@@ -38,6 +38,7 @@
     "test:kiosk-worker": "npm --prefix worker test",
     "test:staff-permissions": "node scripts/staff-permissions-regression.mjs",
     "test:queue-local-cleanup": "node scripts/queue-local-cleanup-regression.mjs",
+    "test:auto-sync-lock-quarantine": "node scripts/auto-sync-lock-quarantine-regression.mjs",
     "test:anonymous-auth-regression": "node scripts/cashier-mode-regression.mjs",
     "test:end-day-runtime-regression": "node scripts/cashier-mode-regression.mjs",
     "test:end-day-idempotency-regression": "node scripts/cashier-mode-regression.mjs",

@@ -2,6 +2,8 @@ const SALES_KEY = 'pos101.sales'
 const QUEUE_KEY = 'pos101.syncQueue'
 export const QUARANTINE_BUCKET = 'pos101.salesQuarantine'
 export const SYNC_QUEUE_QUARANTINE_BUCKET = 'pos101.syncQueue.quarantine'
+export const KNOWN_MANUAL_REVIEW_SALE_1056 = 'b55ca7d2-fd37-4aa9-bafe-866aa2f93810'
+export const KNOWN_MANUAL_REVIEW_REASON_1056 = 'PREVIOUSLY_QUARANTINED_SALE_NOW_EXISTS_IN_FIREBASE_CONFLICTS_WITH_ORDER_1056'
 
 const readJson = (key, fallback) => {
   try {
@@ -142,6 +144,9 @@ export const reconcileLocalQueueAgainstCentral = (centralSales = [], { now = new
   const quarantined = []
   const retained = []
   for (const [index, rawEntry] of queue.entries()) {
+    // Non-sale rows belong to their own domain queue. Preserve them here;
+    // expense readback resolution is performed by runExpenseCentralSync.
+    if (!rawEntry?.sale && (rawEntry?.expense || rawEntry?.kind === 'expense')) { retained.push(rawEntry); continue }
     const central = centralMatchForQueueEntry(rawEntry, centralSales)
     const sale = queueIdentity(rawEntry)
     const valid = Boolean(rawEntry?.sale && isSaleSyncEligible(rawEntry?.sale) && isSaleIdentityComplete(rawEntry?.sale))
@@ -218,6 +223,60 @@ export const quarantineSale = (sale, quarantineReason, raw = sale) => {
   if (!existing.some(row => `${row.saleId}|${row.operationKey}|${row.quarantineReason}` === key)) writeJson(QUARANTINE_BUCKET, [...existing, entry])
   if (typeof console !== 'undefined') console.info('[POS_QUEUE_QUARANTINE]', { reason: quarantineReason, saleId: entry.saleId, orderNumber: entry.orderNumber, operationKeyPresent: Boolean(entry.operationKey), dayIdentityPresent: Boolean(entry.businessDate && entry.operationalDayId), classification: quarantineReason })
   return entry
+}
+
+export const isManualReviewQuarantined = saleId => readSalesQuarantine().some(row => (
+  row.saleId === saleId && row.manualReviewRequired === true
+))
+
+// Idempotent local review metadata only. It preserves the local ledger and
+// Firebase record and excludes the protected sale from automatic recovery.
+export const restoreManualReviewQuarantineMarker = ({ saleId, orderNumber, reason, centralExists = false } = {}) => {
+  const id = text(saleId)
+  if (!id) return { restored: false, reason: 'SALE_ID_REQUIRED' }
+  const existing = readSalesQuarantine()
+  const marker = {
+    saleId: id,
+    orderNumber: orderNumber ?? '',
+    quarantineReason: reason || 'MANUAL_REVIEW_REQUIRED',
+    manualReviewRequired: true,
+    autoRecoveryExcluded: true,
+    centralExists: Boolean(centralExists),
+    restoredAt: Date.now(),
+  }
+  const sameMarker = row => row.saleId === marker.saleId && row.manualReviewRequired === true
+  if (!existing.some(sameMarker)) writeJson(QUARANTINE_BUCKET, [...existing, marker])
+  return { restored: true, marker: existing.find(sameMarker) || marker }
+}
+
+const queueEntryExpense = entry => entry?.expense || (entry?.kind === 'expense' ? entry : null)
+const expenseIdOf = expense => text(expense?.id || expense?.expenseId)
+
+// Legacy builds accidentally placed expense rows in the sale queue. Remove
+// only rows whose same id is present in a caller-supplied Firebase readback;
+// unresolved rows remain intact for the expense path.
+export const resolveLegacyExpenseQueueEntries = (centralExpenses = []) => {
+  const queue = readRawSaleQueue()
+  const auditKey = 'pos101.syncQueue.expenseResolutionAudit'
+  const audit = readJson(auditKey, [])
+  let identified = 0
+  let resolved = 0
+  const retained = []
+  for (const entry of queue) {
+    const expense = queueEntryExpense(entry)
+    if (!expense) { retained.push(entry); continue }
+    identified += 1
+    const id = expenseIdOf(expense)
+    const remote = id && (centralExpenses || []).find(row => expenseIdOf(row) === id)
+    if (!remote) { retained.push(entry); continue }
+    resolved += 1
+    audit.push({ id, action: 'verified-central-readback-remove-from-sale-queue', resolvedAt: Date.now(), firebaseWritesPerformed: 0 })
+  }
+  if (resolved) {
+    writeJson(QUEUE_KEY, retained)
+    writeJson(auditKey, audit.slice(-100))
+  }
+  return { identified, resolved, retained: retained.length, firebaseWritesPerformed: 0 }
 }
 
 // Legacy queue rows may predate operationKey/businessDate persistence. They
@@ -352,6 +411,7 @@ export const reconcileSalesQueue = (centralSales = [], { onStrandedSale = null }
   let quarantined = 0
   const stranded = []
   for (const entry of queue) {
+    if (!entry?.sale) continue
     const sale = entry?.sale || entry
     if (!isSaleIdentityComplete(sale)) { quarantineSale(sale, 'LEGACY_UNSAFE_QUEUE', entry); quarantined += 1 }
     else if (!isSaleSyncEligible(sale) || isInvalidSaleStatus(sale)) { quarantineSale(sale, 'INVALID_STATUS', entry); quarantined += 1 }
@@ -359,6 +419,7 @@ export const reconcileSalesQueue = (centralSales = [], { onStrandedSale = null }
   }
   for (const sale of sales) {
     if (!isSaleSyncEligible(sale) || sale.status === 'synced' || sale.syncConfirmedAt) continue
+    if (isManualReviewQuarantined(saleIdOf(sale))) continue
     if (queue.some(entry => isSaleEntry(entry) && sameSaleIdentity(entry.sale, sale))) continue
     if (centralIds.has(saleIdOf(sale))) continue
     const recovered = { ...sale, recoveredFromLocalLedger: true, recoveryReason: 'STRANDED_LOCAL_SALE_NOT_IN_QUEUE' }
