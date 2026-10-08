@@ -36,6 +36,7 @@ import { reconcileCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
+import { buildSaleEditPatch, saleEditPreservesIdentity, saleEditableSnapshot } from './saleEdit.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -555,6 +556,42 @@ export const readCentralSalesForOperationalDay = async day => {
   await financialUser(false)
   const rows = centralValues(await get(salesRef()))
   return getReportSalesForOperationalDay({ centralSales: rows, operationalDayId: day?.id || day?.operationalDayId, businessDate: day?.businessDate })
+}
+
+// Edits are deliberately limited to metadata and discount/payment fields. The
+// original sale id, operation key, items, order number, and business day stay
+// immutable; the same RTDB node is updated and read back, so no second sale is
+// ever created by this workflow.
+export const updateCentralSale = async (sale, changes = {}) => {
+  const user = await financialUser(true)
+  const id = saleIdOf(sale)
+  if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
+  const saleRef = ref(db, `pos101_sales/${id}`)
+  const currentSnapshot = await get(saleRef)
+  if (!currentSnapshot.exists()) throw Object.assign(new Error('البيع المركزي غير موجود.'), { code: 'SALE_NOT_FOUND' })
+  const current = { ...currentSnapshot.val(), id }
+  if (current.status === 'voided' || current.voided) throw Object.assign(new Error('لا يمكن تعديل بيع مبطل.'), { code: 'SALE_VOIDED' })
+  const dayId = String(current.operationalDayId || current.operational_day_id || '').trim()
+  if (!dayId) throw Object.assign(new Error('لا يمكن تعديل بيع بلا يوم تشغيلي.'), { code: 'SALE_DAY_REQUIRED' })
+  const daySnapshot = await get(ref(db, `pos101_operational_days/${dayId}`))
+  const day = daySnapshot.exists() ? daySnapshot.val() : null
+  if (!day || day.status !== 'open') throw Object.assign(new Error('التعديل متاح فقط ضمن اليوم التشغيلي المفتوح.'), { code: 'SALE_DAY_CLOSED' })
+  const patch = buildSaleEditPatch(current, changes)
+  if (!Number.isFinite(Number(patch.discount)) || Number(patch.discount) < 0 || Number(patch.discount) > Number(patch.subtotal)) throw Object.assign(new Error('قيمة الخصم غير صالحة.'), { code: 'SALE_DISCOUNT_INVALID' })
+  const now = Date.now()
+  const next = { ...current, ...patch, id, saleId: current.saleId || id, updatedAt: now, updatedByUid: user.uid, updatedByName: user.displayName || user.email || '', lastEditReason: String(changes.reason || '').trim() }
+  if (!saleEditPreservesIdentity(current, next)) throw new Error('محاولة تعديل حقل محمي من البيع.')
+  const auditId = `sale-edit-${safeKey(id)}-${now}-${crypto.randomUUID().slice(0, 8)}`
+  const audit = financialAuditPayload({ id: auditId, user, action: 'sale edit', entityType: 'sale', entityId: id, before: saleEditableSnapshot(current), after: saleEditableSnapshot(next), reason: next.lastEditReason, businessDate: current.businessDate || day.businessDate || '' })
+  await update(ref(db), { [`pos101_sales/${id}`]: next, [`${auditPath}/${auditId}`]: audit })
+  const [saleBack, auditBack] = await Promise.all([get(saleRef), get(financialPath(`${auditPath}/${auditId}`))])
+  if (!saleBack.exists() || !auditBack.exists() || !saleEditPreservesIdentity(current, saleBack.val())) throw new Error('تعذر التحقق من تعديل البيع وسجل التدقيق.')
+  const saved = { ...saleBack.val(), id }
+  const local = readSales()
+  const index = local.findIndex(row => saleIdOf(row) === id)
+  if (index >= 0) { local[index] = saved; writeSales(local); dispatchUpdated() }
+  window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: saved }))
+  return saved
 }
 
 const readPreCloseFinancialReconciliation = async operationalDay => {

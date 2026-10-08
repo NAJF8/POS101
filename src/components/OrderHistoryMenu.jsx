@@ -18,7 +18,7 @@ const businessDateLabel = sale => {
   return year ? `${day}/${month}/${year}` : '—'
 }
 
-function SaleDetails({ sale, onBack, onPrint, onVoid, readOnly = false }) {
+function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }) {
   const [confirmingVoid, setConfirmingVoid] = useState(false)
   const items = sale.items || sale.order?.items || []
 
@@ -59,7 +59,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, readOnly = false }) {
 
       {!readOnly && <div className="history-details-actions">
         <button onClick={() => onPrint(sale)}><Icon name="printer" size={18} /> إعادة طباعة</button>
-        <button disabled title="التعديل المالي غير متاح حتى يُربط هذا النموذج بسجل تصحيح مصرح به"><Icon name="edit" size={18} /> تعديل غير متاح</button>
+        <button disabled={!onEdit || sale.status === 'voided'} onClick={() => onEdit?.(sale)} title={onEdit ? 'تعديل آمن مع سجل تدقيق' : 'التعديل متاح فقط لليوم المفتوح'}><Icon name="edit" size={18} /> تعديل</button>
         {sale.status !== 'voided' && (
           confirmingVoid ? (
             <span className="void-confirm"><b>تأكيد الإبطال؟</b><button onClick={() => onVoid(sale)}>تأكيد</button><button onClick={() => setConfirmingVoid(false)}>رجوع</button></span>
@@ -70,7 +70,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, readOnly = false }) {
   )
 }
 
-export default function OrderHistoryMenu({ onClose, session, salesOverride = null, readOnly = false }) {
+export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, readOnly = false }) {
   const [sales, setSales] = useState(() => salesOverride ?? readSales())
   const [query, setQuery] = useState('')
   const [fromDate, setFromDate] = useState('')
@@ -79,6 +79,10 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const [status, setStatus] = useState('all')
   const [page, setPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState(null)
+  const [editingSale, setEditingSale] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editError, setEditError] = useState('')
 
   useEffect(() => {
     const refresh = () => setSales(salesOverride ?? readSales())
@@ -117,11 +121,28 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
     setSales(nextSales)
     setSelectedSale(nextSales.find(entry => entry.id === sale.id))
   }
+  const beginEdit = sale => {
+    setEditError('')
+    setEditingSale(sale)
+    setEditForm({ note: sale.customerNote ?? sale.orderNote ?? sale.cashierNote ?? sale.note ?? sale.notes ?? '', orderType: sale.orderType || sale.order?.orderType || '', paymentMethod: sale.paymentMethod || 'cash', discount: sale.discount ?? 0, cashier: sale.cashierNameSnapshot || sale.cashierName || sale.seller || '', adminNote: sale.adminNote || sale.editNote || '', reason: '' })
+  }
+  const saveEdit = async event => {
+    event.preventDefault()
+    if (!editingSale || !onEditSale || !editForm) return
+    setEditBusy(true); setEditError('')
+    try {
+      const saved = await onEditSale(editingSale, editForm)
+      const nextSales = sales.map(entry => entry.id === saved.id ? saved : entry)
+      setSales(nextSales); setSelectedSale(saved); setEditingSale(null); setEditForm(null)
+    } catch (error) {
+      setEditError(error?.message || 'تعذر حفظ تعديل البيع.')
+    } finally { setEditBusy(false) }
+  }
 
   return (
     <div className="history-modal-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
       <section className="history-modal-content" role="dialog" aria-modal="true" aria-labelledby="history-title">
-        {selectedSale ? <SaleDetails sale={selectedSale} onBack={() => setSelectedSale(null)} onPrint={reprint} onVoid={voidSale} readOnly={readOnly} /> : <>
+        {selectedSale ? <SaleDetails sale={selectedSale} onBack={() => setSelectedSale(null)} onPrint={reprint} onVoid={voidSale} onEdit={!readOnly && onEditSale ? beginEdit : null} readOnly={readOnly} /> : <>
             <header className="history-header"><div><h2 id="history-title"><Icon name="receipt" size={24} /> سجل الطلبات</h2><p>عرض جميع الطلبات السابقة حسب تاريخ العمل التشغيلي</p></div><button className="close-btn" onClick={onClose} aria-label="إغلاق سجل الطلبات"><Icon name="x" size={23} /></button></header>
           <div className="history-filters">
             <label className="history-search"><Icon name="search" size={20} /><input type="search" placeholder="ابحث برقم الطلب أو المنتج…" value={query} onChange={event => resetPage(() => setQuery(event.target.value))} /></label>
@@ -130,10 +151,11 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
             <select aria-label="وسيلة الدفع" value={method} onChange={event => resetPage(() => setMethod(event.target.value))}><option value="all">جميع الوسائل</option><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select>
             <select aria-label="حالة الطلب" value={status} onChange={event => resetPage(() => setStatus(event.target.value))}><option value="all">جميع الحالات</option><option value="completed">مكتمل</option><option value="voided">مبطل</option></select>
           </div>
-          <div className="history-table-wrapper"><table className="history-table"><thead><tr><th>#</th><th>رقم الطلب</th><th>النوع</th><th>اليوم التشغيلي / الوقت</th><th>الوسيلة</th><th>المبلغ</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{paginated.map((sale, index) => <tr key={sale.id} className={sale.status === 'voided' ? 'history-row-voided' : ''}><td className="number-cell">{formatNumber((safePage - 1) * PAGE_SIZE + index + 1)}</td><td className="number-cell">{formatNumber(sale.orderNumber)}</td><td>{typeLabel(sale)}</td><td className="date-cell" title={`وقت البيع الفعلي: ${localDate(sale.createdAt)}`}><span className="history-business-date">{businessDateLabel(sale)}<small>{formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}</small></span></td><td>{paymentLabel(sale.paymentMethod)}</td><td className="number-cell money-cell">{money(sale.total)}</td><td><span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span></td><td><div className="h-actions"><button onClick={() => setSelectedSale(sale)} title="عرض التفاصيل" aria-label={`عرض تفاصيل الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="search" size={17} /></button>{!readOnly && <><button onClick={() => reprint(sale)} title="إعادة طباعة" aria-label={`إعادة طباعة الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="printer" size={17} /></button><button disabled title="التعديل المالي غير متاح حتى يُربط بسجل تصحيح مصرح به" aria-label="تعديل غير متاح"><Icon name="edit" size={17} /></button>{sale.status !== 'voided' && <button className="history-void" onClick={() => setSelectedSale(sale)} title="فتح تفاصيل الإبطال" aria-label={`إبطال الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="trash" size={17} /></button>}</>}</div></td></tr>)}{!paginated.length && <tr><td className="history-empty" colSpan="8"><Icon name="receipt" size={28} /><b>{sales.length ? 'لا توجد مبيعات تطابق عوامل التصفية' : 'لا توجد مبيعات مسجلة بعد'}</b></td></tr>}</tbody></table></div>
+          <div className="history-table-wrapper"><table className="history-table"><thead><tr><th>#</th><th>رقم الطلب</th><th>النوع</th><th>اليوم التشغيلي / الوقت</th><th>الوسيلة</th><th>المبلغ</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{paginated.map((sale, index) => <tr key={sale.id} className={sale.status === 'voided' ? 'history-row-voided' : ''}><td className="number-cell">{formatNumber((safePage - 1) * PAGE_SIZE + index + 1)}</td><td className="number-cell">{formatNumber(sale.orderNumber)}</td><td>{typeLabel(sale)}</td><td className="date-cell" title={`وقت البيع الفعلي: ${localDate(sale.createdAt)}`}><span className="history-business-date">{businessDateLabel(sale)}<small>{formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}</small></span></td><td>{paymentLabel(sale.paymentMethod)}</td><td className="number-cell money-cell">{money(sale.total)}</td><td><span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span></td><td><div className="h-actions"><button onClick={() => setSelectedSale(sale)} title="عرض التفاصيل" aria-label={`عرض تفاصيل الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="search" size={17} /></button>{!readOnly && <><button onClick={() => reprint(sale)} title="إعادة طباعة" aria-label={`إعادة طباعة الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="printer" size={17} /></button><button disabled={!onEditSale || sale.status === 'voided'} onClick={() => beginEdit(sale)} title={onEditSale ? 'تعديل آمن مع سجل تدقيق' : 'التعديل متاح فقط لليوم المفتوح'} aria-label="تعديل الطلب"><Icon name="edit" size={17} /></button>{sale.status !== 'voided' && <button className="history-void" onClick={() => setSelectedSale(sale)} title="فتح تفاصيل الإبطال" aria-label={`إبطال الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="trash" size={17} /></button>}</>}</div></td></tr>)}{!paginated.length && <tr><td className="history-empty" colSpan="8"><Icon name="receipt" size={28} /><b>{sales.length ? 'لا توجد مبيعات تطابق عوامل التصفية' : 'لا توجد مبيعات مسجلة بعد'}</b></td></tr>}</tbody></table></div>
           <footer className="history-footer"><div className="history-count">إجمالي النتائج: <b>{formatNumber(filtered.length)}</b></div><nav className="pagination" aria-label="ترقيم صفحات السجل"><button disabled={safePage === 1} onClick={() => setPage(value => value - 1)}>السابق</button><span>صفحة {formatNumber(safePage)} من {formatNumber(totalPages)}</span><button disabled={safePage === totalPages} onClick={() => setPage(value => value + 1)}>التالي</button></nav></footer>
         </>}
       </section>
+      {editingSale && editForm && <div className="history-edit-overlay" role="presentation"><form className="history-edit-modal" onSubmit={saveEdit} dir="rtl"><h3>تعديل آمن للطلب #{formatNumber(editingSale.orderNumber)}</h3><p>تعديل البيانات المسموحة فقط. المنتجات ورقم الطلب واليوم التشغيلي محمية.</p><label>الملاحظة<textarea value={editForm.note} onChange={event => setEditForm({ ...editForm, note: event.target.value })} /></label><label>المصدر / النوع<select value={editForm.orderType} onChange={event => setEditForm({ ...editForm, orderType: event.target.value })}><option value="">داخل الكوفي</option><option value="بلي">بلي</option><option value="توترز">توترز</option><option value="سفري">سفري</option></select></label><label>وسيلة الدفع<select value={editForm.paymentMethod} onChange={event => setEditForm({ ...editForm, paymentMethod: event.target.value })}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label><label>الخصم<input type="number" min="0" step="1" value={editForm.discount} onChange={event => setEditForm({ ...editForm, discount: event.target.value })} /></label><label>الكاشير<input value={editForm.cashier} onChange={event => setEditForm({ ...editForm, cashier: event.target.value })} /></label><label>ملاحظة الإدارة<textarea value={editForm.adminNote} onChange={event => setEditForm({ ...editForm, adminNote: event.target.value })} /></label><label>سبب التعديل<input required value={editForm.reason} onChange={event => setEditForm({ ...editForm, reason: event.target.value })} /></label>{editError && <p className="form-error" role="alert">{editError}</p>}<div className="history-edit-actions"><button type="button" onClick={() => setEditingSale(null)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy}>{editBusy ? 'جارٍ الحفظ…' : 'حفظ مع التدقيق'}</button></div></form></div>}
     </div>
   )
 }

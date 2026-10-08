@@ -14,6 +14,7 @@ import { buildEmployeeReport, filterEmployeeSummaries } from '../services/employ
 import { buildCaptainReport, filterCaptainCandidates } from '../services/captainReport.js'
 import { filterCashOutflowReport, normalizeCashOutflowReport, sumCashOutflowReport } from '../services/cashOutflowReport.js'
 import { buildManagementPaymentsReport } from '../services/managementPaymentsReport.js'
+import { buildDeliveryDiscountReport, deliverySourceLabel } from '../services/deliveryDiscountReport.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -59,6 +60,15 @@ const a4PrintStyles = `
   .employee-summary-thermal { display: none; }
   thead { display: table-header-group; }
   tr, .report-paper-header, .report-paper-footer { break-inside: avoid; page-break-inside: avoid; }
+  .non-printable { display: none !important; }
+  .employee-report-paper { font-size: 10pt; line-height: 1.25; }
+  .employee-report-paper .report-paper-header { padding-bottom: 2mm; margin-bottom: 3mm; }
+  .employee-report-paper h2 { font-size: 14pt; margin-bottom: 1mm; }
+  .employee-report-paper h3 { font-size: 11pt; margin: 3mm 0 1.5mm; }
+  .employee-report-paper .print-table { margin-bottom: 3mm; }
+  .employee-report-paper .print-table th, .employee-report-paper .print-table td { padding: 1.2mm; font-size: 9pt; line-height: 1.2; }
+  .employee-report-paper .summary-highlight td, .employee-report-paper .summary-row td { font-size: 9pt; }
+  .delivery-discount-paper .print-table th, .delivery-discount-paper .print-table td { padding: 1.4mm; font-size: 8.5pt; line-height: 1.2; }
 `
 
 // Match the thermal receipt's 80mm paper settings. Content stays below the
@@ -114,6 +124,10 @@ const thermalComprehensiveStyles = `
   .employee-thermal-net { border-top: .3mm solid #000; padding-top: .6mm; font-weight: 900; }
   .employee-thermal-total { border-width: .5mm; }
   .employee-thermal-empty { border: .3mm solid #000; padding: 2mm; text-align: center; }
+  .delivery-discount-paper .print-table th, .delivery-discount-paper .print-table td { padding: 1mm .6mm; font-size: 7.5pt; line-height: 1.15; }
+  .delivery-discount-paper h2 { font-size: 13pt; }
+  .delivery-discount-paper h3 { font-size: 10pt; }
+  .non-printable { display: none !important; }
   .report-paper > *, .report-paper h2, .report-paper h3, .report-paper p, .report-paper td, .report-paper th, .report-paper .thermal-card-body > *, .report-paper .thermal-card-foot > *, .report-paper .thermal-cards-total > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; page-break-inside: avoid; }
@@ -180,6 +194,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const [periodError, setPeriodError] = useState('')
   const [expenseTypeFilter, setExpenseTypeFilter] = useState('all')
   const [managementTypeFilter, setManagementTypeFilter] = useState('all')
+  const [deliverySourceFilter, setDeliverySourceFilter] = useState('all')
 
   // Reports always open on the active business date and use one shared range.
   useEffect(() => {
@@ -267,6 +282,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const normalizedCashOutflows = useMemo(() => normalizeCashOutflowReport({ expenses, transactions: cashboxTransactions, staff, operationalDayDates: expenseOperationalDayDates }), [expenses, cashboxTransactions, staff, expenseOperationalDayDates])
   const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
   const managementReport = useMemo(() => buildManagementPaymentsReport({ expenses, transactions: cashboxTransactions, staff, from: periodFrom, to: periodTo, type: managementTypeFilter }), [expenses, cashboxTransactions, staff, periodFrom, periodTo, managementTypeFilter])
+  const deliveryDiscountReport = useMemo(() => buildDeliveryDiscountReport(filteredSales, { from: periodFrom, to: periodTo, source: deliverySourceFilter }), [filteredSales, periodFrom, periodTo, deliverySourceFilter])
 
   const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales: reportSales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, reportSales, expenses, cashboxTransactions, periodFrom, periodTo])
   const visibleEmployeeSummaries = useMemo(() => filterEmployeeSummaries(employeeDataset.summaries, employeeQuery), [employeeDataset.summaries, employeeQuery])
@@ -371,7 +387,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
 
   const printReportDirect = () => {
     if (!directThermalReady || !onDirectThermalPrint) return
-    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
+    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات بلي وتوترز', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions)
       : undefined
@@ -410,6 +426,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <Icon name="receipt" size={40} />
             <b>تقرير الطلبات / المبيعات</b>
             <small>كل المبيعات ضمن الفترة المختارة</small>
+          </button>
+          <button className="report-card-btn" onClick={() => setReportType('delivery-discounts')} data-testid="delivery-discount-report-card">
+            <Icon name="receipt" size={40} />
+            <b>تقرير خصومات بلي وتوترز</b>
+            <small>من سجل المبيعات المركزي للفترة المختارة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('materials')}>
             <Icon name="box" size={40} />
@@ -472,7 +493,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     return <div className="report-view-container employee-report-view" dir="rtl">
       <div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => printReport('thermal')}><Icon name="printer" size={20} /> طباعة حرارية 80mm</button><button className="outline-btn" type="button" onClick={() => printReport('a4')}><Icon name="printer" size={20} /> طباعة A4 / PDF</button></div></div>
       <section className="employee-report-controls non-printable" aria-label="فلترة تقرير الموظفين"><label>ابحث باسم الموظف أو الكود<input value={employeeQuery} onChange={event => setEmployeeQuery(event.target.value)} placeholder="ابحث باسم الموظف أو الكود" /></label><label>اختيار الموظف<select value={selectedEmployeeId} onChange={event => setSelectedEmployeeId(event.target.value)}><option value="">كل الموظفين / تصفية نهاية الشهر</option>{visibleEmployeeSummaries.map(row => <option key={row.employee.id} value={row.employee.id}>{row.employee.name}{row.employee.code ? ` · ${row.employee.code}` : ''}</option>)}</select></label><div className="reports-shortcuts"><button type="button" onClick={() => { setPeriodFrom(`${defaultBusinessDate.slice(0, 7)}-01`); setPeriodTo(defaultBusinessDate) }}>هذا الشهر</button><button type="button" onClick={() => { const previous = shiftDate(`${defaultBusinessDate.slice(0, 7)}-01`, -1); setPeriodFrom(`${previous.slice(0, 7)}-01`); setPeriodTo(previous) }}>الشهر السابق</button><button type="button" onClick={() => { setPeriodFrom(shiftDate(defaultBusinessDate, -29)); setPeriodTo(defaultBusinessDate) }}>آخر 30 يوم</button></div><div className="employee-report-date-range"><label>من تاريخ<input type="date" value={periodFrom} onChange={event => setPeriodFrom(event.target.value)} /></label><label>إلى تاريخ<input type="date" value={periodTo} onChange={event => setPeriodTo(event.target.value)} /></label></div></section>
-       <div className="report-paper"><div className="report-paper-header"><img src={logoUrl} alt="" className="report-logo" /><h2>{summary ? `تقرير موظف: ${summary.employee.name}` : 'تصفية نهاية الشهر - الموظفين'}</h2>{summary && <p>الكود: {summary.employee.code || '—'}</p>}<p>من {periodFrom} إلى {periodTo}</p><p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || 'الإدارة'}</p></div>{printContent}</div>
+       <div className="report-paper employee-report-paper"><div className="report-paper-header"><img src={logoUrl} alt="" className="report-logo" /><h2>{summary ? `تقرير موظف: ${summary.employee.name}` : 'تصفية نهاية الشهر - الموظفين'}</h2>{summary && <p>الكود: {summary.employee.code || '—'}</p>}<p>من {periodFrom} إلى {periodTo}</p><p>تاريخ الطباعة: {getDefaultReportDate()} · المستخدم: {session?.name || 'الإدارة'}</p></div>{printContent}</div>
     </div>
   }
 
@@ -597,7 +618,16 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       </section>
     }
 
-    if (reportType === 'period') {
+    if (reportType === 'delivery-discounts') {
+      title = 'تقرير خصومات بلي وتوترز'
+      const total = deliveryDiscountReport.totals.overall
+      const summary = source => deliveryDiscountReport.totals[source]
+      content = <>
+        <div className="reports-range-toolbar non-printable" aria-label="فلتر مصدر تقرير الخصومات"><label>المصدر<select aria-label="مصدر الخصم" value={deliverySourceFilter} onChange={event => setDeliverySourceFilter(event.target.value)}><option value="all">بلي وتوترز</option><option value="baly">بلي</option><option value="toters">توترز</option></select></label><span>الفترة: {periodFrom} إلى {periodTo}</span></div>
+        <table className="print-table report-summary" data-testid="delivery-discount-summary"><tbody>{['baly', 'toters'].map(source => <tr key={source}><td>{deliverySourceLabel(source)} · الطلبات</td><td className="number-cell">{formatNumber(summary(source).count)}</td><td>{format(summary(source).discount)}</td></tr>)}<tr className="summary-highlight"><td>الإجمالي العام · {formatNumber(total.count)} طلب</td><td className="number-cell">{format(total.discount)}</td><td>{format(total.finalTotal)}</td></tr></tbody></table>
+        <table className="print-table delivery-discount-table" data-testid="delivery-discount-report"><thead><tr><th>businessDate</th><th>رقم الطلب</th><th>المصدر</th><th>قبل الخصم</th><th>الخصم</th><th>%</th><th>بعد الخصم</th><th>الدفع</th><th>الكاشير</th><th>createdAt</th></tr></thead><tbody>{deliveryDiscountReport.rows.map(row => <tr key={row.id}><td>{row.businessDate}</td><td>{row.orderNumber}</td><td>{row.sourceLabel}</td><td className="number-cell">{format(row.originalTotal)}</td><td className="number-cell">{format(row.discount)}</td><td className="number-cell">{row.discountPercent.toFixed(2)}%</td><td className="number-cell">{format(row.finalTotal)}</td><td>{row.paymentMethod === 'cash' ? 'نقدي' : 'إلكتروني'}</td><td>{row.cashier}</td><td>{row.createdAt ? formatDate(row.createdAt) : '—'}</td></tr>)}{!deliveryDiscountReport.rows.length && <tr><td colSpan="10">لا توجد طلبات بلي أو توترز ضمن الفترة المحددة</td></tr>}<tr className="summary-row"><td colSpan="4">الإجمالي</td><td className="number-cell">{format(total.discount)}</td><td>—</td><td className="number-cell">{format(total.finalTotal)}</td><td colSpan="3">{formatNumber(total.count)} طلب</td></tr></tbody></table>
+      </>
+    } else if (reportType === 'period') {
       title = 'تقرير الفترة'
       const s = periodDataset.summary
       const kpis = [['إجمالي المبيعات', s.grossSales], ['المبيعات النقدية', s.cashSales], ['المبيعات الإلكترونية', s.electronicSales], ['إجمالي المصاريف', s.expensesTotal], ['سحوبات الصندوق', s.withdrawals], ['إيداعات الصندوق', s.deposits], ['التعديلات', s.adjustments], ['عدد الطلبات', s.orderCount], ['متوسط قيمة الطلب', s.averageOrder], ['صافي النقد', s.netCash], ['رصيد أول الفترة', s.beforeBalance], ['رصيد آخر الفترة', s.endBalance]]

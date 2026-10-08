@@ -1050,6 +1050,13 @@ input, textarea, select { cursor: text; }
 .history-details-actions > button, .void-confirm button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--coffee); font-weight: 600; }
 .history-details-actions > button:disabled { color: #9b958e; background: #f6f4f0; }
 .history-details-actions .history-void, .void-confirm button:first-of-type { border-color: #e7c2be; background: #fff7f6; color: var(--danger); }
+.history-edit-overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(24, 20, 16, .48); }
+.history-edit-modal { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; display: grid; gap: 12px; padding: 22px; border-radius: 14px; background: var(--paper); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
+.history-edit-modal h3, .history-edit-modal p { margin: 0; }
+.history-edit-modal label { display: grid; gap: 5px; font-weight: 700; }
+.history-edit-modal input, .history-edit-modal select, .history-edit-modal textarea { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); font: inherit; }
+.history-edit-modal textarea { min-height: 74px; resize: vertical; }
+.history-edit-actions { display: flex; justify-content: flex-start; gap: 8px; }
 .void-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 3px 0; color: var(--danger); font-size: 12px; }
 
 @media (max-width: 1280px) {
