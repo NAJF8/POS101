@@ -1,4 +1,4 @@
-const BUILD_SHA = '5c13530da859f64bc3a1ec6ffe12118cbbfcaae3'
+const BUILD_SHA = '7e44b48cc55f3e7137938297be2cea775265652c'
 const CACHE_PREFIX = 'pos101-static-'
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_SHA}`
 
