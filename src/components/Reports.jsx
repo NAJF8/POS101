@@ -6,7 +6,7 @@ import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.
 import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { isCashboxExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
-import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, toMoneyNumber } from '../services/financialCenter.js'
+import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
@@ -18,6 +18,7 @@ import { buildDeliveryDiscountReport, deliverySourceLabel } from '../services/de
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
+const ACTUAL_CASH_PENDING = 'بانتظار إدخال الكاش الفعلي'
 // Reports print in their own A4 or thermal 80mm document. Thermal content is
 // intentionally narrower than the Windows driver's confirmed 72.1mm limit.
 const logoUrl = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
@@ -659,6 +660,12 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       const stats = aggregateSales(filteredSales)
       const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)
       const { grossSales, discounts, expenses: expensesTotal, cashboxExpenses, managementExpenses, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll, cashSales, cashboxWithdrawals, managementWithdrawals, withdrawals, deposits, finalAfterAllSettlements } = summary
+      const actualCashMissingLabel = selectedClosedDay ? 'غير مسجل في هذا التقرير القديم' : ACTUAL_CASH_PENDING
+      const actualCashValue = hasActualCash(summary.actualCash) ? format(toMoneyNumber(summary.actualCash, 0)) : actualCashMissingLabel
+      const actualDifferenceValue = summary.endDayDifference == null ? actualCashMissingLabel : `${format(toMoneyNumber(summary.endDayDifference, 0))} ${summary.endDayDifference === 0 ? 'مطابق' : summary.endDayDifference < 0 ? 'نقص' : 'زيادة'}`
+      const netDrawerMovementValue = summary.netDrawerMovement == null ? actualCashMissingLabel : format(toMoneyNumber(summary.netDrawerMovement, 0))
+      const netCashSalesValue = summary.netCashSalesFromDrawer == null ? actualCashMissingLabel : format(toMoneyNumber(summary.netCashSalesFromDrawer, 0))
+      const cashSalesDifferenceValue = summary.cashSalesDifference == null ? actualCashMissingLabel : `${format(toMoneyNumber(summary.cashSalesDifference, 0))} ${summary.cashSalesDifferenceStatus === 'matched' ? 'مطابق' : summary.cashSalesDifferenceStatus === 'short' ? 'نقص' : 'زيادة'}`
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
       const electronicTotal = filteredSales.filter(s => s.paymentMethod === 'electronic').reduce((sum, s) => sum + numberValue(s.total), 0)
@@ -700,14 +707,14 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <tr><td>المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
             <tr><td>السحوبات</td><td className="number-cell">{format(withdrawals)}</td></tr>
             <tr className="summary-highlight"><td>الرصيد المتوقع بالصندوق</td><td className="number-cell">{summary.expectedClosingCash == null ? 'غير متوفر' : format(summary.expectedClosingCash)}</td></tr>
-            <tr><td>الكاش الفعلي</td><td className="number-cell">{summary.actualCash == null ? 'غير متوفر' : format(summary.actualCash)}</td></tr>
-            <tr><td>الفرق</td><td className="number-cell">{summary.endDayDifference == null ? 'غير متوفر' : `${format(summary.endDayDifference)} ${summary.endDayDifference === 0 ? 'مطابق' : summary.endDayDifference < 0 ? 'نقص' : 'زيادة'}`}</td></tr>
-            <tr><td>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي</td><td className="number-cell">{summary.netDrawerMovement == null ? 'غير متوفر' : format(summary.netDrawerMovement)}</td></tr>
-            <tr><td>صافي مبيعات اليوم النقدية</td><td className="number-cell">{summary.netCashSalesFromDrawer == null ? 'غير متوفر' : format(summary.netCashSalesFromDrawer)}</td></tr>
-            <tr><td>فرق المبيعات النقدية</td><td className="number-cell">{summary.cashSalesDifference == null ? 'غير متوفر' : `${format(summary.cashSalesDifference)} ${summary.cashSalesDifferenceStatus === 'matched' ? 'مطابق' : summary.cashSalesDifferenceStatus === 'short' ? 'نقص' : 'زيادة'}`}</td></tr>
+            <tr><td>الكاش الفعلي</td><td className="number-cell">{actualCashValue}</td></tr>
+            <tr><td>الفرق</td><td className="number-cell">{actualDifferenceValue}</td></tr>
+            <tr><td>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي</td><td className="number-cell">{netDrawerMovementValue}</td></tr>
+            <tr><td>صافي مبيعات اليوم النقدية</td><td className="number-cell">{netCashSalesValue}</td></tr>
+            <tr><td>فرق المبيعات النقدية</td><td className="number-cell">{cashSalesDifferenceValue}</td></tr>
             <tr><td>سحوبات من الصندوق</td><td className="number-cell">{format(cashboxWithdrawals)}</td></tr>
             <tr><td>سحوبات من الإدارة</td><td className="number-cell">{format(managementWithdrawals)}</td></tr>
-            <tr><td>إجمالي السحوبات</td><td className="number-cell">{format(withdrawals)}</td></tr>
+            <tr><td>إجمالي السحوبات</td><td className="number-cell">{format(toMoneyNumber(withdrawals, 0))}</td></tr>
             <tr><td>الإيداعات</td><td className="number-cell">{format(deposits)}</td></tr>
             <tr className="summary-highlight"><td>المجموع بعد كل التصفيات</td><td className="number-cell">{format(finalAfterAllSettlements)}</td></tr>
             <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(stats.count)}</td></tr>

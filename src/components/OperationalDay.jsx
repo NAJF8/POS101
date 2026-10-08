@@ -3,11 +3,12 @@ import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/recoverySnapshot.js'
-import { calculateEndDayCashAnalysis, toMoneyNumber } from '../services/financialCenter.js'
+import { calculateEndDayCashAnalysis, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
 
 const money = value => formatMoney(toMoneyNumber(value, 0))
 const displayMoney = value => value === null || value === undefined || value === '' ? '—' : money(value)
 const differenceLabel = value => value === null || value === undefined || value === '' ? '' : toMoneyNumber(value, 0) === 0 ? 'مطابق' : toMoneyNumber(value, 0) < 0 ? 'نقص' : 'زيادة'
+const ACTUAL_CASH_PENDING = 'بانتظار إدخال الكاش الفعلي'
 
 export default function OperationalDay({ day = {}, summary = {}, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
@@ -254,11 +255,12 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
            <span>السحوبات <b>{money(safeSettlementPreview.withdrawals)}</b></span>
            <span>الرصيد المتوقع بالصندوق <b>{money(safeSettlementPreview.expectedClosingCash ?? (expectedCashOpening + toMoneyNumber(safeSettlementPreview.dailyCashMovement, 0)))}</b></span>
            {(safeSettlementPreview.openingCashBalance == null && safeSettlementPreview.openingBalance == null && day?.openingCashBalance == null) && <small role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
-          <label className="settlement-actual-cash">الكاش الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل الكاش الفعلي" /></label>
-          {actualCash !== '' && <span>الفرق <b>{displayMoney(endDayAnalysis.difference)} {differenceLabel(endDayAnalysis.difference)}</b></span>}
-          <span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي <b>{displayMoney(endDayAnalysis.netDrawerMovement)}</b></span>
-          <span>صافي مبيعات اليوم النقدية <b>{displayMoney(endDayAnalysis.netCashSalesFromDrawer)}</b></span>
-          <span>فرق المبيعات النقدية <b>{displayMoney(endDayAnalysis.cashSalesDifference)} {differenceLabel(endDayAnalysis.cashSalesDifference)}</b></span>
+           <label className="settlement-actual-cash">أدخل الكاش الفعلي بالصندوق<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل الكاش الفعلي" /></label>
+           <span>الكاش الفعلي <b>{hasActualCash(actualCash) ? money(actualCash) : ACTUAL_CASH_PENDING}</b></span>
+           <span>الفرق <b>{endDayAnalysis.difference == null ? ACTUAL_CASH_PENDING : `${money(endDayAnalysis.difference)} ${differenceLabel(endDayAnalysis.difference)}`}</b></span>
+           <span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي <b>{endDayAnalysis.netDrawerMovement == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netDrawerMovement)}</b></span>
+           <span>صافي مبيعات اليوم النقدية <b>{endDayAnalysis.netCashSalesFromDrawer == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netCashSalesFromDrawer)}</b></span>
+           <span>فرق المبيعات النقدية <b>{endDayAnalysis.cashSalesDifference == null ? ACTUAL_CASH_PENDING : `${money(endDayAnalysis.cashSalesDifference)} ${differenceLabel(endDayAnalysis.cashSalesDifference)}`}</b></span>
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>

@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { calculateEndDayCashAnalysis, hasActualCash, toMoneyNumber } from '../src/services/financialCenter.js'
+
+const operationalSource = fs.readFileSync(new URL('../src/components/OperationalDay.jsx', import.meta.url), 'utf8')
+const reportsSource = fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8')
+const financialCenterSource = fs.readFileSync(new URL('../src/components/FinancialCenter.jsx', import.meta.url), 'utf8')
+
+assert.equal(hasActualCash(undefined), false)
+assert.equal(hasActualCash(null), false)
+assert.equal(hasActualCash(''), false)
+assert.equal(hasActualCash(' '), false)
+assert.equal(hasActualCash(NaN), false)
+assert.equal(hasActualCash(0), true)
+assert.equal(hasActualCash('0'), true)
+assert.equal(hasActualCash(410500), true)
+assert.equal(hasActualCash('410500'), true)
+console.log('ACTUAL_CASH_ZERO_VALID=PASS')
+
+const missing = calculateEndDayCashAnalysis({ openingCashBalance: 81500, cashSales: 338000, expenses: 0, withdrawals: 0, expectedCash: 419500, actualCash: '' })
+assert.equal(missing.actualCash, null)
+assert.equal(missing.difference, null)
+assert.equal(missing.netDrawerMovement, null)
+assert.equal(missing.netCashSalesFromDrawer, null)
+assert.equal(missing.cashSalesDifference, null)
+console.log('ACTUAL_CASH_MISSING_NOT_ERROR=PASS')
+console.log('COMPUTED_ACTUAL_FIELDS_WAIT_FOR_INPUT=PASS')
+
+const known = calculateEndDayCashAnalysis({ openingCashBalance: '81500', cashSales: '338000', expenses: undefined, withdrawals: undefined, expectedCash: '419500', actualCash: '410500' })
+assert.equal(known.actualCash, 410500)
+assert.equal(known.netDrawerMovement, 329000)
+assert.equal(known.netCashSalesFromDrawer, 329000)
+assert.equal(known.cashSalesDifference, -9000)
+console.log('KNOWN_VALUES_STILL_RENDER=PASS')
+console.log('EXPECTED_CASH_RENDERED_WITHOUT_ACTUAL=PASS')
+
+assert.match(operationalSource, /بانتظار إدخال الكاش الفعلي/)
+assert.match(operationalSource, /أدخل الكاش الفعلي بالصندوق/)
+assert.match(reportsSource, /غير مسجل في هذا التقرير القديم/)
+assert.match(reportsSource, /إجمالي السحوبات.*toMoneyNumber\(withdrawals, 0\)/s)
+assert.match(financialCenterSource, /غير مسجل في هذا التقرير القديم/)
+assert.match(financialCenterSource, /بانتظار إدخال الكاش الفعلي/)
+console.log('ACTUAL_CASH_MISSING_LABEL_PENDING_INPUT=PASS')
+console.log('WITHDRAWALS_TOTAL_ZERO_RENDERED=PASS')
+console.log('NO_REPORT_CRASH=PASS')

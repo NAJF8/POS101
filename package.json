@@ -50,6 +50,7 @@
     ,"test:backup-sales-recovery": "node scripts/backup-sales-recovery-regression.mjs"
     ,"test:end-day-opening-balance-report": "node scripts/end-day-opening-balance-report-regression.mjs"
     ,"test:report-page-crash": "node scripts/report-page-crash-regression.mjs"
+    ,"test:actual-cash-pending-input": "node scripts/actual-cash-pending-input-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

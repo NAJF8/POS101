@@ -1,5 +1,5 @@
 import { isCashboxExpense, isManagementExpense, sumExpenses } from './expenseReporting.js'
-import { calculateEndDayCashAnalysis, calculateSettlement, toMoneyNumber } from './financialCenter.js'
+import { calculateEndDayCashAnalysis, calculateSettlement, hasActualCash, toMoneyNumber } from './financialCenter.js'
 
 const amount = value => {
   const numeric = Number(value)
@@ -33,7 +33,7 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
   const expectedClosingCash = report
     ? toMoneyNumber(report.expectedClosingCash ?? report.expectedCash ?? (openingCashBalance ?? 0) + cashSales - expensesForAnalysis - withdrawalsForAnalysis, 0)
     : null
-  const actualCash = report && report.actualCash !== null && report.actualCash !== undefined && report.actualCash !== '' && Number.isFinite(Number(report.actualCash))
+  const actualCash = report && hasActualCash(report.actualCash)
     ? toMoneyNumber(report.actualCash, 0)
     : null
   const analysis = calculateEndDayCashAnalysis({ openingCashBalance, cashSales, expenses: expensesForAnalysis, withdrawals: withdrawalsForAnalysis, expectedCash: expectedClosingCash, actualCash })

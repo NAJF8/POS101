@@ -5,6 +5,10 @@ export const toMoneyNumber = (value, fallback = 0) => {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : fallback
 }
+export const hasActualCash = value => {
+  if (value === null || value === undefined || String(value).trim() === '') return false
+  return Number.isFinite(Number(value))
+}
 const amount = value => toMoneyNumber(value, 0)
 export const normalizeBusinessDate = (value, fallback = '') => {
   const text = String(value || '').trim()
@@ -42,7 +46,7 @@ export const cashAnalysisStatus = difference => difference === null || differenc
 // expected-cash calculation, which remains opening + dailyCashMovement.
 export const calculateEndDayCashAnalysis = ({ openingCashBalance, cashSales = 0, expenses = 0, withdrawals = 0, expectedCash = null, actualCash = null } = {}) => {
   const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
-  const actualKnown = actualCash !== null && actualCash !== undefined && actualCash !== '' && Number.isFinite(Number(actualCash))
+  const actualKnown = hasActualCash(actualCash)
   const opening = toMoneyNumber(openingCashBalance, 0)
   const actual = actualKnown ? toMoneyNumber(actualCash, 0) : null
   const difference = actualKnown && Number.isFinite(Number(expectedCash)) ? actual - toMoneyNumber(expectedCash, 0) : null
@@ -86,8 +90,8 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
 
 export const calculateCashboxDay = ({ openingCashBalance, actualCash, sales = [], expenses = [], transactions = [] } = {}) => {
   const summary = calculateSettlement({ openingCashBalance, sales, expenses, transactions })
-  const actual = Number(actualCash)
-  const actualKnown = Number.isFinite(actual)
+  const actualKnown = hasActualCash(actualCash)
+  const actual = toMoneyNumber(actualCash, 0)
   const difference = actualKnown && summary.openingCashKnown ? actual - summary.expectedClosingCash : null
   return { ...summary, ...calculateEndDayCashAnalysis({ openingCashBalance, cashSales: summary.cashSales, expenses: summary.expenses, withdrawals: summary.withdrawals, expectedCash: summary.openingCashKnown ? summary.expectedCash : null, actualCash }), status: difference === null ? 'unknown' : settlementStatusForDifference(difference) }
 }
@@ -153,9 +157,9 @@ export const latestActiveSettlementCorrection = (corrections = []) => correction
 export const getEffectiveSettlement = (settlement, corrections = []) => {
   const correction = latestActiveSettlementCorrection(corrections)
   if (!correction) {
-    const effectiveActualCash = amount(settlement?.actualCash)
-    const effectiveDifference = effectiveActualCash - amount(settlement?.expectedCash)
-    return { settlement, correction: null, effectiveActualCash, effectiveDifference, effectiveStatus: settlementStatusForDifference(effectiveDifference) }
+    const effectiveActualCash = hasActualCash(settlement?.actualCash) ? toMoneyNumber(settlement.actualCash, 0) : null
+    const effectiveDifference = effectiveActualCash === null ? null : effectiveActualCash - amount(settlement?.expectedCash)
+    return { settlement, correction: null, effectiveActualCash, effectiveDifference, effectiveStatus: effectiveDifference === null ? 'unknown' : settlementStatusForDifference(effectiveDifference) }
   }
   const effectiveActualCash = amount(correction.correctedActualCash)
   const effectiveDifference = effectiveActualCash - amount(settlement?.expectedCash)
