@@ -36,7 +36,7 @@ import { reconcileCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
-import { buildSaleEditPatch, saleEditPreservesIdentity, saleEditableSnapshot } from './saleEdit.js'
+import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot } from './saleEdit.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -586,6 +586,57 @@ export const updateCentralSale = async (sale, changes = {}) => {
   await update(ref(db), { [`pos101_sales/${id}`]: next, [`${auditPath}/${auditId}`]: audit })
   const [saleBack, auditBack] = await Promise.all([get(saleRef), get(financialPath(`${auditPath}/${auditId}`))])
   if (!saleBack.exists() || !auditBack.exists() || !saleEditPreservesIdentity(current, saleBack.val())) throw new Error('تعذر التحقق من تعديل البيع وسجل التدقيق.')
+  const saved = { ...saleBack.val(), id }
+  const local = readSales()
+  const index = local.findIndex(row => saleIdOf(row) === id)
+  if (index >= 0) { local[index] = saved; writeSales(local); dispatchUpdated() }
+  window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: saved }))
+  return saved
+}
+
+export const correctCentralSaleItems = async (sale, changes = {}) => {
+  const user = await staffUser(true)
+  if (!isCentralAdminUser(user)) throw Object.assign(new Error('تصحيح منتجات الطلبات متاح للمدير أو الإدارة فقط.'), { code: 'SALE_CORRECTION_PERMISSION_REQUIRED' })
+  const reason = String(changes.reason || '').trim()
+  if (!reason) throw Object.assign(new Error('سبب تصحيح المنتجات مطلوب.'), { code: 'SALE_CORRECTION_REASON_REQUIRED' })
+  const id = saleIdOf(sale)
+  if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
+  const saleRef = ref(db, `pos101_sales/${id}`)
+  const currentSnapshot = await get(saleRef)
+  if (!currentSnapshot.exists()) throw Object.assign(new Error('البيع المركزي غير موجود.'), { code: 'SALE_NOT_FOUND' })
+  const current = { ...currentSnapshot.val(), id }
+  if (current.status === 'voided' || current.voided) throw Object.assign(new Error('لا يمكن تعديل بيع مبطل.'), { code: 'SALE_VOIDED' })
+  const dayId = String(current.operationalDayId || current.operational_day_id || '').trim()
+  if (!dayId) throw Object.assign(new Error('لا يمكن تعديل بيع بلا يوم تشغيلي.'), { code: 'SALE_DAY_REQUIRED' })
+  const daySnapshot = await get(ref(db, `pos101_operational_days/${dayId}`))
+  const day = daySnapshot.exists() ? daySnapshot.val() : null
+  if (!day || day.status !== 'open') throw Object.assign(new Error('تصحيح المنتجات متاح فقط ضمن اليوم التشغيلي المفتوح.'), { code: 'SALE_DAY_CLOSED' })
+  const patch = buildSaleItemCorrectionPatch(current, changes)
+  const now = Date.now()
+  const next = { ...current, ...patch, id, saleId: current.saleId || id, updatedAt: now, updatedByUid: user.uid, updatedByName: user.displayName || user.email || '', lastEditReason: reason, lastEditAction: 'SOLD_ORDER_ITEM_CORRECTION' }
+  if (!saleEditPreservesIdentity({ ...current, items: undefined }, { ...next, items: undefined })) throw new Error('محاولة تعديل حقل محمي من البيع.')
+  const auditId = `sale-item-correction-${safeKey(id)}-${now}-${crypto.randomUUID().slice(0, 8)}`
+  const oldTotals = correctionTotalsSnapshot(current)
+  const newTotals = correctionTotalsSnapshot(next)
+  const audit = {
+    ...financialAuditPayload({ id: auditId, user, action: 'SOLD_ORDER_ITEM_CORRECTION', entityType: 'sale_item_correction', entityId: id, before: { saleId: id, orderNumber: current.orderNumber, items: soldItemsSnapshot(current), totals: oldTotals }, after: { saleId: id, orderNumber: next.orderNumber, items: next.items, totals: newTotals }, reason, businessDate: current.businessDate || day.businessDate || '' }),
+    saleId: id,
+    orderNumber: current.orderNumber,
+    editedBy: { uid: user.uid, name: user.displayName || user.email || '' },
+    editedAt: now,
+    oldItems: soldItemsSnapshot(current),
+    newItems: next.items,
+    oldTotals,
+    newTotals,
+    changedFields: saleCorrectionChangedFields(current, next),
+  }
+  const historyEntry = { action: audit.action, auditId, editedAt: now, editedByUid: user.uid, reason, oldTotal: oldTotals.total, newTotal: newTotals.total }
+  if (Array.isArray(current.editHistory)) next.editHistory = [...current.editHistory, historyEntry]
+  await update(ref(db), { [`pos101_sales/${id}`]: next, [`${auditPath}/${auditId}`]: audit })
+  const [saleBack, auditBack, salesBack] = await Promise.all([get(saleRef), get(financialPath(`${auditPath}/${auditId}`)), get(salesRef())])
+  if (!saleBack.exists() || !auditBack.exists() || !saleEditPreservesIdentity({ ...current, items: undefined }, { ...saleBack.val(), items: undefined })) throw new Error('تعذر التحقق من تصحيح البيع وسجل التدقيق.')
+  const matching = centralValues(salesBack).filter(row => saleIdOf(row) === id)
+  if (matching.length !== 1 || String(saleBack.val()?.orderNumber || '') !== String(current.orderNumber || '')) throw new Error('تعذر التحقق من هوية البيع وعدم تكراره.')
   const saved = { ...saleBack.val(), id }
   const local = readSales()
   const index = local.findIndex(row => saleIdOf(row) === id)

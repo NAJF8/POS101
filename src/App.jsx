@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, canSyncPosSales, centralAuth, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale } from './services/posCentralSync.js'
+import { activateKioskWithCode, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -966,6 +966,7 @@ export default function App() {
   // Use the hydrated current user here: adminAuthUser was captured before the
   // async authorization record loaded, so it could permanently miss admin-viewer.
   const adminReady = isCentralAdminUser(adminAuthUser) || isCentralAdminUser(centralAuthUser)
+  const saveSaleEdit = useCallback((sale, changes) => changes?.itemCorrection ? correctCentralSaleItems(sale, changes) : updateCentralSale(sale, changes), [])
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
   const requestView = useCallback(view => {
@@ -1038,7 +1039,9 @@ export default function App() {
         <OrderHistoryMenu
           session={session}
           salesOverride={adminReady ? adminCentralSales : null}
-          readOnly
+          readOnly={!adminReady}
+          onEditSale={adminReady ? saveSaleEdit : null}
+          canCorrectSaleItems={adminReady}
           onClose={() => setCurrentView('dashboard')}
         />
       )}
@@ -1073,7 +1076,7 @@ export default function App() {
             onNewOrder={newOrder}
             session={session}
           />
-          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={updateCentralSale} onClose={() => setModal(null)} />}
+          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} canCorrectSaleItems={adminReady} onClose={() => setModal(null)} />}
         </div>
       )}
 

@@ -33,6 +33,7 @@ const normalizeSoldItem = (item, index) => {
   const notes = item?.notes ?? item?.note ?? ''
   return {
     key: item?.lineId || item?.id || `sold-item-${index}`,
+    _originalIndex: index,
     name: item?.name || item?.productName || item?.title || item?.itemName || item?.product?.name || 'منتج غير مسمى',
     quantity: Number.isFinite(quantityValue) ? quantityValue : 0,
     unitPrice: Number.isFinite(unitPriceValue) ? unitPriceValue : 0,
@@ -48,6 +49,17 @@ function SoldProductsSnapshot({ sale }) {
     <h4 id="history-edit-products-title">المنتجات المباعة</h4>
     {items.length ? <div className="history-edit-items-table-wrap"><table className="history-edit-items-table"><thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>المجموع</th></tr></thead><tbody>{items.map(item => <tr key={item.key}><td><b>{item.name}</b>{item.options && <small>الخيارات: {item.options}</small>}{item.notes && <small>ملاحظة: {item.notes}</small>}</td><td className="number-cell">{formatNumber(item.quantity)}</td><td className="number-cell">{money(item.unitPrice)}</td><td className="number-cell">{money(item.lineTotal)}</td></tr>)}</tbody></table></div> : <p className="history-edit-empty-items">لا توجد تفاصيل منتجات محفوظة لهذا الطلب</p>}
     <dl className="history-edit-order-summary"><div><dt>المجموع قبل الخصم</dt><dd>{money(sale?.subtotal)}</dd></div><div><dt>الخصم</dt><dd>{money(sale?.discount)}</dd></div><div><dt>الإجمالي بعد الخصم</dt><dd>{money(sale?.total)}</dd></div><div><dt>وسيلة الدفع</dt><dd>{paymentLabel(sale?.paymentMethod)}</dd></div><div><dt>نوع الطلب / المصدر</dt><dd>{typeLabel(sale)}</dd></div></dl>
+  </section>
+}
+
+function EditableSoldProducts({ items, enabled, canCorrect, onChange, onDelete, oldTotal, newTotal, paymentMethod, orderType }) {
+  const subtotal = items.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0)
+  return <section className="history-edit-products" aria-labelledby="history-edit-products-title">
+    <div className="history-edit-products-heading"><h4 id="history-edit-products-title">المنتجات المباعة</h4><button type="button" className="history-edit-correction-toggle" disabled={!canCorrect} onClick={enabled.toggle}>{enabled.value ? 'إيقاف تصحيح المنتجات' : 'تفعيل تصحيح المنتجات'}</button></div>
+    {!canCorrect && <p className="history-edit-permission-note">تصحيح المنتجات متاح للمدير أو الإدارة فقط.</p>}
+    {enabled.value && <p className="history-edit-warning" role="note">هذا التصحيح يؤثر على إجمالي الطلب والتقارير وسيتم تسجيله في سجل التدقيق</p>}
+    {items.length ? <div className="history-edit-items-table-wrap"><table className="history-edit-items-table history-edit-items-editable"><thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>المجموع</th><th aria-label="إجراء" /></tr></thead><tbody>{items.map(item => { const lineTotal = (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0); return <tr key={item.key}><td><b>{item.name}</b>{item.options && <small>الخيارات: {item.options}</small>}{item.notes && <small>ملاحظة: {item.notes}</small>}</td><td className="number-cell"><input aria-label={`كمية ${item.name}`} type="number" min="0.001" step="any" value={item.quantity} disabled={!enabled.value} onChange={event => onChange(item._originalIndex, 'quantity', event.target.value)} /></td><td className="number-cell"><input aria-label={`سعر ${item.name}`} type="number" min="0" step="any" value={item.unitPrice} disabled={!enabled.value} onChange={event => onChange(item._originalIndex, 'unitPrice', event.target.value)} /></td><td className="number-cell">{money(lineTotal)}</td><td>{enabled.value && <button type="button" className="history-edit-delete-item" onClick={() => onDelete(item._originalIndex)} aria-label={`حذف ${item.name}`}>حذف</button>}</td></tr> })}</tbody></table></div> : <p className="history-edit-empty-items">لا توجد تفاصيل منتجات محفوظة لهذا الطلب</p>}
+    <dl className="history-edit-order-summary"><div><dt>المجموع قبل الخصم</dt><dd>{money(subtotal)}</dd></div><div><dt>الخصم</dt><dd>يُطبق أدناه</dd></div><div><dt>الإجمالي السابق</dt><dd>{money(oldTotal)}</dd></div><div><dt>الإجمالي الجديد</dt><dd>{money(newTotal)}</dd></div><div><dt>الفرق</dt><dd>{money(newTotal - oldTotal)}</dd></div><div><dt>وسيلة الدفع</dt><dd>{paymentLabel(paymentMethod)}</dd></div><div><dt>نوع الطلب / المصدر</dt><dd>{orderType || 'داخل الكوفي'}</dd></div></dl>
   </section>
 }
 
@@ -103,7 +115,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }
   )
 }
 
-export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, readOnly = false }) {
+export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, canCorrectSaleItems = false, readOnly = false }) {
   const [sales, setSales] = useState(() => salesOverride ?? readSales())
   const [query, setQuery] = useState('')
   const [fromDate, setFromDate] = useState('')
@@ -116,6 +128,8 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const [editForm, setEditForm] = useState(null)
   const [editBusy, setEditBusy] = useState(false)
   const [editError, setEditError] = useState('')
+  const [correctionMode, setCorrectionMode] = useState(false)
+  const [correctionItems, setCorrectionItems] = useState([])
 
   useEffect(() => {
     if (!editingSale) return undefined
@@ -175,15 +189,24 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const beginEdit = sale => {
     setEditError('')
     setEditingSale(sale)
+    setCorrectionMode(false)
+    setCorrectionItems(soldItemsForEdit(sale).map(normalizeSoldItem))
     const discount = sale.discount === '' || !Number.isFinite(Number(sale.discount)) ? 0 : sale.discount
     setEditForm({ note: sale.customerNote ?? sale.orderNote ?? sale.cashierNote ?? sale.note ?? sale.notes ?? '', orderType: sale.orderType || sale.order?.orderType || '', paymentMethod: sale.paymentMethod || 'cash', discount, cashier: sale.cashierNameSnapshot || sale.cashierName || sale.seller || '', adminNote: sale.adminNote || sale.editNote || '', reason: '' })
+  }
+  const updateCorrectionItem = (originalIndex, field, value) => setCorrectionItems(items => items.map(item => item._originalIndex === originalIndex ? { ...item, [field]: value } : item))
+  const deleteCorrectionItem = originalIndex => {
+    if (correctionItems.length <= 1) { setEditError('لا يمكن حذف جميع المنتجات من طلب مكتمل. استخدم إلغاء/تصحيح إداري منفصل.'); return }
+    setCorrectionItems(items => items.filter(item => item._originalIndex !== originalIndex))
+    setEditError('')
   }
   const saveEdit = async event => {
     event.preventDefault()
     if (!editingSale || !onEditSale || !editForm) return
     setEditBusy(true); setEditError('')
     try {
-      const saved = await onEditSale(editingSale, editForm)
+      const changes = correctionMode ? { ...editForm, itemCorrection: true, items: correctionItems } : editForm
+      const saved = await onEditSale(editingSale, changes)
       const nextSales = sales.map(entry => entry.id === saved.id ? saved : entry)
       setSales(nextSales); setSelectedSale(saved); setEditingSale(null); setEditForm(null)
     } catch (error) {
@@ -207,7 +230,7 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
           <footer className="history-footer"><div className="history-count">إجمالي النتائج: <b>{formatNumber(filtered.length)}</b></div><nav className="pagination" aria-label="ترقيم صفحات السجل"><button disabled={safePage === 1} onClick={() => setPage(value => value - 1)}>السابق</button><span>صفحة {formatNumber(safePage)} من {formatNumber(totalPages)}</span><button disabled={safePage === totalPages} onClick={() => setPage(value => value + 1)}>التالي</button></nav></footer>
         </>}
       </section>
-      {editingSale && editForm && createPortal(<div className="history-edit-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setEditingSale(null)}><form className="history-edit-modal" onSubmit={saveEdit} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-edit-title"><header className="history-edit-header"><div><h3 id="history-edit-title">تعديل الطلب رقم {formatNumber(editingSale.orderNumber)}</h3><p>المنتجات ورقم الطلب واليوم التشغيلي محمية.</p></div><button type="button" className="history-edit-close" onClick={() => setEditingSale(null)} disabled={editBusy} aria-label="إغلاق نافذة تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-edit-body"><SoldProductsSnapshot sale={editingSale} /><label><span>المصدر / النوع</span><select value={editForm.orderType} onChange={event => setEditForm({ ...editForm, orderType: event.target.value })}><option value="">داخل الكوفي</option><option value="بلي">بلي</option><option value="توترز">توترز</option><option value="سفري">سفري</option></select></label><label><span>وسيلة الدفع</span><select value={editForm.paymentMethod} onChange={event => setEditForm({ ...editForm, paymentMethod: event.target.value })}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label><label className="history-edit-discount"><span>الخصم</span><input type="number" min="0" step="1" inputMode="numeric" placeholder="0" value={editForm.discount ?? ''} onChange={event => setEditForm({ ...editForm, discount: event.target.value })} /></label><label><span>اسم الكاشير</span><input value={editForm.cashier} onChange={event => setEditForm({ ...editForm, cashier: event.target.value })} /></label><label><span>ملاحظة العميل</span><textarea className="history-edit-textarea-short" value={editForm.note} onChange={event => setEditForm({ ...editForm, note: event.target.value })} /></label><label><span>ملاحظة الإدارة</span><textarea className="history-edit-textarea-short" value={editForm.adminNote} onChange={event => setEditForm({ ...editForm, adminNote: event.target.value })} /></label><label><span>سبب التعديل</span><input required value={editForm.reason} onChange={event => setEditForm({ ...editForm, reason: event.target.value })} /></label>{editError && <p className="form-error" role="alert">{editError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={() => setEditingSale(null)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy}>{editBusy ? 'جارٍ الحفظ…' : 'حفظ التعديل'}</button></footer></form></div>, document.body)}
+      {editingSale && editForm && createPortal(<div className="history-edit-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setEditingSale(null)}><form className="history-edit-modal" onSubmit={saveEdit} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-edit-title"><header className="history-edit-header"><div><h3 id="history-edit-title">تعديل الطلب رقم {formatNumber(editingSale.orderNumber)}</h3><p>{correctionMode ? 'وضع تصحيح إداري للعناصر والأسعار.' : 'المنتجات ورقم الطلب واليوم التشغيلي محمية.'}</p></div><button type="button" className="history-edit-close" onClick={() => setEditingSale(null)} disabled={editBusy} aria-label="إغلاق نافذة تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-edit-body"><EditableSoldProducts items={correctionItems} canCorrect={canCorrectSaleItems} enabled={{ value: correctionMode, toggle: () => { setCorrectionMode(value => !value); setEditError('') } }} onChange={updateCorrectionItem} onDelete={deleteCorrectionItem} oldTotal={Number(editingSale.total) || 0} newTotal={correctionMode ? correctionItems.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0) - (Number(editForm.discount) || 0) : Number(editingSale.total) || 0} paymentMethod={editForm.paymentMethod} orderType={editForm.orderType} /><label><span>المصدر / النوع</span><select value={editForm.orderType} onChange={event => setEditForm({ ...editForm, orderType: event.target.value })}><option value="">داخل الكوفي</option><option value="بلي">بلي</option><option value="توترز">توترز</option><option value="سفري">سفري</option></select></label><label><span>وسيلة الدفع</span><select value={editForm.paymentMethod} onChange={event => setEditForm({ ...editForm, paymentMethod: event.target.value })}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label><label className="history-edit-discount"><span>الخصم</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={editForm.discount ?? ''} onChange={event => setEditForm({ ...editForm, discount: event.target.value })} /></label><label><span>اسم الكاشير</span><input value={editForm.cashier} onChange={event => setEditForm({ ...editForm, cashier: event.target.value })} /></label><label><span>ملاحظة العميل</span><textarea className="history-edit-textarea-short" value={editForm.note} onChange={event => setEditForm({ ...editForm, note: event.target.value })} /></label><label><span>ملاحظة الإدارة</span><textarea className="history-edit-textarea-short" value={editForm.adminNote} onChange={event => setEditForm({ ...editForm, adminNote: event.target.value })} /></label><label><span>سبب التعديل {correctionMode ? '(مطلوب للتصحيح الإداري)' : ''}</span><input required value={editForm.reason} onChange={event => setEditForm({ ...editForm, reason: event.target.value })} /></label>{editError && <p className="form-error" role="alert">{editError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={() => setEditingSale(null)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy || !String(editForm.reason || '').trim() || (correctionMode && !canCorrectSaleItems)}>{editBusy ? 'جارٍ الحفظ…' : correctionMode ? 'حفظ التصحيح' : 'حفظ التعديل'}</button></footer></form></div>, document.body)}
     </div>
   )
 }
