@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildSaleEditPatch, buildSaleItemCorrectionPatch, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot } from '../src/services/saleEdit.js'
+import { buildSaleEditPatch, buildSaleItemCorrectionPatch, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, validateCorrectionIdentity } from '../src/services/saleEdit.js'
 
 const before = { id: 's1', saleId: 's1', operationKey: 'pos101:s1', orderNumber: 7, businessDate: '2026-10-08', operationalDayId: 'day1', subtotal: 10000, discount: 0, total: 10000, items: [{ id: 'coffee', quantity: 1 }], orderType: 'داخل الكوفي', note: 'old' }
 const after = { ...before, ...buildSaleEditPatch(before, { orderType: 'بلي', paymentMethod: 'electronic', discount: 2600, note: 'edited', reason: 'تصحيح المصدر' }) }
@@ -20,4 +20,10 @@ assert.equal(saleCorrectionChangedFields(correctionBefore, { ...correctionBefore
 assert.throws(() => buildSaleItemCorrectionPatch(correctionBefore, { items: [], discount: 0 }), /لا يمكن حذف جميع المنتجات/)
 assert.throws(() => buildSaleItemCorrectionPatch(correctionBefore, { items: [{ ...correctionBefore.items[0], _originalIndex: 0, quantity: 0, unitPrice: 1 }], discount: 0 }), /الكمية/)
 assert.throws(() => buildSaleItemCorrectionPatch(correctionBefore, { items: [{ ...correctionBefore.items[0], _originalIndex: 0, quantity: 1, unitPrice: -1 }], discount: 0 }), /السعر/)
+const manager = { id: 'manager-1', name: 'مدير الاختبار', code: 'M1296', role: 'manager', active: true }
+assert.equal(validateCorrectionIdentity({ name: manager.name, code: manager.code, staff: [manager], requireAdmin: true }).valid, true)
+assert.equal(validateCorrectionIdentity({ name: manager.name, code: 'wrong', staff: [manager], requireAdmin: true }).valid, false)
+assert.equal(validateCorrectionIdentity({ name: 'كاشير', code: 'C100', staff: [{ name: 'كاشير', code: 'C100', role: 'cashier', active: true }], requireAdmin: true }).valid, false)
+assert.equal(maskCorrectionCode('M1296'), '***296')
+assert.equal(maskCorrectionCode('M1296').includes('M1296'), false)
 console.log('SALE_EDIT_REGRESSION=PASS')

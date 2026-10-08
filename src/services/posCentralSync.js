@@ -36,7 +36,7 @@ import { reconcileCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
-import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot } from './saleEdit.js'
+import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -599,6 +599,9 @@ export const correctCentralSaleItems = async (sale, changes = {}) => {
   if (!isCentralAdminUser(user)) throw Object.assign(new Error('تصحيح منتجات الطلبات متاح للمدير أو الإدارة فقط.'), { code: 'SALE_CORRECTION_PERMISSION_REQUIRED' })
   const reason = String(changes.reason || '').trim()
   if (!reason) throw Object.assign(new Error('سبب تصحيح المنتجات مطلوب.'), { code: 'SALE_CORRECTION_REASON_REQUIRED' })
+  const identity = changes.correctionIdentity || {}
+  const identityCheck = validateCorrectionIdentity({ name: identity.name, code: identity.code, staff: await readCentralStaff(), actor: user, authorization: user.pos101Authorization || user.authorization, requireAdmin: true })
+  if (!identityCheck.valid) throw Object.assign(new Error('اسم الكاشير أو الرمز غير صحيح'), { code: 'SALE_CORRECTION_IDENTITY_INVALID' })
   const id = saleIdOf(sale)
   if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
   const saleRef = ref(db, `pos101_sales/${id}`)
@@ -629,8 +632,15 @@ export const correctCentralSaleItems = async (sale, changes = {}) => {
     oldTotals,
     newTotals,
     changedFields: saleCorrectionChangedFields(current, next),
+    correctedByName: identityCheck.name,
+    correctedByCode: identityCheck.maskedCode || maskCorrectionCode(identity.code),
+    correctedByRole: identityCheck.role,
+    correctedByUid: user.uid || '',
+    correctionReason: reason,
+    correctedAt: now,
+    diff: saleCorrectionChangedFields(current, next),
   }
-  const historyEntry = { action: audit.action, auditId, editedAt: now, editedByUid: user.uid, reason, oldTotal: oldTotals.total, newTotal: newTotals.total }
+  const historyEntry = { action: audit.action, auditId, editedAt: now, editedByUid: user.uid, correctedByName: identityCheck.name, correctedByCode: identityCheck.maskedCode, correctedByRole: identityCheck.role, reason, oldTotal: oldTotals.total, newTotal: newTotals.total, changedFields: audit.changedFields }
   if (Array.isArray(current.editHistory)) next.editHistory = [...current.editHistory, historyEntry]
   await update(ref(db), { [`pos101_sales/${id}`]: next, [`${auditPath}/${auditId}`]: audit })
   const [saleBack, auditBack, salesBack] = await Promise.all([get(saleRef), get(financialPath(`${auditPath}/${auditId}`)), get(salesRef())])

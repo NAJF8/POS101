@@ -23,6 +23,26 @@ export const buildSaleEditPatch = (sale, changes = {}) => {
 export const saleEditPreservesIdentity = (before, after) => ['id', 'saleId', 'operationKey', 'orderNumber', 'operationalDayId', 'businessDate', 'items'].every(key => JSON.stringify(before?.[key] ?? null) === JSON.stringify(after?.[key] ?? null))
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key)
+const normalizedText = value => String(value || '').trim().toLocaleLowerCase()
+export const maskCorrectionCode = value => {
+  const code = String(value || '').trim()
+  return code ? `***${code.slice(-3)}` : '***'
+}
+export const validateCorrectionIdentity = ({ name, code, staff = [], actor = null, authorization = null, requireAdmin = true } = {}) => {
+  const normalizedName = normalizedText(name)
+  const normalizedCode = String(code || '').trim()
+  if (!normalizedName || !normalizedCode) return { valid: false, message: 'اسم الكاشير أو الرمز غير صحيح' }
+  const matchingStaff = (Array.isArray(staff) ? staff : []).find(row => row?.active !== false && normalizedText(row.name) === normalizedName && String(row.code || '').trim() === normalizedCode)
+  const actorNameMatches = normalizedText(actor?.displayName || actor?.name || actor?.email) === normalizedName
+  const actorCodeMatches = [authorization?.code, actor?.code, actor?.pos101Code, actor?.customClaims?.pos101Code].some(value => String(value || '').trim() === normalizedCode)
+  const actorRole = String(authorization?.role || actor?.role || '').trim().toLowerCase()
+  const actorMatches = actorNameMatches && actorCodeMatches && ['super_admin', 'admin', 'manager', 'admin-viewer'].includes(actorRole)
+  const role = String(matchingStaff?.role || (actorMatches ? actorRole : '')).trim().toLowerCase()
+  const roleAllowed = ['super_admin', 'admin', 'manager', 'admin-viewer'].includes(role)
+  if (requireAdmin && !(roleAllowed && (matchingStaff || actorMatches))) return { valid: false, message: 'اسم الكاشير أو الرمز غير صحيح' }
+  if (!matchingStaff && !actorMatches) return { valid: false, message: 'اسم الكاشير أو الرمز غير صحيح' }
+  return { valid: true, name: String(matchingStaff?.name || name).trim(), role: role || 'manager', maskedCode: maskCorrectionCode(normalizedCode), staffId: matchingStaff?.id || '' }
+}
 const firstArray = values => values.find(value => Array.isArray(value)) || []
 export const soldItemsSnapshot = sale => firstArray([
   sale?.items, sale?.cart, sale?.products, sale?.orderItems, sale?.lines,

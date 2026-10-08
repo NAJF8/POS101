@@ -8,6 +8,7 @@ const readSales = () => {
 }
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { businessDateForSale } from '../services/reportSales.js'
+import { validateCorrectionIdentity } from '../services/saleEdit.js'
 const money = formatMoney
 const paymentLabel = value => value === 'cash' ? 'نقدي' : value === 'electronic' || value === 'card' ? 'إلكتروني' : 'غير محدد'
 const statusLabel = value => value === 'voided' ? 'مبطل' : 'مكتمل'
@@ -115,7 +116,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }
   )
 }
 
-export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, canCorrectSaleItems = false, readOnly = false }) {
+export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, canCorrectSaleItems = false, staff = [], correctionActor = null, correctionAuthorization = null, readOnly = false }) {
   const [sales, setSales] = useState(() => salesOverride ?? readSales())
   const [query, setQuery] = useState('')
   const [fromDate, setFromDate] = useState('')
@@ -130,6 +131,10 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const [editError, setEditError] = useState('')
   const [correctionMode, setCorrectionMode] = useState(false)
   const [correctionItems, setCorrectionItems] = useState([])
+  const [identityModalOpen, setIdentityModalOpen] = useState(false)
+  const [identityForm, setIdentityForm] = useState({ name: '', code: '', reason: '' })
+  const [identityError, setIdentityError] = useState('')
+  const [editSuccess, setEditSuccess] = useState('')
 
   useEffect(() => {
     if (!editingSale) return undefined
@@ -188,6 +193,9 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   }
   const beginEdit = sale => {
     setEditError('')
+    setEditSuccess('')
+    setIdentityModalOpen(false)
+    setIdentityError('')
     setEditingSale(sale)
     setCorrectionMode(false)
     setCorrectionItems(soldItemsForEdit(sale).map(normalizeSoldItem))
@@ -203,6 +211,12 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const saveEdit = async event => {
     event.preventDefault()
     if (!editingSale || !onEditSale || !editForm) return
+    if (correctionMode) {
+      setIdentityForm({ name: '', code: '', reason: editForm.reason || '' })
+      setIdentityError('')
+      setIdentityModalOpen(true)
+      return
+    }
     setEditBusy(true); setEditError('')
     try {
       const changes = correctionMode ? { ...editForm, itemCorrection: true, items: correctionItems } : editForm
@@ -213,9 +227,28 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
       setEditError(error?.message || 'تعذر حفظ تعديل البيع.')
     } finally { setEditBusy(false) }
   }
+  const confirmIdentityAndSave = async event => {
+    event.preventDefault()
+    const identityCheck = validateCorrectionIdentity({ name: identityForm.name, code: identityForm.code, staff, actor: correctionActor, authorization: correctionAuthorization, requireAdmin: true })
+    if (!identityCheck.valid || !String(identityForm.reason || '').trim()) {
+      setIdentityError(identityCheck.valid ? 'سبب التعديل مطلوب.' : 'اسم الكاشير أو الرمز غير صحيح')
+      return
+    }
+    setEditBusy(true); setIdentityError(''); setEditError('')
+    try {
+      const changes = { ...editForm, reason: identityForm.reason.trim(), itemCorrection: true, items: correctionItems, correctionIdentity: { name: identityForm.name.trim(), code: identityForm.code.trim(), role: identityCheck.role } }
+      const saved = await onEditSale(editingSale, changes)
+      const nextSales = sales.map(entry => entry.id === saved.id ? saved : entry)
+      setSales(nextSales); setSelectedSale(saved); setEditingSale(null); setEditForm(null); setIdentityModalOpen(false); setCorrectionMode(false)
+      setEditSuccess(`تم حفظ التعديل باسم ${identityCheck.name}`)
+    } catch (error) {
+      setIdentityError(error?.message || 'تعذر حفظ تعديل البيع.')
+    } finally { setEditBusy(false) }
+  }
 
   return (
     <div className="history-modal-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      {editSuccess && <p className="history-edit-success" role="status">{editSuccess}</p>}
       <section className="history-modal-content" role="dialog" aria-modal="true" aria-labelledby="history-title">
         {selectedSale ? <SaleDetails sale={selectedSale} onBack={() => setSelectedSale(null)} onPrint={reprint} onVoid={voidSale} onEdit={!readOnly && onEditSale ? beginEdit : null} readOnly={readOnly} /> : <>
             <header className="history-header"><div><h2 id="history-title"><Icon name="receipt" size={24} /> سجل الطلبات</h2><p>عرض جميع الطلبات السابقة حسب تاريخ العمل التشغيلي</p></div><button className="close-btn" onClick={onClose} aria-label="إغلاق سجل الطلبات"><Icon name="x" size={23} /></button></header>
@@ -231,6 +264,7 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
         </>}
       </section>
       {editingSale && editForm && createPortal(<div className="history-edit-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setEditingSale(null)}><form className="history-edit-modal" onSubmit={saveEdit} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-edit-title"><header className="history-edit-header"><div><h3 id="history-edit-title">تعديل الطلب رقم {formatNumber(editingSale.orderNumber)}</h3><p>{correctionMode ? 'وضع تصحيح إداري للعناصر والأسعار.' : 'المنتجات ورقم الطلب واليوم التشغيلي محمية.'}</p></div><button type="button" className="history-edit-close" onClick={() => setEditingSale(null)} disabled={editBusy} aria-label="إغلاق نافذة تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-edit-body"><EditableSoldProducts items={correctionItems} canCorrect={canCorrectSaleItems} enabled={{ value: correctionMode, toggle: () => { setCorrectionMode(value => !value); setEditError('') } }} onChange={updateCorrectionItem} onDelete={deleteCorrectionItem} oldTotal={Number(editingSale.total) || 0} newTotal={correctionMode ? correctionItems.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0) - (Number(editForm.discount) || 0) : Number(editingSale.total) || 0} paymentMethod={editForm.paymentMethod} orderType={editForm.orderType} /><label><span>المصدر / النوع</span><select value={editForm.orderType} onChange={event => setEditForm({ ...editForm, orderType: event.target.value })}><option value="">داخل الكوفي</option><option value="بلي">بلي</option><option value="توترز">توترز</option><option value="سفري">سفري</option></select></label><label><span>وسيلة الدفع</span><select value={editForm.paymentMethod} onChange={event => setEditForm({ ...editForm, paymentMethod: event.target.value })}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label><label className="history-edit-discount"><span>الخصم</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={editForm.discount ?? ''} onChange={event => setEditForm({ ...editForm, discount: event.target.value })} /></label><label><span>اسم الكاشير</span><input value={editForm.cashier} onChange={event => setEditForm({ ...editForm, cashier: event.target.value })} /></label><label><span>ملاحظة العميل</span><textarea className="history-edit-textarea-short" value={editForm.note} onChange={event => setEditForm({ ...editForm, note: event.target.value })} /></label><label><span>ملاحظة الإدارة</span><textarea className="history-edit-textarea-short" value={editForm.adminNote} onChange={event => setEditForm({ ...editForm, adminNote: event.target.value })} /></label><label><span>سبب التعديل {correctionMode ? '(مطلوب للتصحيح الإداري)' : ''}</span><input required value={editForm.reason} onChange={event => setEditForm({ ...editForm, reason: event.target.value })} /></label>{editError && <p className="form-error" role="alert">{editError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={() => setEditingSale(null)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy || !String(editForm.reason || '').trim() || (correctionMode && !canCorrectSaleItems)}>{editBusy ? 'جارٍ الحفظ…' : correctionMode ? 'حفظ التصحيح' : 'حفظ التعديل'}</button></footer></form></div>, document.body)}
+      {identityModalOpen && editingSale && createPortal(<div className="history-edit-overlay history-identity-overlay" role="presentation"><form className="history-identity-modal" onSubmit={confirmIdentityAndSave} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-identity-title"><header className="history-edit-header"><div><h3 id="history-identity-title">تأكيد تعديل الطلب</h3><p>أدخل هوية الموظف المخوّل قبل حفظ التصحيح.</p></div><button type="button" className="history-edit-close" onClick={() => setIdentityModalOpen(false)} disabled={editBusy} aria-label="إلغاء تأكيد تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-identity-body"><label><span>اسم الكاشير / الموظف</span><input autoFocus required value={identityForm.name} onChange={event => setIdentityForm({ ...identityForm, name: event.target.value })} /></label><label><span>الرمز / الكود</span><input required type="password" autoComplete="off" value={identityForm.code} onChange={event => setIdentityForm({ ...identityForm, code: event.target.value })} /></label><label><span>سبب التعديل</span><textarea required value={identityForm.reason} onChange={event => setIdentityForm({ ...identityForm, reason: event.target.value })} /></label>{identityError && <p className="form-error" role="alert">{identityError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={() => setIdentityModalOpen(false)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy || !identityForm.name.trim() || !identityForm.code.trim() || !identityForm.reason.trim()}>{editBusy ? 'جارٍ التحقق…' : 'تأكيد وحفظ'}</button></footer></form></div>, document.body)}
     </div>
   )
 }

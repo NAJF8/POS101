@@ -1094,6 +1094,11 @@ input, textarea, select { cursor: text; }
 .history-edit-modal .history-edit-discount input { font-size: 1.08rem; font-weight: 800; direction: ltr; text-align: right; }
 .history-edit-actions { position: sticky; bottom: 0; z-index: 1; display: flex; justify-content: flex-start; gap: 10px; padding: 12px 24px 14px; border-top: 1px solid var(--line); background: var(--cream); }
 .history-edit-actions button { min-width: 120px; min-height: 42px; }
+.history-edit-success { position: fixed; top: 18px; left: 50%; z-index: 2200; transform: translateX(-50%); margin: 0; padding: 10px 16px; border: 1px solid #86b58a; border-radius: 8px; background: #eff9ef; color: #205c2a; font-weight: 800; box-shadow: 0 8px 26px rgba(0,0,0,.18); }
+.history-identity-overlay { z-index: 2300; background: rgba(15, 18, 14, .9); }
+.history-identity-modal { width: min(480px, calc(100vw - 32px)); max-height: min(86vh, 560px); overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #d7cec1; border-radius: 14px; background: var(--cream); color: var(--coffee); box-shadow: 0 22px 70px rgba(0,0,0,.55); }
+.history-identity-body { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 13px; padding: 18px 24px 20px; }
+.history-identity-body textarea { min-height: 72px; resize: vertical; }
 @media (max-width: 640px) { .history-edit-overlay { padding: 12px; } .history-edit-modal { width: min(100%, 620px); max-height: 86vh; } .history-edit-header, .history-edit-body, .history-edit-actions { padding-left: 16px; padding-right: 16px; } .history-edit-order-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .void-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 3px 0; color: var(--danger); font-size: 12px; }
 
