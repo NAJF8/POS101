@@ -746,7 +746,11 @@ export const findOperationalDayByBusinessDate = async businessDate => {
 
 export const readCentralOperationalDays = async () => {
   await requireOperationalDayRole()
-  return operationalDayValues(await get(operationalDaysRef()))
+  const [legacySnapshot, currentSnapshot] = await Promise.all([get(operationalDaysRef()), get(operationalDayCurrentRef())])
+  const days = operationalDayValues(legacySnapshot)
+  const current = currentSnapshot.exists() ? normalizeOperationalDay(currentSnapshot.val()) : null
+  if (current && !days.some(day => operationalDayIdOf(day) === current.id)) days.push(current)
+  return days
 }
 
 export const readOpeningCashSuggestion = async () => {
@@ -1117,10 +1121,16 @@ export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, 
   })
   const day = normalizeOperationalDay(transaction.snapshot.val())
   if (!day) throw Object.assign(new Error('تعذر إنشاء اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_START_FAILED' })
-  await set(ref(db, `pos101_operational_days/${day.id}`), day)
-  const [currentBack, legacyBack] = await Promise.all([get(operationalDayCurrentRef()), get(ref(db, `pos101_operational_days/${day.id}`))])
+  let legacyBack = null
+  try {
+    await set(ref(db, `pos101_operational_days/${day.id}`), day)
+    legacyBack = await get(ref(db, `pos101_operational_days/${day.id}`))
+  } catch (error) {
+    if (!isCentralAdminUser(user)) throw error
+  }
+  const currentBack = await get(operationalDayCurrentRef())
   const verified = normalizeOperationalDay(currentBack.val())
-  if (!verified || verified.status !== 'open' || !legacyBack.exists() || operationalDayIdOf(legacyBack.val()) !== day.id) throw Object.assign(new Error('تعذر التحقق من بدء اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_START_READBACK_FAILED' })
+  if (!verified || verified.status !== 'open' || (!isCentralAdminUser(user) && (!legacyBack?.exists() || operationalDayIdOf(legacyBack.val()) !== day.id))) throw Object.assign(new Error('تعذر التحقق من بدء اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_START_READBACK_FAILED' })
   return cacheOperationalDay(verified, { central: true })
 }
 
