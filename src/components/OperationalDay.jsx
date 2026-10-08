@@ -6,7 +6,7 @@ import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/re
 
 const money = value => formatMoney(Number(value || 0))
 
-export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onPrepareStart, onStart, onEnd, onReadDiagnostic }) {
+export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
@@ -16,6 +16,10 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const [openingCash, setOpeningCash] = useState('')
   const [openingNote, setOpeningNote] = useState('')
   const [openingSuggestion, setOpeningSuggestion] = useState(null)
+  const [openingAdjustOpen, setOpeningAdjustOpen] = useState(false)
+  const [openingAdjustBusy, setOpeningAdjustBusy] = useState(false)
+  const [openingAdjustError, setOpeningAdjustError] = useState('')
+  const [openingAdjustCash, setOpeningAdjustCash] = useState('')
   const [diagnosticOpen, setDiagnosticOpen] = useState(false)
   const [diagnosticCode, setDiagnosticCode] = useState('')
   const [diagnosticError, setDiagnosticError] = useState('')
@@ -67,6 +71,19 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
     if (busy) return
     setBusy(true)
     try { await onPrepareEnd?.(); setEndOpen(true) } catch { /* App surfaces the guard error. */ } finally { setBusy(false) }
+  }
+  const openOpeningAdjust = () => {
+    setOpeningAdjustCash(day?.openingCashBalance == null ? '' : String(day.openingCashBalance))
+    setOpeningAdjustError('')
+    setOpeningAdjustOpen(true)
+  }
+  const saveOpeningAdjust = async () => {
+    if (openingAdjustBusy || openingAdjustCash === '' || Number(openingAdjustCash) < 0) return
+    setOpeningAdjustBusy(true); setOpeningAdjustError('')
+    try {
+      await onSetOpeningCashBalance?.({ openingCashBalance: Number(openingAdjustCash), reason: 'رصيد افتتاحي/تمويل صندوق مفقود.' })
+      setOpeningAdjustOpen(false)
+    } catch (saveError) { setOpeningAdjustError(saveError?.message || 'تعذر تحديث رصيد الافتتاح.') } finally { setOpeningAdjustBusy(false) }
   }
   const openDiagnostic = () => {
     setDiagnosticOpen(true)
@@ -144,7 +161,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
             <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
             <button type="button" onClick={openDiagnostic}>تشخيص المزامنة</button>
           </div>
-        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>تشخيص المزامنة</button></div>}
+        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>تشخيص المزامنة</button></div>}
     </div> : <div className="operational-day-body">
       <div className="operational-day-empty">
         <strong>لا يوجد يوم تشغيلي مفتوح</strong>
@@ -155,6 +172,15 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
     {error && <p className="form-error" role="alert">{error}</p>}
     {startError && <p className="form-error" role="alert">{startError}</p>}
     {open && preCloseGuard?.message && <p className="form-error" role="alert">{preCloseGuard.message}</p>}
+
+    {openingAdjustOpen && <div className="overlay"><div className="dialog operational-day-dialog" dir="rtl">
+      <h2>تعديل رصيد الافتتاح</h2>
+      <p>هذا التعديل لا يغلق اليوم ولا يغيّر المبيعات أو المصروفات أو السحوبات.</p>
+      <label>رصيد الافتتاح<input autoFocus type="number" min="0" value={openingAdjustCash} onChange={event => setOpeningAdjustCash(event.target.value)} /></label>
+      <p role="note">السبب: رصيد افتتاحي/تمويل صندوق مفقود.</p>
+      {openingAdjustError && <p className="form-error" role="alert">{openingAdjustError}</p>}
+      <div className="dialog-actions"><button className="secondary-action" type="button" disabled={openingAdjustBusy} onClick={() => setOpeningAdjustOpen(false)}>إلغاء</button><button className="primary-action" type="button" disabled={openingAdjustBusy || openingAdjustCash === ''} onClick={saveOpeningAdjust}>{openingAdjustBusy ? 'جارٍ الحفظ…' : 'حفظ رصيد الافتتاح'}</button></div>
+    </div></div>}
 
     {diagnosticOpen && <div className="overlay"><div className="dialog operational-day-dialog end-day-diagnostic-dialog" dir="rtl">
       <h2>تشخيص المزامنة</h2>

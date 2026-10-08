@@ -684,6 +684,45 @@ export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, 
   return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(transaction.snapshot)))
 }
 
+export const setOperationalDayOpeningCashBalance = async (day, { openingCashBalance, reason = 'رصيد افتتاحي/تمويل صندوق مفقود.' } = {}) => {
+  const user = await requireOperationalDayRole()
+  const id = operationalDayIdOf(day)
+  const opening = Number(openingCashBalance)
+  if (!id || !day?.businessDate) throw Object.assign(new Error('هوية اليوم التشغيلي والتاريخ مطلوبان.'), { code: 'OPENING_DAY_REQUIRED' })
+  if (!Number.isFinite(opening) || opening < 0) throw Object.assign(new Error('رصيد بداية اليوم يجب أن يكون رقماً لا يقل عن صفر.'), { code: 'OPENING_CASH_INVALID' })
+  const dayRef = ref(db, `pos101_operational_days/${id}`)
+  const currentSnapshot = await get(dayRef)
+  if (!currentSnapshot.exists() || currentSnapshot.val()?.status !== 'open') throw Object.assign(new Error('لا يمكن تعديل رصيد يوم غير مفتوح.'), { code: 'OPENING_DAY_NOT_OPEN' })
+  const current = currentSnapshot.val()
+  const now = Date.now()
+  const note = String(reason || '').trim() || 'رصيد افتتاحي/تمويل صندوق مفقود.'
+  const auditId = `audit-opening-cash-${safeKey(id)}-${now}`
+  const audit = financialAuditPayload({
+    id: auditId,
+    user,
+    action: 'manual opening cash balance reconciliation',
+    entityType: 'operational_day_opening_cash',
+    entityId: id,
+    before: { openingCashBalance: current.openingCashBalance ?? null },
+    after: { openingCashBalance: opening },
+    reason: 'MANUAL_OPENING_CASH_BALANCE_SET_FROM_CASH_RECONCILIATION: ' + note,
+    businessDate: day.businessDate,
+  })
+  await update(ref(db), {
+    [`pos101_operational_days/${id}/openingCashBalance`]: opening,
+    [`pos101_operational_days/${id}/openingCashSource`]: 'manual',
+    [`pos101_operational_days/${id}/openingCashAdjustmentNote`]: note,
+    [`pos101_operational_days/${id}/openingCashAdjustedAt`]: now,
+    [`pos101_operational_days/${id}/openingCashAdjustedBy`]: { uid: user.uid, name: user.displayName || user.email || '', email: user.email || '' },
+    [`${auditPath}/${auditId}`]: audit,
+  })
+  const [dayBack, auditBack] = await Promise.all([get(dayRef), get(financialPath(`${auditPath}/${auditId}`))])
+  const updatedDay = dayBack.exists() ? { ...dayBack.val(), id } : null
+  if (!updatedDay || updatedDay.status !== 'open' || Number(updatedDay.openingCashBalance) !== opening || !auditBack.exists()) throw Object.assign(new Error('تعذر التحقق من تحديث رصيد الافتتاح.'), { code: 'OPENING_CASH_READBACK_FAILED' })
+  cacheOperationalDay(updatedDay)
+  return { day: updatedDay, audit: auditBack.val() }
+}
+
 export const endOperationalDay = async (day, { endedBy = {} } = {}) => {
   const user = await requireOperationalDayRole()
   const id = operationalDayIdOf(day)
