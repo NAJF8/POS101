@@ -11,7 +11,7 @@ export const saleDiscountOf = sale => amount(sale?.discount ?? sale?.discount_am
 export const saleNetOf = sale => amount(sale?.net ?? sale?.total ?? sale?.total_after_discount ?? sale?.subtotal) || saleGrossOf(sale) - saleDiscountOf(sale)
 export const isCanonicalSaleEligible = sale => {
   const status = text(sale?.status).toLowerCase()
-  return !sale?.voided && !['cancelled', 'canceled', 'voided', 'abandoned', 'draft'].includes(status)
+  return !sale?.voided && !['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'].includes(status)
 }
 
 export const belongsToOperationalDay = (sale, day) => {

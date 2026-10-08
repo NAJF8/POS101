@@ -27,7 +27,7 @@ export const resolveFinancialBusinessDate = (record, operationalDayDates = {}) =
   return `${parts.find(part => part.type === 'year')?.value}-${parts.find(part => part.type === 'month')?.value}-${parts.find(part => part.type === 'day')?.value}`
 }
 
-const invalidStatuses = new Set(['voided', 'cancelled', 'canceled', 'abandoned', 'draft'])
+const invalidStatuses = new Set(['voided', 'cancelled', 'canceled', 'abandoned', 'draft', 'باطل', 'ملغي'])
 const isVoided = row => invalidStatuses.has(String(row?.status || '').trim().toLowerCase()) || row?.voided === true
 const saleAmount = sale => amount(sale?.total ?? sale?.subtotal)
 const paymentMethod = sale => sale?.paymentMethod || sale?.payment?.method || ''

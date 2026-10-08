@@ -89,7 +89,7 @@ export const readLocalSales = () => {
 export const filterReportSales = (sales, { startMs = -Infinity, endMs = Infinity } = {}) => (Array.isArray(sales) ? sales : [])
   .filter(sale => sale.createdAt >= startMs && sale.createdAt <= endMs && !sale.voided)
 
-const CLOSED_SALE_STATUSES = new Set(['cancelled', 'canceled', 'voided', 'abandoned', 'draft'])
+const CLOSED_SALE_STATUSES = new Set(['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'])
 const saleOperationalDayId = sale => String(sale?.operationalDayId || sale?.operational_day_id || sale?.shiftId || sale?.shift_id || '').trim()
 const operationalDayId = day => String(day?.operationalDayId || day?.id || '').trim()
 

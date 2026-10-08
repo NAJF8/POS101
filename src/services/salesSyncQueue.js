@@ -26,7 +26,8 @@ const sameSaleIdentity = (left, right) => {
   return Boolean((leftId && rightId && leftId === rightId)
     || (leftOperationKey && rightOperationKey && leftOperationKey === rightOperationKey))
 }
-const cancelledStatuses = new Set(['cancelled', 'canceled', 'voided', 'abandoned', 'draft'])
+const cancelledStatuses = new Set(['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'])
+const voidedStatuses = new Set(['cancelled', 'canceled', 'voided', 'باطل', 'ملغي'])
 const saleItems = sale => Array.isArray(sale?.items)
   ? sale.items
   : Array.isArray(sale?.order?.items) ? sale.order.items : []
@@ -52,6 +53,7 @@ const requiredIdentity = sale => ({
 export const missingSaleIdentity = sale => Object.entries(requiredIdentity(sale)).filter(([, value]) => !value).map(([key]) => key)
 export const isSaleIdentityComplete = sale => missingSaleIdentity(sale).length === 0
 export const isInvalidSaleStatus = sale => cancelledStatuses.has(text(sale?.status).toLowerCase())
+export const isVoidedSale = sale => voidedStatuses.has(text(sale?.status).toLowerCase()) || sale?.voided === true
 
 const stable = value => {
   if (Array.isArray(value)) return value.map(stable)
@@ -310,6 +312,23 @@ const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.
 
 export const readRawSaleQueue = () => readJson(QUEUE_KEY, [])
 export const readSaleQueue = () => readRawSaleQueue().filter(isSaleEntry)
+
+export const resolveVoidedSaleLocally = (sale, { centralVerified = false, queueResolution = 'voided_before_central_sync', reason = 'local sale voided before Firebase write', resolvedAt = Date.now() } = {}) => {
+  const id = saleIdOf(sale)
+  const operationKey = operationKeyOf(sale)
+  const matches = row => sameSaleIdentity(row, sale)
+  const marker = { type: 'queue-resolution', at: resolvedAt, queueResolution, centralUploadSkipped: !centralVerified, reason }
+  const sales = readJson(SALES_KEY, [])
+  writeJson(SALES_KEY, sales.map(row => matches(row)
+    ? { ...row, queueResolution, queueResolvedAt: resolvedAt, centralUploadSkipped: !centralVerified, queueResolutionReason: reason, audit: [...(Array.isArray(row.audit) ? row.audit : []), marker] }
+    : row))
+  writeJson(QUEUE_KEY, readRawSaleQueue().filter(entry => {
+    const queued = entry?.sale || entry
+    return !matches(queued)
+  }))
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: { saleId: id, operationKey, queueResolution } }))
+  return { saleId: id, operationKey, queueResolution, centralUploadSkipped: !centralVerified, queueResolvedAt: resolvedAt }
+}
 
 export const readSalesCount = () => readJson(SALES_KEY, []).filter(sale => saleIdOf(sale)).length
 

@@ -6,7 +6,7 @@ const amount = value => {
 }
 
 export const filterSalesByOperationalDay = (sales = [], operationalDayId) =>
-  (Array.isArray(sales) ? sales : []).filter(sale => sale?.operationalDayId === operationalDayId && !sale?.voided)
+  (Array.isArray(sales) ? sales : []).filter(sale => sale?.operationalDayId === operationalDayId && !sale?.voided && !['voided', 'cancelled', 'canceled', 'باطل', 'ملغي'].includes(String(sale?.status || '').toLowerCase()))
 
 export const filterExpensesByOperationalDay = (expenses = [], operationalDayId) =>
   filterNormalizedExpenses(expenses, operationalDayId)

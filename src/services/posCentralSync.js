@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettleme
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
@@ -1089,6 +1089,44 @@ const logQueueItemDiagnostic = ({ index, sale, entry, firebaseExists, action, de
   return payload
 }
 
+const resolveVoidedQueueEntries = async centralSales => {
+  const rawQueue = readRawSaleQueue()
+  let resolved = 0
+  let failed = 0
+  for (const [index, entry] of rawQueue.entries()) {
+    const sale = entry?.sale
+    if (!sale || !isVoidedSale(sale)) continue
+    const central = (centralSales || []).find(remote => saleIdOf(remote) === saleIdOf(sale))
+    const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
+    let readBack = central ? await get(saleRef).catch(() => null) : null
+    const firebaseExists = Boolean(readBack?.exists())
+    const firebaseStatus = readBack?.val()?.status || (readBack?.val()?.voided ? 'voided' : '')
+    if (!readBack?.exists()) {
+      logQueueItemDiagnostic({ index, sale, entry, firebaseExists: false, action: 'SKIP_AND_CLEAR_QUEUE', detail: 'VOIDED_BEFORE_SYNC' })
+      resolveVoidedSaleLocally(sale)
+      resolved += 1
+      continue
+    }
+    if (!isVoidedSale(readBack.val())) {
+      logQueueItemDiagnostic({ index, sale, entry, firebaseExists: true, action: 'SYNC_VOID_STATUS', detail: 'CENTRAL_ACTIVE_REQUIRES_VOID_UPDATE' })
+      try {
+        await set(saleRef, { ...readBack.val(), status: 'voided', voided: true, voidedAt: sale.voidedAt || sale.cancelledAt || sale.canceledAt || Date.now(), queueResolution: 'void_status_synced' })
+        readBack = await get(saleRef)
+      } catch (error) {
+        failed += 1
+        console.info('[POS101_QUEUE_ITEM]', JSON.stringify({ QUEUE_ITEM: index, saleId: saleIdOf(sale), orderNumber: sale.orderNumber, localStatus: sale.status, firebaseExists, firebaseStatus, classification: 'VOID_SYNC_NEEDED', action: 'SYNC_VOID_STATUS', error: error?.message || String(error) }))
+        continue
+      }
+    }
+    if (readBack?.exists() && isVoidedSale(readBack.val())) {
+      resolveVoidedSaleLocally(sale, { centralVerified: true, queueResolution: 'voided_central_readback_verified', reason: 'Firebase void status readback PASS' })
+      console.info('[POS101_QUEUE_ITEM]', JSON.stringify({ QUEUE_ITEM: index, saleId: saleIdOf(sale), orderNumber: sale.orderNumber, localStatus: sale.status, firebaseExists: true, firebaseStatus: readBack.val()?.status || 'voided', classification: 'VOID_SYNC_NEEDED', action: 'SYNC_VOID_STATUS' }))
+      resolved += 1
+    } else failed += 1
+  }
+  return { resolved, failed, remainingVoided: readRawSaleQueue().filter(entry => isVoidedSale(entry?.sale)).length }
+}
+
 const normalizeQueuedSaleForCurrentDay = sale => {
   const currentDay = readCachedOperationalDay()
   const saleId = String(saleIdOf(sale) || '').trim()
@@ -1127,7 +1165,9 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   const rawQueue = readRawSaleQueue()
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
-  const beforeCentral = centralValues(before)
+  let beforeCentral = centralValues(before)
+  const voidedQueueResult = await resolveVoidedQueueEntries(beforeCentral)
+  if (voidedQueueResult.resolved) beforeCentral = centralValues(await get(salesRef()))
   const known1056 = beforeCentral.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   const local1056 = localSales.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   if (known1056 || local1056) restoreManualReviewQuarantineMarker({ saleId: KNOWN_MANUAL_REVIEW_SALE_1056, orderNumber: 1056, reason: KNOWN_MANUAL_REVIEW_REASON_1056, centralExists: Boolean(known1056) })

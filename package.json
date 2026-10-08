@@ -41,6 +41,7 @@
     "test:auto-sync-lock-quarantine": "node scripts/auto-sync-lock-quarantine-regression.mjs",
     "test:new-sale-after-emergency-repair": "node scripts/new-sale-after-emergency-repair-regression.mjs",
     "test:queue-lock-self": "node scripts/queue-lock-self-regression.mjs",
+    "test:voided-queue": "node scripts/voided-queue-regression.mjs",
     "test:anonymous-auth-regression": "node scripts/cashier-mode-regression.mjs",
     "test:end-day-runtime-regression": "node scripts/cashier-mode-regression.mjs",
     "test:end-day-idempotency-regression": "node scripts/cashier-mode-regression.mjs",
