@@ -340,6 +340,21 @@ export const readSaleSyncStatus = () => {
   }
 }
 
+export const readPendingSaleDiagnostics = () => readRawSaleQueue()
+  .filter(isSaleEntry)
+  .map(entry => ({
+    saleId: saleIdOf(entry.sale),
+    operationKey: operationKeyOf(entry.sale),
+    orderNumber: entry.sale?.orderNumber ?? entry.orderNumber ?? null,
+    total: Number(entry.sale?.total ?? entry.sale?.subtotal ?? entry.total ?? 0),
+    businessDate: entry.sale?.businessDate || entry.businessDate || '',
+    operationalDayId: entry.sale?.operationalDayId || entry.operationalDayId || '',
+    lastAttemptAt: entry.lastAttemptAt || null,
+    attempts: Number(entry.attemptCount ?? entry.attempts ?? 0),
+    lastError: entry.lastError || entry.sale?.syncError || '',
+    status: entry.status || 'pending',
+  }))
+
 const centralIdentity = sale => ({
   saleId: saleIdOf(sale),
   operationKey: operationKeyOf(sale),

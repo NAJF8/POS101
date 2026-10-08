@@ -16,7 +16,7 @@ import { Purchases } from './components/Purchases'
 import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, buildSalesBackup, readSaleSyncStatus } from './services/salesSyncQueue'
+import { enqueueSale, buildSalesBackup, readSaleSyncStatus, readPendingSaleDiagnostics } from './services/salesSyncQueue'
 import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
@@ -655,6 +655,18 @@ export default function App() {
     const worker = createCashierQueueWorker({
       processQueue: retry,
       hasEligibleQueue: () => canSyncPosSales(centralAuth()?.currentUser).then(permission => permission.allowed),
+      getDiagnosticContext: async () => {
+        const user = centralAuth()?.currentUser
+        const permission = await canSyncPosSales(user).catch(error => ({ allowed: false, error: error?.code || error?.message || String(error) }))
+        return {
+          queueSales: readPendingSaleDiagnostics(),
+          canSync: Boolean(permission.allowed),
+          authUser: user?.uid || user?.email || null,
+          lockState: window.localStorage.getItem('pos101.syncLock') || null,
+          repairFlagState: window.localStorage.getItem('pos101.emergencyRepairActive') || null,
+          permissionError: permission.error || null,
+        }
+      },
       onDiagnostic: payload => {
         window.__POS101_QUEUE_WORKER_STATUS__ = payload
         window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))

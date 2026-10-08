@@ -1,38 +1,40 @@
 import { defaultSyncLockManager } from './syncLockManager.js'
 
-export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () => true, intervalMs = 15000, onDiagnostic = null } = {}) => {
+export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () => true, intervalMs = 10000, getDiagnosticContext = null, onDiagnostic = null } = {}) => {
   if (typeof processQueue !== 'function') throw new TypeError('processQueue is required')
   let running = null
   let timer = null
   let stopped = false
 
-  const diagnostic = (event, detail = {}) => {
-    const payload = { event, at: Date.now(), ...detail }
+  const diagnostic = async (event, detail = {}) => {
+    let context = {}
+    try { context = await getDiagnosticContext?.() || {} } catch (error) { context = { diagnosticContextError: error?.message || String(error) } }
+    const payload = { event, at: Date.now(), ...context, ...detail }
     try { onDiagnostic?.(payload) } catch {}
     if (typeof console !== 'undefined') console.info('[POS_CASHIER_QUEUE_WORKER]', payload)
     return payload
   }
 
   const run = (trigger = 'manual') => {
-    if (stopped) { diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'stopped' }); return Promise.resolve(null) }
+    if (stopped) { void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'stopped' }); return Promise.resolve(null) }
     const repairState = defaultSyncLockManager.recoverStaleEmergencyRepairFlag()
     if (repairState.active) {
-      diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'emergency-repair-active' })
+      void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'emergency-repair-active' })
       return Promise.resolve(null)
     }
     // The shared POS sync lock owns cross-trigger coordination. Keep returning
     // the in-flight promise for duplicate events, but do not create a second
     // competing lock or emit a misleading repeated "locked" loop.
     if (running) return running
-    diagnostic('WORKER_PROCESS_START', { trigger })
+    void diagnostic('WORKER_PROCESS_START', { trigger })
     running = Promise.resolve(hasEligibleQueue())
       .then(allowed => {
-        if (!allowed) { diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'ineligible' }); return null }
+        if (!allowed) { void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'ineligible' }); return null }
         return processQueue()
       })
-      .then(result => { diagnostic('WORKER_PROCESS_COMPLETE', { trigger, result: result && typeof result === 'object' ? { uploaded: result.uploaded, updated: result.updated, centralCount: result.centralCount } : null }); return result })
-      .catch(error => { diagnostic('WORKER_PROCESS_ERROR', { trigger, code: error?.code || 'UNKNOWN', message: error?.message || String(error) }); throw error })
-      .finally(() => { running = null; diagnostic('WORKER_LOCK_RELEASED', { trigger }) })
+      .then(result => { void diagnostic('WORKER_PROCESS_COMPLETE', { trigger, result: result && typeof result === 'object' ? { uploaded: result.uploaded, updated: result.updated, centralCount: result.centralCount } : null }); return result })
+      .catch(error => { void diagnostic('WORKER_PROCESS_ERROR', { trigger, code: error?.code || 'UNKNOWN', message: error?.message || String(error) }); throw error })
+      .finally(() => { running = null; void diagnostic('WORKER_LOCK_RELEASED', { trigger }) })
     return running
   }
 
@@ -42,7 +44,7 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
     const handlers = new Map(events.map(event => [event, () => trigger(event)]))
     for (const [event, handler] of handlers) target.addEventListener?.(event, handler)
     if (intervalMs > 0) timer = target.setInterval?.(() => trigger('interval'), intervalMs)
-    diagnostic('WORKER_STARTED', { intervalMs, events })
+    void diagnostic('WORKER_STARTED', { intervalMs, events })
     trigger('startup')
     return () => {
       stopped = true
