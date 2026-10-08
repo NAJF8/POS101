@@ -15,7 +15,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale } from './services/posCentralSync.js'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -86,7 +86,6 @@ const stableStaffId = name => `staff-${encodeURIComponent(name).replace(/%/g, ''
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard')
   const [orders, setOrders] = useState(() => ensureOrderSlots(read('pos101.orders', []), 10))
-  const [nextNumber, setNextNumber] = useState(() => read('pos101.nextNumber', 1015))
   const [active, setActive] = useState(0)
   const [category, setCategory] = useState('الكل')
   const [query, setQuery] = useState('')
@@ -263,7 +262,6 @@ export default function App() {
 
   // Persist state
   useEffect(() => localStorage.setItem('pos101.orders', JSON.stringify(orders)), [orders])
-  useEffect(() => localStorage.setItem('pos101.nextNumber', nextNumber), [nextNumber])
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.discountPresets', JSON.stringify(discountPresets)), [discountPresets])
@@ -783,12 +781,21 @@ export default function App() {
     const stableSaleId = activeOrder.saleId || crypto.randomUUID()
     const stableOperationKey = activeOrder.operationKey || `pos101:${stableSaleId}`
     if (!activeOrder.saleId || !activeOrder.operationKey) setOrders(v => v.map((o, i) => i === active ? { ...o, saleId: stableSaleId, operationKey: stableOperationKey } : o))
+    let centralOrder
+    try {
+      centralOrder = await allocateCentralOrderNumber({ operationalDayId: currentOperationalDay.id, businessDate: currentOperationalDay.businessDate })
+    } catch (error) {
+      saleInFlight.current = false
+      setOperationalDayError(error?.message || 'تعذر تخصيص رقم طلب مركزي. تحقق من الاتصال والمصادقة ثم أعد المحاولة.')
+      setModal('operational-day-required')
+      return false
+    }
 
     const sale = {
       saleId: stableSaleId,
       id: stableSaleId,
       operationKey: stableOperationKey,
-      orderNumber: nextNumber,
+      orderNumber: centralOrder.orderNumber,
       cashierId: session.shiftId,
       cashierNameSnapshot: sellerName,
       shift: session.name,
@@ -807,7 +814,6 @@ export default function App() {
     }
 
     // 1. Optimistic Local Save & Cart Clear (POS continues selling)
-    setNextNumber(n => n + 1)
     setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
     if (autoPrint) void requestSalePrint(sale)
     setPendingPayment(null)
@@ -818,7 +824,7 @@ export default function App() {
     enqueueSale(sale)
     window.setTimeout(() => { saleInFlight.current = false }, 350)
     return true
-  }, [session, activeOrder, nextNumber, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
+  }, [session, activeOrder, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -1138,7 +1144,7 @@ export default function App() {
       {/* Modals */}
       {modal === 'cashier-menu' && <CashierMenu session={session} onClose={() => setModal(null)} onLogout={logout} />}
       {modal === 'financial-pin' && <FinancialPinDialog staff={staff} onClose={() => { setFinancialPinTarget(null); setModal(null) }} onUnlock={unlockFinancialView} />}
-      {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>يجب بدء اليوم التشغيلي أولاً</h2><p>لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setModal(null)}>رجوع</button><button type="button" className="primary-action" onClick={() => { setModal(null); setCurrentView('dashboard') }}>الانتقال إلى بدء اليوم</button></div></div></div>}
+      {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>{operationalDayError ? 'تعذر إكمال البيع' : 'يجب بدء اليوم التشغيلي أولاً'}</h2><p>{operationalDayError || 'لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.'}</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => { setModal(null); setOperationalDayError('') }}>رجوع</button><button type="button" className="primary-action" onClick={() => { setModal(null); setOperationalDayError(''); setCurrentView('dashboard') }}>الانتقال إلى بدء اليوم</button></div></div></div>}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
       {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}
       {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct} />}

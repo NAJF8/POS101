@@ -343,11 +343,14 @@ export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
 // Reconcile those rows without deleting or replacing any sale or queue entry.
 // The original saleId and operationKey are copied verbatim into the deferred
 // queue, so a future integration can use them for idempotency.
-export const reconcileSalesQueue = () => {
+export const reconcileSalesQueue = (centralSales = [], { onStrandedSale = null } = {}) => {
   const sales = readJson(SALES_KEY, [])
+  let nextSales = sales.slice()
   const queue = readRawSaleQueue()
+  const centralIds = new Set((centralSales || []).map(saleIdOf).filter(Boolean))
   let added = 0
   let quarantined = 0
+  const stranded = []
   for (const entry of queue) {
     const sale = entry?.sale || entry
     if (!isSaleIdentityComplete(sale)) { quarantineSale(sale, 'LEGACY_UNSAFE_QUEUE', entry); quarantined += 1 }
@@ -357,11 +360,17 @@ export const reconcileSalesQueue = () => {
   for (const sale of sales) {
     if (!isSaleSyncEligible(sale) || sale.status === 'synced' || sale.syncConfirmedAt) continue
     if (queue.some(entry => isSaleEntry(entry) && sameSaleIdentity(entry.sale, sale))) continue
-    queue.push(queueEntryForSale(sale))
+    if (centralIds.has(saleIdOf(sale))) continue
+    const recovered = { ...sale, recoveredFromLocalLedger: true, recoveryReason: 'STRANDED_LOCAL_SALE_NOT_IN_QUEUE' }
+    stranded.push({ saleId: saleIdOf(sale), orderNumber: sale?.orderNumber ?? '', total: sale?.total ?? sale?.subtotal ?? 0, businessDate: sale?.businessDate || '', operationalDayId: sale?.operationalDayId || sale?.operational_day_id || '', reason: 'STRANDED_SALE_FOUND' })
+    try { onStrandedSale?.(stranded[stranded.length - 1]) } catch {}
+    queue.push(queueEntryForSale(recovered))
+    nextSales = nextSales.map(row => sameSaleIdentity(row, sale) ? recovered : row)
     added += 1
   }
+  if (JSON.stringify(nextSales) !== JSON.stringify(sales)) writeJson(SALES_KEY, nextSales)
   if (added) writeJson(QUEUE_KEY, queue)
-  return { added, quarantined, queue: queue.filter(isSaleEntry), pendingCount: readPendingSaleCount() }
+  return { added, quarantined, stranded, queue: queue.filter(isSaleEntry), pendingCount: readPendingSaleCount() }
 }
 
 export const buildSalesBackup = (createdAt = new Date().toISOString()) => {

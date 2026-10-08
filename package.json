@@ -33,6 +33,7 @@
     "test:delivery-discount-report": "node scripts/delivery-discount-report-regression.mjs",
     "test:sale-edit": "node scripts/sale-edit-regression.mjs",
     "test:sale-edit-modal": "node scripts/sale-edit-modal-regression.mjs",
+    "test:sync-fail-fix": "node scripts/sync-fail-fix-regression.mjs",
     "test:kiosk-auth-regression": "node scripts/kiosk-auth-regression.mjs",
     "test:kiosk-worker": "npm --prefix worker test",
     "test:staff-permissions": "node scripts/staff-permissions-regression.mjs",

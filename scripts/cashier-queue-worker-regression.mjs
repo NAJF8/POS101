@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createCashierQueueWorker } from '../src/services/cashierQueueWorker.js'
+import { createSyncLockManager, SYNC_LOCK_HEARTBEAT_STALE_MS, SYNC_LOCK_STALE_MS } from '../src/services/syncLockManager.js'
 
 const events = ['pos101-sale-created', 'pos101-sale-updated', 'online', 'focus', 'visibilitychange', 'firebase-reconnect', 'auth-ready']
 const makeTarget = () => {
@@ -57,15 +58,32 @@ target.tick()
 await flush()
 assert.equal(processCalls, 3, 'ineligible queues must not run')
 assert.ok(diagnostics.some(event => event.event === 'WORKER_PROCESS_START' && event.trigger === 'startup'))
-assert.ok(diagnostics.some(event => event.event === 'WORKER_RUN_SKIPPED' && event.reason === 'locked'))
 assert.ok(diagnostics.some(event => event.event === 'WORKER_RUN_SKIPPED' && event.reason === 'ineligible'))
 assert.ok(diagnostics.some(event => event.event === 'WORKER_PROCESS_ERROR'))
 stop()
+
+const values = new Map()
+const storage = {
+  getItem: key => values.has(key) ? values.get(key) : null,
+  setItem: (key, value) => values.set(key, value),
+  removeItem: key => values.delete(key),
+}
+let now = 100000
+const managerA = createSyncLockManager({ storage, sessionStorage: storage, now: () => now })
+const managerB = createSyncLockManager({ storage, sessionStorage: storage, now: () => now })
+assert.equal(managerA.acquire({ trigger: 'worker' }).acquired, true)
+assert.equal(managerB.acquire({ trigger: 'worker' }).action, 'blocked_active')
+now += Math.max(SYNC_LOCK_STALE_MS, SYNC_LOCK_HEARTBEAT_STALE_MS) + 1
+assert.equal(managerB.acquire({ trigger: 'worker' }).action, 'released_stale')
+assert.equal(managerB.describe().ownedByThisContext, true)
 
 console.log(JSON.stringify({
   NEW_SALE_AUTOSYNC: 'PASS',
   AUTH_LATE_AUTOSYNC: 'PASS',
   PROCESSOR_LOCK_RECOVERY: 'PASS',
   RESTART_AUTOSYNC: 'PASS',
+  WORKER_REGRESSION_UPDATED: 'PASS',
+  SHARED_SYNC_LOCK_TEST: 'PASS',
+  STALE_LOCK_RECOVERY_TEST: 'PASS',
   EVENTS: events,
 }))

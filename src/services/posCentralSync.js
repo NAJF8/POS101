@@ -28,7 +28,8 @@ import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrec
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, readRawSaleQueue, readSaleQueue, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isSaleSyncEligible, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
@@ -843,6 +844,37 @@ export const inspectLocalSales = () => {
   return { count: sales.length, latestOrderNumber: latest?.orderNumber ?? null, latestCreatedAt: latest?.createdAt ?? null }
 }
 
+// Order numbers are allocated centrally on the open operational-day node.
+// The RTDB transaction serializes two devices, while the global central max
+// prevents reusing an old number after a local counter reset or day rollover.
+export const allocateCentralOrderNumber = async ({ operationalDayId, businessDate } = {}) => {
+  await financialUser(true)
+  const dayId = String(operationalDayId || '').trim()
+  if (!dayId) throw Object.assign(new Error('اليوم التشغيلي مطلوب لتخصيص رقم الطلب.'), { code: 'ORDER_NUMBER_DAY_REQUIRED' })
+  const dayRef = ref(db, `pos101_operational_days/${dayId}`)
+  const currentDaySnapshot = await get(dayRef)
+  if (!currentDaySnapshot.exists() || currentDaySnapshot.val()?.status !== 'open') {
+    throw Object.assign(new Error('لا يمكن تخصيص رقم طلب خارج يوم تشغيلي مفتوح.'), { code: 'ORDER_NUMBER_DAY_CLOSED' })
+  }
+  const centralSales = centralValues(await get(salesRef()))
+  let allocated = null
+  const transaction = await runTransaction(dayRef, current => {
+    if (!current || current.status !== 'open') return
+    if (businessDate && String(current.businessDate || '') !== String(businessDate)) return
+    const next = nextCentralOrderNumber({ day: current, centralSales })
+    allocated = next
+    return { ...current, nextOrderNumber: next + 1, lastOrderNumberAllocated: next, lastOrderNumberAllocatedAt: Date.now() }
+  })
+  if (!transaction.committed || !Number.isInteger(allocated) || allocated < 1) {
+    throw Object.assign(new Error('تعذر تخصيص رقم طلب مركزي بأمان.'), { code: 'ORDER_NUMBER_TRANSACTION_FAILED' })
+  }
+  const readBack = await get(dayRef)
+  if (!readBack.exists() || Number(readBack.val()?.lastOrderNumberAllocated) !== allocated || Number(readBack.val()?.nextOrderNumber) <= allocated) {
+    throw Object.assign(new Error('تعذر التحقق من رقم الطلب المركزي بعد التخصيص.'), { code: 'ORDER_NUMBER_READBACK_FAILED' })
+  }
+  return { orderNumber: allocated, operationalDayId: dayId, businessDate: String(readBack.val()?.businessDate || businessDate || '') }
+}
+
 export const getCentralSyncState = () => ({ initialSyncCompleted: readInitialSyncCompleted() })
 
 export const mergeCentralSalesLocally = centralSales => {
@@ -916,6 +948,14 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
   const beforeCentral = centralValues(before)
+  const recovery = reconcileSalesQueue(beforeCentral, {
+    onStrandedSale: sale => logQueueDecision(sale, 'STRANDED_SALE_FOUND', 'local ledger row was absent from the active queue', { queueLength: readRawSaleQueue().length, eligible: true, processingStarted: false, firebaseWriteResult: 'not-started', readbackResult: 'not-started', localUpdateResult: 'recovery-enqueued' }),
+  })
+  const historicalOrderNumberDuplicates = buildOrderNumberDuplicateReport(beforeCentral)
+  if (historicalOrderNumberDuplicates.length) {
+    console.warn('[POS101_ORDER_NUMBER_REVIEW]', JSON.stringify({ reason: 'HISTORICAL_DUPLICATE_ORDER_NUMBERS', records: historicalOrderNumberDuplicates }))
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-order-number-review', { detail: historicalOrderNumberDuplicates }))
+  }
   // Legacy/malformed queue cleanup is local-only. The central snapshot above
   // is read once; reconciliation itself performs zero Firebase writes and
   // removes only entries proven against that snapshot.
@@ -927,14 +967,20 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     if (!rawSale) { logQueueDecision(null, 'missing:sale', 'missing sale payload', { queueLength: activeQueueAfterCleanup.length }); continue }
     const normalized = normalizeQueuedSaleForCurrentDay(rawSale)
     if (normalized.missing.length) {
-      logQueueDecision(normalized.sale, `missing:${normalized.missing.join(',')}`, 'queue entry is not recoverable', { queueLength: activeQueueAfterCleanup.length, eligible: false })
-      if (manualReport) manualReport.salesToProcess.push({ orderNumber: normalized.sale?.orderNumber ?? null, saleId: saleIdOf(normalized.sale), operationKey: normalized.sale?.operationKey || '', centralBefore: false, writeAttempted: false, writeResult: 'SKIPPED', readbackResult: 'SKIPPED', localUpdateResult: 'RETAINED', error: `missing:${normalized.missing.join(',')}` })
+      const recoveredCollision = rawSale.recoveredFromLocalLedger ? findActiveOrderNumberCollision(normalized.sale, beforeCentral) : null
+      const reviewReason = recoveredCollision ? 'STRANDED_SALE_REQUIRES_MANUAL_REVIEW:ORDER_NUMBER_COLLISION_MANUAL_REVIEW' : 'STRANDED_SALE_REQUIRES_MANUAL_REVIEW:OPERATIONAL_DAY_MISMATCH'
+      logQueueDecision(normalized.sale, `missing:${normalized.missing.join(',')}`, reviewReason, { queueLength: activeQueueAfterCleanup.length, eligible: false })
+      if (rawSale.recoveredFromLocalLedger) quarantineSale(rawSale, reviewReason, { ...rawEntry, centralMatch: recoveredCollision || null })
+      if (manualReport) manualReport.salesToProcess.push({ orderNumber: normalized.sale?.orderNumber ?? null, saleId: saleIdOf(normalized.sale), operationKey: normalized.sale?.operationKey || '', centralBefore: false, writeAttempted: false, writeResult: 'SKIPPED', readbackResult: 'SKIPPED', localUpdateResult: 'RETAINED', error: `missing:${normalized.missing.join(',')};${reviewReason}` })
       continue
     }
     queuedSales.push(normalized.sale)
   }
   const candidateByIdentity = new Map()
-  for (const sale of [...(queueOnly ? [] : localSales), ...queuedSales]) {
+  // Every upload candidate must have an active durable queue entry. Ledger-only
+  // rows are first recovered into that queue above, so a stale local record can
+  // never bypass the duplicate/day/readback gates below.
+  for (const sale of queuedSales) {
     const identity = String(saleIdOf(sale) || sale?.operationKey || sale?.operation_key || '')
     if (identity && !candidateByIdentity.has(identity)) candidateByIdentity.set(identity, sale)
   }
@@ -967,6 +1013,15 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
       error: '',
     } : null
     if (manualSale) manualReport.salesToProcess.push(manualSale)
+    const orderNumberCollision = findActiveOrderNumberCollision(sale, beforeCentral)
+    if (orderNumberCollision) {
+      const error = Object.assign(new Error(`رقم الطلب مستخدم في مبيعة مركزية أخرى: ${sale.orderNumber}`), { code: 'ORDER_NUMBER_COLLISION_MANUAL_REVIEW' })
+      quarantineSale(sale, error.code, { sale, centralMatch: orderNumberCollision })
+      if (queueEntry) retainQueuedSale(queueEntry, error)
+      if (manualSale) manualSale.error = error.code
+      logQueueDecision(sale, 'duplicate order number guard', error.code, { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'blocked', readbackResult: 'not-required', localUpdateResult: 'retained-in-queue' })
+      continue
+    }
     if (classification.action === 'quarantine') {
       const error = Object.assign(new Error(`تعذر رفع مبيعة متعارضة: ${classification.reason}`), { code: classification.reason })
       if (queueEntry) retainQueuedSale(queueEntry, error)
@@ -1034,6 +1089,8 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     uploadBlocked: false,
     skipped: activeQueueAfterCleanup.length - uploaded - updated,
     queueCleanup,
+    strandedRecovered: recovery.added,
+    historicalOrderNumberDuplicates,
   }
 }
 
