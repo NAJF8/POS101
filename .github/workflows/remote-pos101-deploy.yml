@@ -53,6 +53,7 @@ jobs:
       - run: node scripts/expense-ui-regression.mjs
       - run: npm run test:sale-edit
       - run: npm run test:sale-edit-modal
+      - run: npm run test:backup-sales-recovery
       - run: node scripts/operational-day-close-regression.mjs
       - run: node scripts/pre-close-reconciliation-regression.mjs
       - run: node scripts/closed-day-report-regression.mjs

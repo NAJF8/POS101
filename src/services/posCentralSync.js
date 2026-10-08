@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrec
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
@@ -38,6 +38,7 @@ import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, ret
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
 import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
+import { classifyBackupSale, normalizeBackupSale } from './backupSalesRecovery.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -1360,6 +1361,80 @@ export const subscribeCentralSalesReadOnly = callback => {
 
 export const readCentralSalesReadOnly = async () => {
   return (await readAndMergeAdminSales()).centralSales
+}
+
+const requireAdminViewer = async () => {
+  const user = await ensurePosFirebaseSession('تسجيل دخول الإدارة مطلوب لفحص نسخة المبيعات.')
+  if (!isCentralAdminUser(user)) throw Object.assign(new Error('هذه الأداة متاحة لحساب الإدارة فقط.'), { code: 'ADMIN_ROLE_REQUIRED' })
+  return user
+}
+
+const readLocalSalesForBackupTool = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch { return [] }
+}
+
+export const inspectBackupSales = async ({ sales = [] } = {}) => {
+  await requireAdminViewer()
+  const centralSnapshot = await get(salesRef())
+  const centralSales = centralValues(centralSnapshot)
+  const normalized = (Array.isArray(sales) ? sales : []).map(normalizeBackupSale)
+  const dayIds = [...new Set(normalized.map(sale => sale.operationalDayId).filter(Boolean))]
+  const daySnapshots = await Promise.all(dayIds.map(id => get(ref(db, `pos101_operational_days/${id}`))))
+  const days = new Map(dayIds.map((id, index) => [id, daySnapshots[index].exists() ? { ...daySnapshots[index].val(), id } : null]))
+  const directSnapshots = await Promise.all(normalized.map(sale => sale.saleId ? get(ref(db, `pos101_sales/${sale.saleId}`)) : Promise.resolve(null)))
+  const quarantined = readSalesQuarantine().map(row => String(row?.saleId || '').trim()).filter(Boolean)
+  const results = normalized.map((sale, index) => {
+    const result = classifyBackupSale({ sale, centralSales, openDay: days.get(sale.operationalDayId), quarantinedSaleIds: quarantined })
+    const direct = directSnapshots[index]
+    return { ...result, directExists: Boolean(direct?.exists()), directSale: direct?.exists() ? direct.val() : null }
+  })
+  return { centralCount: centralSales.length, results, openDays: [...days.values()].filter(Boolean) }
+}
+
+export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) => {
+  await requireAdminViewer()
+  const expected = normalizeBackupSale(sale)
+  if (!salePayloadMatches(expected, centralSale)) throw Object.assign(new Error('لا يمكن تحديث الحالة المحلية قبل تطابق readback الكامل.'), { code: 'BACKUP_READBACK_MISMATCH' })
+  const localSales = readLocalSalesForBackupTool()
+  const index = localSales.findIndex(row => saleIdOf(row) === saleIdOf(expected))
+  if (index < 0) return { updated: false, reason: 'LOCAL_SALE_NOT_FOUND' }
+  const now = Date.now()
+  localSales[index] = { ...localSales[index], centralVerified: true, centralVerifiedAt: now, syncConfirmedAt: now, syncSource: 'firebase-readback', syncStatus: 'synced', status: 'synced' }
+  localStorage.setItem(SALES_KEY, JSON.stringify(localSales))
+  window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
+  return { updated: true, saleId: saleIdOf(expected), at: now }
+}
+
+export const recoverBackupSale = async ({ sale, recoverySourceFile = '', recoveredByName = '', recoveryReason = '', recoveryCode = '' } = {}) => {
+  const user = await requireAdminViewer()
+  if (!verifySystemAdminCode(recoveryCode)) throw Object.assign(new Error('رمز الاسترداد الإداري غير صحيح.'), { code: 'RECOVERY_CODE_INVALID' })
+  const actor = String(recoveredByName || user.displayName || user.email || '').trim()
+  const reason = String(recoveryReason || '').trim()
+  if (!actor || !reason) throw Object.assign(new Error('اسم المسؤول وسبب الاسترداد مطلوبان.'), { code: 'RECOVERY_REASON_REQUIRED' })
+  const candidate = normalizeBackupSale(sale)
+  const centralSnapshot = await get(salesRef())
+  const daySnapshot = await get(ref(db, `pos101_operational_days/${candidate.operationalDayId}`))
+  const centralSales = centralValues(centralSnapshot)
+  const openDay = daySnapshot.exists() ? { ...daySnapshot.val(), id: candidate.operationalDayId } : null
+  const classification = classifyBackupSale({ sale: candidate, centralSales, openDay, quarantinedSaleIds: readSalesQuarantine().map(row => String(row?.saleId || '').trim()) })
+  if (classification.classification !== 'MISSING_SAFE_TO_RECOVER') throw Object.assign(new Error(`لا يمكن استرداد المبيعة: ${classification.classification} — ${classification.reason}`), { code: 'RECOVERY_NOT_ELIGIBLE', classification })
+  const recoveredAt = Date.now()
+  const payload = { ...candidate, id: candidate.saleId, saleId: candidate.saleId, recoveredFromBackup: true, recoverySourceFile: String(recoverySourceFile || ''), recoveredByName: actor, recoveredAt, recoveryReason: reason, originalSyncStatus: candidate.syncStatus || 'pending' }
+  const saleRef = ref(db, `pos101_sales/${candidate.saleId}`)
+  const transaction = await runTransaction(saleRef, current => current == null ? payload : current)
+  const readBack = await get(saleRef)
+  if (!readBack.exists() || !salePayloadMatches(candidate, readBack.val())) throw Object.assign(new Error('فشل readback الكامل بعد الاسترداد.'), { code: 'BACKUP_RECOVERY_READBACK_FAILED' })
+  if (transaction.committed) {
+    const auditId = `audit-backup-recovery-${candidate.saleId}-${recoveredAt}`
+    const audit = financialAuditPayload({ id: auditId, user, action: 'backup_sale_recovery', entityType: 'sale', entityId: candidate.saleId, after: { saleId: candidate.saleId, orderNumber: candidate.orderNumber, total: candidate.total, recoverySourceFile: String(recoverySourceFile || ''), recoveredFromBackup: true }, reason, businessDate: candidate.businessDate })
+    await set(financialPath(`${auditPath}/${auditId}`), audit)
+    const auditBack = await get(financialPath(`${auditPath}/${auditId}`))
+    if (!auditBack.exists()) throw Object.assign(new Error('تمت المبيعة لكن تعذر التحقق من سجل الاسترداد.'), { code: 'BACKUP_RECOVERY_AUDIT_READBACK_FAILED' })
+  }
+  return { committed: transaction.committed, sale: readBack.val(), duplicate: !transaction.committed, auditReadback: transaction.committed }
 }
 
 export const readLocalExpenses = () => readCachedExpenses()

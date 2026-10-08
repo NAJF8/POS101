@@ -47,6 +47,7 @@
     "test:expense-without-google-login-regression": "node scripts/cashier-mode-regression.mjs",
     "test:staff-without-google-login-regression": "node scripts/cashier-mode-regression.mjs"
     ,"test:pending-tables": "node scripts/pending-tables-regression.mjs"
+    ,"test:backup-sales-recovery": "node scripts/backup-sales-recovery-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

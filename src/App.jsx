@@ -27,8 +27,10 @@ import { calculateOperationalDaySummary } from './services/operationalDayReport.
 import { canonicalSalesForOperationalDay, reconcileCanonicalSales } from './services/canonicalSales.js'
 import { calculateSettlement } from './services/financialCenter.js'
 import KioskActivation from './components/KioskActivation.jsx'
+import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
+import { inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale } from './services/posCentralSync.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -991,6 +993,9 @@ export default function App() {
   // async authorization record loaded, so it could permanently miss admin-viewer.
   const adminReady = isCentralAdminUser(adminAuthUser) || isCentralAdminUser(centralAuthUser)
   const saveSaleEdit = useCallback((sale, changes) => changes?.itemCorrection ? correctCentralSaleItems(sale, changes) : updateCentralSale(sale, changes), [])
+  const inspectBackup = useCallback(({ sales }) => inspectBackupSales({ sales }), [])
+  const markBackupLocal = useCallback(({ sale, centralSale }) => markBackupSaleReadbackLocally({ sale, centralSale }), [])
+  const recoverBackup = useCallback(payload => recoverBackupSale(payload), [])
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
   const requestView = useCallback(view => {
@@ -1144,6 +1149,7 @@ export default function App() {
           <div className="admin-central-actions"><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
           <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} salesOverride={adminCentralSales} products={catalogProducts} categories={catalogCategories} onNavigate={() => {}} />
+           <SalesBackupRecovery adminUser={adminAuthUser || centralAuthUser} onInspect={inspectBackup} onMarkLocal={markBackupLocal} onRecover={recoverBackup} />
         </section>
       )}
 

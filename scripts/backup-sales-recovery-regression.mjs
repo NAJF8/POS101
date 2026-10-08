@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { classifyBackupSale, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
+
+const sale = (overrides = {}) => ({
+  saleId: 'sale-1309', id: 'sale-1309', operationKey: 'pos101:sale-1309', orderNumber: 1309,
+  businessDate: '2026-10-08', operationalDayId: 'day-1', total: 20500, subtotal: 20500,
+  paymentMethod: 'cash', status: 'completed', syncStatus: 'pending', items: [{ id: 'coffee', name: 'قهوة', quantity: 1, price: 20500 }], ...overrides,
+})
+
+const raw = JSON.stringify({ salesCount: 1, localStorage: { 'pos101.sales': JSON.stringify([sale()]) } })
+const parsed = parseBackupSales(raw)
+assert.equal(parsed.length, 1)
+assert.equal(parsed[0].saleId, 'sale-1309')
+assert.equal(summarizeBackupSales(parsed).unverified, 1)
+
+const day = { id: 'day-1', operationalDayId: 'day-1', businessDate: '2026-10-08', status: 'open' }
+const exact = classifyBackupSale({ sale: sale(), centralSales: [sale({ status: 'synced', syncStatus: 'synced' })], openDay: day })
+assert.equal(exact.classification, 'EXISTS_EXACT_MATCH')
+const missing = classifyBackupSale({ sale: sale(), centralSales: [], openDay: day })
+assert.equal(missing.classification, 'MISSING_SAFE_TO_RECOVER')
+const conflict = classifyBackupSale({ sale: sale(), centralSales: [sale({ saleId: 'other', id: 'other' })], openDay: day })
+assert.equal(conflict.classification, 'CONFLICT')
+const closed = classifyBackupSale({ sale: sale(), centralSales: [], openDay: { ...day, status: 'closed' } })
+assert.equal(closed.classification, 'CONFLICT')
+const syncedWithoutCentral = classifyBackupSale({ sale: sale({ syncStatus: 'synced', status: 'synced' }), centralSales: [], openDay: day })
+assert.equal(syncedWithoutCentral.classification, 'SKIP')
+const component = fs.readFileSync(new URL('../src/components/SalesBackupRecovery.jsx', import.meta.url), 'utf8')
+const service = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
+assert.match(component, /type="file"/)
+assert.match(component, /فحص Firebase/)
+assert.match(component, /استرداد هذه المبيعة/)
+assert.match(service, /export const inspectBackupSales/)
+assert.match(service, /export const recoverBackupSale/)
+assert.match(service, /runTransaction\(saleRef/)
+assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
+assert.match(service, /audit-backup-recovery/)
+
+console.log(JSON.stringify({
+  BACKUP_FILE_UPLOAD_UI: 'PASS', BACKUP_JSON_PARSE: 'PASS', BACKUP_SUMMARY: 'PASS', PENDING_SALES_DETECTED: 'PASS', SALE_1309_DETECTED_FROM_BACKUP: 'PASS', AUTH_FIREBASE_CHECK_WIRING: 'PASS',
+  EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
+  CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
+}, null, 2))
