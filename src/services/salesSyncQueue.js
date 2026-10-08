@@ -284,11 +284,15 @@ export const resolveLegacyExpenseQueueEntries = (centralExpenses = []) => {
 // Legacy queue rows may predate operationKey/businessDate persistence. They
 // remain real sale entries when their sale payload is otherwise valid; the
 // sync layer normalizes the missing identity fields before writing.
-const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale))
+const isSaleWriteEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale)
+  && (entry?.type === 'sale_write' || entry?.kind === 'sale' || !entry?.type))
+const isVoidUpdateEntry = entry => Boolean(entry && (entry?.type === 'void_update' || entry?.kind === 'void_update') && entry?.saleId)
+const isSaleEntry = isSaleWriteEntry
 const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
   const pending = pendingSale(sale, error)
   const attempts = Number(existing?.attemptCount ?? existing?.attempts)
   return {
+    type: 'sale_write',
     kind: 'sale',
     queueKey: String(saleIdOf(sale)),
     sale: pending,
@@ -312,6 +316,47 @@ const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.
 
 export const readRawSaleQueue = () => readJson(QUEUE_KEY, [])
 export const readSaleQueue = () => readRawSaleQueue().filter(isSaleEntry)
+export const readVoidUpdateQueue = () => readRawSaleQueue().filter(isVoidUpdateEntry)
+
+const voidQueueEntry = (sale, voidPayload = {}, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
+  const saleId = saleIdOf(sale)
+  const attempts = Number(existing?.attemptCount ?? existing?.attempts)
+  return {
+    type: 'void_update',
+    kind: 'void_update',
+    queueKey: `void:${saleId}`,
+    saleId,
+    orderNumber: sale?.orderNumber ?? '',
+    businessDate: sale?.businessDate || '',
+    operationalDayId: sale?.operationalDayId || sale?.operational_day_id || '',
+    voidPayload: { ...voidPayload, saleId },
+    status: 'pending',
+    queuedAt: existing?.queuedAt || queuedAt,
+    attempts: Number.isFinite(attempts) && attempts >= 0 ? attempts : 0,
+    attemptCount: Number.isFinite(attempts) && attempts >= 0 ? attempts : 0,
+    lastAttemptAt: existing?.lastAttemptAt || null,
+    lastError: error ? String(error?.message || error) : (existing?.lastError || ''),
+    lastErrorCode: error ? String(error?.code || '') : (existing?.lastErrorCode || ''),
+  }
+}
+
+export const enqueueVoidUpdate = (sale, voidPayload = {}, { error, queuedAt = Date.now() } = {}) => {
+  const saleId = saleIdOf(sale)
+  if (!saleId) throw Object.assign(new Error('معرف البيع مطلوب لطابور الإبطال.'), { code: 'VOID_SALE_ID_REQUIRED' })
+  const queue = readRawSaleQueue()
+  const existing = queue.find(entry => isVoidUpdateEntry(entry) && String(entry.saleId) === String(saleId))
+  const nextEntry = voidQueueEntry(sale, voidPayload, { existing, error, queuedAt })
+  const nextQueue = existing ? queue.map(entry => entry === existing ? nextEntry : entry) : [...queue, nextEntry]
+  writeJson(QUEUE_KEY, nextQueue)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: { saleId, type: 'void_update_queued' } }))
+  return nextEntry
+}
+
+export const removeVoidUpdate = saleOrId => {
+  const saleId = typeof saleOrId === 'object' ? saleIdOf(saleOrId) : String(saleOrId || '')
+  const queue = readRawSaleQueue()
+  writeJson(QUEUE_KEY, queue.filter(entry => !(isVoidUpdateEntry(entry) && String(entry.saleId) === saleId)))
+}
 
 export const resolveVoidedSaleLocally = (sale, { centralVerified = false, queueResolution = 'voided_before_central_sync', reason = 'local sale voided before Firebase write', resolvedAt = Date.now() } = {}) => {
   const id = saleIdOf(sale)
@@ -320,9 +365,10 @@ export const resolveVoidedSaleLocally = (sale, { centralVerified = false, queueR
   const marker = { type: 'queue-resolution', at: resolvedAt, queueResolution, centralUploadSkipped: !centralVerified, reason }
   const sales = readJson(SALES_KEY, [])
   writeJson(SALES_KEY, sales.map(row => matches(row)
-    ? { ...row, queueResolution, queueResolvedAt: resolvedAt, centralUploadSkipped: !centralVerified, queueResolutionReason: reason, audit: [...(Array.isArray(row.audit) ? row.audit : []), marker] }
+    ? { ...row, status: 'voided', voided: true, queueResolution, queueResolvedAt: resolvedAt, centralUploadSkipped: !centralVerified, centralVerified: centralVerified ? true : row.centralVerified === true, voidCentralVerified: centralVerified, queueResolutionReason: reason, audit: [...(Array.isArray(row.audit) ? row.audit : []), marker] }
     : row))
   writeJson(QUEUE_KEY, readRawSaleQueue().filter(entry => {
+    if (isVoidUpdateEntry(entry)) return String(entry.saleId) !== String(id)
     const queued = entry?.sale || entry
     return !matches(queued)
   }))
@@ -347,6 +393,7 @@ export const readPendingSaleCount = () => {
 
 export const readSaleSyncStatus = () => {
   const queue = readRawSaleQueue().filter(isSaleEntry)
+  const voidQueue = readVoidUpdateQueue()
   const pending = queue.filter(entry => String(entry?.status || 'pending').toLowerCase() === 'pending')
   const failed = queue.filter(entry => String(entry?.status || '').toLowerCase() === 'failed')
   const attempts = queue.map(entry => entry?.lastAttemptAt).filter(Boolean).sort((a, b) => Number(b) - Number(a))
@@ -354,15 +401,18 @@ export const readSaleSyncStatus = () => {
   return {
     pendingCount: pending.length,
     failedCount: failed.length,
+    pendingVoidCount: voidQueue.filter(entry => String(entry?.status || 'pending').toLowerCase() === 'pending').length,
+    failedVoidCount: voidQueue.filter(entry => String(entry?.status || '').toLowerCase() === 'failed').length,
     lastAttemptAt: attempts[0] || null,
     lastError: errors[0] || '',
   }
 }
 
 export const readPendingSaleDiagnostics = () => readRawSaleQueue()
-  .filter(isSaleEntry)
+  .filter(entry => isSaleEntry(entry) || isVoidUpdateEntry(entry))
   .map(entry => ({
-    saleId: saleIdOf(entry.sale),
+    type: isVoidUpdateEntry(entry) ? 'void_update' : 'sale_write',
+    saleId: saleIdOf(entry.sale) || entry.saleId,
     operationKey: operationKeyOf(entry.sale),
     orderNumber: entry.sale?.orderNumber ?? entry.orderNumber ?? null,
     total: Number(entry.sale?.total ?? entry.sale?.subtotal ?? entry.total ?? 0),
@@ -408,7 +458,7 @@ export const pendingSale = (sale, error) => ({
 
 // The local ledger is authoritative for the POS. A completed sale is committed
 // to both the ledger and the durable queue before this function returns.
-export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
+export const enqueueSale = (sale, { error, queuedAt = Date.now(), dispatchEvent = true } = {}) => {
   const saleId = saleIdOf(sale)
   if (!saleId) { quarantineSale(sale, 'LEGACY_UNSAFE_QUEUE', { sale }); return sale }
   const sales = readJson(SALES_KEY, [])
@@ -447,7 +497,7 @@ export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
   writeJson('lastCompletedSaleBackup', backup)
   writeJson('dailySalesBackup', backup)
   localStorage.setItem('lastSaleBackupAt', String(queuedAt))
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
+  if (dispatchEvent && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
   return persistedSales.find(row => sameSaleIdentity(row, sale)) || localSale
 }
 
@@ -499,6 +549,19 @@ export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
     ? { ...row, status: 'synced', syncStatus: 'synced', centralVerified: true, centralVerifiedAt: syncConfirmedAt, syncConfirmedAt }
     : row))
   writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => !entry?.sale || !sameSaleIdentity(entry.sale, sale)))
+}
+
+export const markSaleVoidedCentral = (sale, { voidConfirmedAt = Date.now(), queueResolution = 'void_status_synced', audit = null } = {}) => {
+  const saleId = saleIdOf(sale)
+  const sales = readJson(SALES_KEY, [])
+  writeJson(SALES_KEY, sales.map(row => sameSale(row, saleId)
+    ? { ...row, status: 'voided', voided: true, voidedAt: sale?.voidedAt || voidConfirmedAt, voidCentralVerified: true, voidConfirmedAt, queueResolution, audit: audit && !(Array.isArray(row.audit) && row.audit.some(item => item?.id && item.id === audit.id)) ? [...(Array.isArray(row.audit) ? row.audit : []), audit] : row.audit }
+    : row))
+  writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => {
+    if (isVoidUpdateEntry(entry)) return String(entry.saleId) !== String(saleId)
+    return !entry?.sale || !sameSaleIdentity(entry.sale, sale)
+  }))
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: { saleId, status: 'voided', voidCentralVerified: true } }))
 }
 
 export const retainQueuedSale = (entry, error) => {

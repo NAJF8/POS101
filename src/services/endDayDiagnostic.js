@@ -47,11 +47,11 @@ const sameIdentity = (left, right) => Boolean(
   || (operationKeyOf(left) && operationKeyOf(left) === operationKeyOf(right))
 )
 
-export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, preCloseGuard = null } = {}) => {
+export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, preCloseGuard = null } = {}) => {
   const local = (Array.isArray(localSales) ? localSales : []).filter(sale => belongsToCurrentDay(sale, operationalDay) && isSaleSyncEligible(sale))
   const queue = (Array.isArray(queueEntries) ? queueEntries : []).filter(entry => entry?.sale && belongsToCurrentDay(entry.sale, operationalDay) && isSaleSyncEligible(entry.sale))
   const central = Array.isArray(centralSales) ? centralSales : []
-  const reconciliation = reconcilePreCloseSales({ localSales: local, queueEntries: queue, centralSales: central, operationalDay, openOrderCount })
+  const reconciliation = reconcilePreCloseSales({ localSales, queueEntries: queue, voidQueueEntries, centralSales: central, operationalDay, openOrderCount })
   const financialReconciliation = reconcileCanonicalSales({ localSales, centralSales, operationalDay })
   const centrallyVerified = sale => central.some(remote => salePayloadMatches(sale, remote))
   const candidates = [...local, ...queue.map(entry => entry.sale)].filter(sale => !centrallyVerified(sale))

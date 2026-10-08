@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettleme
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, quarantineSale, readRawSaleQueue, readSaleQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, markSaleVoidedCentral, quarantineSale, readRawSaleQueue, readSaleQueue, readVoidUpdateQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
@@ -327,6 +327,79 @@ const requireRole = async expectedRole => {
     throw Object.assign(new Error(expectedRole === 'cashier-sync' ? 'هذا الحساب لا يملك صلاحية رفع المبيعات.' : 'تسجيل دخول الإدارة مطلوب للقراءة.'), { code: 'CENTRAL_ROLE_BLOCKED' })
   }
   return user
+}
+
+const saleItemsLength = sale => Array.isArray(sale?.items)
+  ? sale.items.length
+  : Array.isArray(sale?.order?.items) ? sale.order.items.length : 0
+
+const saleReadbackRequiredFieldsMatch = (expected, actual) => Boolean(actual
+  && saleIdOf(expected) === saleIdOf(actual)
+  && String(expected?.orderNumber ?? '') === String(actual?.orderNumber ?? actual?.order_number ?? '')
+  && String(expected?.businessDate || '') === String(actual?.businessDate || '')
+  && String(expected?.operationalDayId || '') === String(actual?.operationalDayId || actual?.operational_day_id || '')
+  && Number(expected?.total ?? expected?.subtotal) === Number(actual?.total ?? actual?.subtotal)
+  && saleItemsLength(expected) === saleItemsLength(actual))
+
+// Normal online checkout uses this direct path. It performs the identity and
+// order-number collision reads before one idempotent write, then requires a
+// complete Firebase readback before the caller may mark local state synced.
+export const saveCentralSaleImmediately = async sale => {
+  await requireRole('cashier-sync')
+  const id = saleIdOf(sale)
+  if (!id || !sale?.orderNumber || !sale?.businessDate || !sale?.operationalDayId || !saleItemsLength(sale)) {
+    throw Object.assign(new Error('بيانات البيع المركزية غير مكتملة.'), { code: 'SALE_PAYLOAD_INCOMPLETE' })
+  }
+  const saleRef = ref(db, `pos101_sales/${id}`)
+  const existingSnapshot = await get(saleRef)
+  if (existingSnapshot.exists()) {
+    const existing = existingSnapshot.val()
+    if (isVoidedSale(existing)) throw Object.assign(new Error('معرف البيع موجود مركزيًا كمبطل.'), { code: 'SALE_ID_VOIDED_COLLISION' })
+    if (centralSaleMatches(sale, existing) && saleReadbackRequiredFieldsMatch(sale, existing)) return { sale: { ...existing, id }, duplicate: true, readbackVerified: true }
+    throw Object.assign(new Error('معرف البيع موجود مركزيًا ببيانات مختلفة.'), { code: 'SALE_ID_COLLISION' })
+  }
+  const centralSales = centralValues(await get(salesRef()))
+  const orderCollision = findActiveOrderNumberCollision(sale, centralSales)
+  if (orderCollision) throw Object.assign(new Error(`رقم الطلب مستخدم في مبيعة مركزية أخرى: ${sale.orderNumber}`), { code: 'ORDER_NUMBER_COLLISION_MANUAL_REVIEW' })
+  await set(saleRef, serializeSale({ ...sale, status: sale.status || 'completed' }))
+  const readBack = await get(saleRef)
+  if (!readBack.exists() || isVoidedSale(readBack.val()) || !centralSaleMatches(sale, readBack.val()) || !saleReadbackRequiredFieldsMatch(sale, readBack.val())) {
+    throw Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
+  }
+  return { sale: { ...readBack.val(), id }, duplicate: false, readbackVerified: true }
+}
+
+const auditRows = sale => Array.isArray(sale?.audit) ? sale.audit : sale?.audit && typeof sale.audit === 'object' ? Object.values(sale.audit) : []
+const hasVoidAudit = (sale, audit) => auditRows(sale).some(row => row?.type === 'void' && (!audit?.id || row?.id === audit.id))
+
+// Void updates target the existing sale node. They never create a replacement
+// sale, and a successful local confirmation is allowed only after readback of
+// status, voidedAt, and the appended audit row.
+export const voidCentralSaleImmediately = async (sale, { voidPayload = {}, audit = null } = {}) => {
+  const user = await requireRole('cashier-sync')
+  const id = saleIdOf(sale)
+  if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
+  const saleRef = ref(db, `pos101_sales/${id}`)
+  const currentSnapshot = await get(saleRef)
+  if (!currentSnapshot.exists()) return { sale: null, neverExisted: true, readbackVerified: true }
+  const current = { ...currentSnapshot.val(), id }
+  const now = Number(voidPayload.voidedAt) || Date.now()
+  const voidAudit = audit || { id: `void-${id}-${now}`, type: 'void', at: now, cashierId: voidPayload.cashierId || user.uid, cashierNameSnapshot: voidPayload.cashierNameSnapshot || user.displayName || user.email || '', reason: voidPayload.voidReason || '' }
+  if (!isVoidedSale(current) || !hasVoidAudit(current, voidAudit)) {
+    const nextAudit = hasVoidAudit(current, voidAudit) ? auditRows(current) : [...auditRows(current), voidAudit]
+    await update(saleRef, {
+      status: 'voided',
+      voided: true,
+      voidedAt: Number(current.voidedAt) || now,
+      voidedBy: voidPayload.voidedBy || user.uid,
+      voidReason: voidPayload.voidReason || '',
+      audit: nextAudit,
+    })
+  }
+  const readBack = await get(saleRef)
+  const verified = readBack.exists() && isVoidedSale(readBack.val()) && Boolean(readBack.val()?.voidedAt) && hasVoidAudit(readBack.val(), voidAudit)
+  if (!verified) throw Object.assign(new Error('تعذر التحقق من إبطال البيع مركزيًا.'), { code: 'VOID_READBACK_FAILED' })
+  return { sale: { ...readBack.val(), id }, neverExisted: false, readbackVerified: true, audit: voidAudit }
 }
 
 const requireOperationalDayRole = async () => {
@@ -860,7 +933,7 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   // Readback is also the restart repair path. Persist only sync metadata after
   // exact payload verification; never resend or rewrite the central sale.
   reconcileSalesAgainstCentral(centralSales)
-  const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), centralSales, operationalDay, openOrderCount })
+  const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay, openOrderCount })
   const financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
   return {
     ...salesReconciliation,
@@ -879,6 +952,7 @@ export const readEndDayDiagnostic = async (operationalDay, { openOrderCount = 0,
   return buildEndDayDiagnostic({
     localSales: readLocalSales(),
     queueEntries: readSaleQueue(),
+    voidQueueEntries: readVoidUpdateQueue(),
     centralSales,
     operationalDay,
     openOrderCount,
@@ -1107,24 +1181,46 @@ const resolveVoidedQueueEntries = async centralSales => {
       resolved += 1
       continue
     }
-    if (!isVoidedSale(readBack.val())) {
-      logQueueItemDiagnostic({ index, sale, entry, firebaseExists: true, action: 'SYNC_VOID_STATUS', detail: 'CENTRAL_ACTIVE_REQUIRES_VOID_UPDATE' })
-      try {
-        await set(saleRef, { ...readBack.val(), status: 'voided', voided: true, voidedAt: sale.voidedAt || sale.cancelledAt || sale.canceledAt || Date.now(), queueResolution: 'void_status_synced' })
-        readBack = await get(saleRef)
-      } catch (error) {
-        failed += 1
-        console.info('[POS101_QUEUE_ITEM]', JSON.stringify({ QUEUE_ITEM: index, saleId: saleIdOf(sale), orderNumber: sale.orderNumber, localStatus: sale.status, firebaseExists, firebaseStatus, classification: 'VOID_SYNC_NEEDED', action: 'SYNC_VOID_STATUS', error: error?.message || String(error) }))
-        continue
-      }
-    }
-    if (readBack?.exists() && isVoidedSale(readBack.val())) {
-      resolveVoidedSaleLocally(sale, { centralVerified: true, queueResolution: 'voided_central_readback_verified', reason: 'Firebase void status readback PASS' })
-      console.info('[POS101_QUEUE_ITEM]', JSON.stringify({ QUEUE_ITEM: index, saleId: saleIdOf(sale), orderNumber: sale.orderNumber, localStatus: sale.status, firebaseExists: true, firebaseStatus: readBack.val()?.status || 'voided', classification: 'VOID_SYNC_NEEDED', action: 'SYNC_VOID_STATUS' }))
+    logQueueItemDiagnostic({ index, sale, entry, firebaseExists: true, action: 'SYNC_VOID_STATUS', detail: isVoidedSale(readBack.val()) ? 'CENTRAL_ALREADY_VOIDED' : 'CENTRAL_ACTIVE_REQUIRES_VOID_UPDATE' })
+    try {
+      const voidedAt = sale.voidedAt || sale.cancelledAt || sale.canceledAt || Date.now()
+      const audit = auditRows(sale).slice().reverse().find(row => row?.type === 'void') || { id: `void-${saleIdOf(sale)}-${voidedAt}`, type: 'void', at: voidedAt, cashierId: sale.cashierId || '', cashierNameSnapshot: sale.cashierNameSnapshot || sale.seller || '', reason: sale.voidReason || '' }
+      const result = await voidCentralSaleImmediately(sale, { voidPayload: { voidedAt, voidedBy: sale.voidedBy || sale.cashierId || '', voidReason: sale.voidReason || '', audit }, audit })
+      markSaleVoidedCentral(sale, { voidConfirmedAt: Date.now(), queueResolution: 'voided_central_readback_verified', audit: result.audit })
+      console.info('[POS101_QUEUE_ITEM]', JSON.stringify({ QUEUE_ITEM: index, saleId: saleIdOf(sale), orderNumber: sale.orderNumber, localStatus: sale.status, firebaseExists: true, firebaseStatus: 'voided', classification: 'VOID_SYNC_NEEDED', action: 'SYNC_VOID_STATUS' }))
       resolved += 1
-    } else failed += 1
+    } catch (error) {
+      failed += 1
+      console.info('[POS101_QUEUE_ITEM]', JSON.stringify({ QUEUE_ITEM: index, saleId: saleIdOf(sale), orderNumber: sale.orderNumber, localStatus: sale.status, firebaseExists, firebaseStatus, classification: 'VOID_SYNC_NEEDED', action: 'SYNC_VOID_STATUS', error: error?.message || String(error) }))
+    }
   }
   return { resolved, failed, remainingVoided: readRawSaleQueue().filter(entry => isVoidedSale(entry?.sale)).length }
+}
+
+const resolveVoidUpdateQueueEntries = async () => {
+  const entries = readVoidUpdateQueue()
+  let resolved = 0
+  let failed = 0
+  const localSales = readSales()
+  for (const entry of entries) {
+    const localSale = localSales.find(row => saleIdOf(row) === String(entry.saleId)) || { saleId: entry.saleId, id: entry.saleId, orderNumber: entry.orderNumber, businessDate: entry.businessDate, operationalDayId: entry.operationalDayId, status: 'voided' }
+    const payload = entry.voidPayload || {}
+    const audit = payload.audit || auditRows(localSale).slice().reverse().find(row => row?.type === 'void') || null
+    try {
+      const result = await voidCentralSaleImmediately(localSale, { voidPayload: payload, audit })
+      if (result.neverExisted) {
+        if (localSale.centralVerified === true) { failed += 1; continue }
+        resolveVoidedSaleLocally(localSale, { queueResolution: 'voided_before_central_sync', reason: 'Firebase sale was absent during void retry' })
+      } else {
+        markSaleVoidedCentral(localSale, { voidConfirmedAt: Date.now(), audit: result.audit, queueResolution: 'void_status_synced' })
+      }
+      resolved += 1
+    } catch (error) {
+      failed += 1
+      console.info('[POS101_VOID_QUEUE_ITEM]', JSON.stringify({ type: 'void_update', saleId: entry.saleId, orderNumber: entry.orderNumber, action: 'RETAIN', error: error?.code || error?.message || String(error) }))
+    }
+  }
+  return { resolved, failed, remaining: readVoidUpdateQueue().length }
 }
 
 const normalizeQueuedSaleForCurrentDay = sale => {
@@ -1166,8 +1262,9 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
   let beforeCentral = centralValues(before)
+  const voidUpdateResult = await resolveVoidUpdateQueueEntries()
   const voidedQueueResult = await resolveVoidedQueueEntries(beforeCentral)
-  if (voidedQueueResult.resolved) beforeCentral = centralValues(await get(salesRef()))
+  if (voidUpdateResult.resolved || voidedQueueResult.resolved) beforeCentral = centralValues(await get(salesRef()))
   const known1056 = beforeCentral.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   const local1056 = localSales.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   if (known1056 || local1056) restoreManualReviewQuarantineMarker({ saleId: KNOWN_MANUAL_REVIEW_SALE_1056, orderNumber: 1056, reason: KNOWN_MANUAL_REVIEW_REASON_1056, centralExists: Boolean(known1056) })

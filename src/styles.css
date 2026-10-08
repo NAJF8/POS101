@@ -1841,3 +1841,15 @@ input, textarea, select { cursor: text; }
   .backup-toolbar { align-items: stretch; flex-direction: column; }
   .backup-toolbar label { min-width: 0; }
 }
+.pos101-sync-blocking-warning {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  margin: 0 auto;
+  padding: 10px 16px;
+  color: #7f1d1d;
+  background: #fee2e2;
+  border-bottom: 1px solid #fca5a5;
+  text-align: center;
+  font-weight: 700;
+}

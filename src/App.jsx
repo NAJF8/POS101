@@ -16,8 +16,8 @@ import { Purchases } from './components/Purchases'
 import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, buildSalesBackup, readSaleSyncStatus, readPendingSaleDiagnostics } from './services/salesSyncQueue'
-import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
+import { enqueueSale, buildSalesBackup, markSaleSynced, enqueueVoidUpdate, markSaleVoidedCentral, resolveVoidedSaleLocally, readSaleSyncStatus, readPendingSaleDiagnostics } from './services/salesSyncQueue'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -108,6 +108,7 @@ export default function App() {
   const [cartScrollRequest, setCartScrollRequest] = useState(0)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
+  const [saleSyncWarning, setSaleSyncWarning] = useState('')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
   const [saleSyncStatus, setSaleSyncStatus] = useState(() => readSaleSyncStatus())
   const [adminAuthUser, setAdminAuthUser] = useState(null)
@@ -837,12 +838,15 @@ export default function App() {
     const stableSaleId = activeOrder.saleId || crypto.randomUUID()
     const stableOperationKey = activeOrder.operationKey || `pos101:${stableSaleId}`
     if (!activeOrder.saleId || !activeOrder.operationKey) setOrders(v => v.map((o, i) => i === active ? { ...o, saleId: stableSaleId, operationKey: stableOperationKey } : o))
-    let centralOrder
+    let centralOrder = activeOrder.orderNumber ? { orderNumber: activeOrder.orderNumber } : null
     try {
-      centralOrder = await allocateCentralOrderNumber({ operationalDayId: currentOperationalDay.id, businessDate: currentOperationalDay.businessDate })
+      if (!centralOrder) {
+        centralOrder = await allocateCentralOrderNumber({ operationalDayId: currentOperationalDay.id, businessDate: currentOperationalDay.businessDate })
+        setOrders(v => v.map((o, i) => i === active ? { ...o, saleId: stableSaleId, operationKey: stableOperationKey, orderNumber: centralOrder.orderNumber } : o))
+      }
     } catch (error) {
       saleInFlight.current = false
-      setOperationalDayError(error?.message || 'تعذر تخصيص رقم طلب مركزي. تحقق من الاتصال والمصادقة ثم أعد المحاولة.')
+      setOperationalDayError(error?.message || 'تعذر تخصيص رقم طلب مركزي بأمان. تحقق من الاتصال ثم أعد المحاولة.')
       setModal('operational-day-required')
       return false
     }
@@ -869,23 +873,70 @@ export default function App() {
       order: { ...activeOrder, items: originalItems }
     }
 
-    // 1. Optimistic Local Save & Cart Clear (POS continues selling)
-    setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-    if (autoPrint) void requestSalePrint(sale)
-    setPendingPayment(null)
-    window.setTimeout(() => setModal(null), 350)
-
-    // 2. Persist the local ledger and deferred queue. No Firebase, ACC, Auth,
-    // or Cloud Function call is allowed on this cashier-critical path.
-    enqueueSale(sale)
+    // Online success is central-first: Firebase write and exact readback must
+    // complete before local sync metadata, printing, or cart clearing.
     try {
-      await processSaleSyncQueue({ reason: 'after-sale-complete' })
+      await saveCentralSaleImmediately(sale)
+      enqueueSale(sale, { dispatchEvent: false })
+      markSaleSynced(sale)
+      setSaleSyncWarning('')
+      setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
+      if (autoPrint) void requestSalePrint(sale)
+      setPendingPayment(null)
+      window.setTimeout(() => setModal(null), 350)
+      return true
     } catch (error) {
-      console.warn('POS101_AFTER_SALE_AUTOSYNC_PENDING', error?.code || error?.message || String(error))
+      // A write/readback/auth failure is the only normal entry into the
+      // emergency queue. Keep the exact saleId/orderNumber for retry and do
+      // not claim central verification.
+      try {
+        // The emergency fallback remains the canonical enqueueSale(sale) path.
+        enqueueSale(sale, { error })
+        setSaleSyncWarning('تعذر رفع الطلب مركزيًا، تم حفظه مؤقتًا وسيعاد رفعه')
+        console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
+      } catch (queueError) {
+        setOperationalDayError(queueError?.message || error?.message || 'تعذر حفظ الطلب مؤقتًا.')
+        setModal('operational-day-required')
+        saleInFlight.current = false
+        return false
+      }
     }
     window.setTimeout(() => { saleInFlight.current = false }, 350)
     return true
   }, [session, activeOrder, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
+
+  const handleVoidSale = useCallback(async sale => {
+    const saleId = sale?.saleId || sale?.id
+    if (!saleId) throw new Error('معرف البيع غير موجود.')
+    const voidedAt = Number(sale?.voidedAt) || Date.now()
+    const audit = { id: sale?.audit?.find?.(row => row?.type === 'void')?.id || `void-${saleId}-${voidedAt}`, type: 'void', at: voidedAt, cashierId: session?.cashierId || session?.shiftId || null, cashierNameSnapshot: session?.name || session?.shiftName || '', reason: '' }
+    const pending = { ...sale, id: saleId, saleId, status: 'void_pending_sync', voided: true, voidedAt, audit: [...(Array.isArray(sale.audit) ? sale.audit : []), audit] }
+    const writeLocalPending = next => {
+      const sales = readLocalSales()
+      const nextSales = sales.map(row => (row.saleId || row.id) === saleId ? next : row)
+      localStorage.setItem('pos101.sales', JSON.stringify(nextSales))
+      window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: next }))
+      return next
+    }
+    writeLocalPending(pending)
+    const voidPayload = { saleId, voidedAt, voidedBy: session?.cashierId || session?.shiftId || '', cashierId: session?.cashierId || session?.shiftId || '', cashierNameSnapshot: session?.name || session?.shiftName || '', voidReason: '', audit }
+    try {
+      const result = await voidCentralSaleImmediately(pending, { voidPayload, audit })
+      if (result.neverExisted) {
+        resolveVoidedSaleLocally(pending, { queueResolution: 'voided_before_central_sync', reason: 'Sale was voided before central creation' })
+        setSaleSyncWarning('تم إبطال الطلب محليًا قبل وجوده مركزيًا؛ لا أثر مالي مركزي له')
+      } else {
+        markSaleVoidedCentral(pending, { voidConfirmedAt: Date.now(), queueResolution: 'void_status_synced', audit: result.audit })
+        setSaleSyncWarning('')
+      }
+      return result.sale || pending
+    } catch (error) {
+      enqueueVoidUpdate(pending, voidPayload, { error })
+      setSaleSyncWarning('إبطال غير مثبت مركزيًا')
+      console.warn('POS101_IMMEDIATE_VOID_SYNC_PENDING', error?.code || error?.message || String(error))
+      return pending
+    }
+  }, [session])
 
   // Keyboard shortcuts and custom events
   useEffect(() => {
@@ -1091,6 +1142,7 @@ export default function App() {
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
       {versionStatus === 'updating' && <div className="pos101-update-status" role="status" aria-live="polite">جاري تحديث النظام...</div>}
       {(versionStatus === 'deferred' || versionStatus === 'pending') && versionBlocked && <div className="pos101-update-notice" role="status" aria-live="polite">يتوفر تحديث للنظام وسيتم تطبيقه بعد إكمال الطلب الحالي.</div>}
+      {saleSyncWarning && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">{saleSyncWarning}</div>}
       {session && (
         <Header
           session={session}
@@ -1128,6 +1180,7 @@ export default function App() {
           staff={staff}
           correctionActor={centralAuthUser || adminAuthUser}
           correctionAuthorization={staffAuthorizationRecord}
+          onVoidSale={handleVoidSale}
           onClose={() => setCurrentView('dashboard')}
         />
       )}
@@ -1164,7 +1217,7 @@ export default function App() {
             onNewOrder={newOrder}
             session={session}
           />
-          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} canCorrectSaleItems staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
+          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} onVoidSale={handleVoidSale} canCorrectSaleItems staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
         </div>
       )}
 

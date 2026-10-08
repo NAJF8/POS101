@@ -11,7 +11,7 @@ import { businessDateForSale } from '../services/reportSales.js'
 import { validateCorrectionIdentity } from '../services/saleEdit.js'
 const money = formatMoney
 const paymentLabel = value => value === 'cash' ? 'نقدي' : value === 'electronic' || value === 'card' ? 'إلكتروني' : 'غير محدد'
-const statusLabel = value => value === 'voided' ? 'مبطل' : 'مكتمل'
+const statusLabel = value => value === 'voided' ? 'مبطل' : value === 'void_pending_sync' ? 'إبطال غير مثبت مركزيًا' : 'مكتمل'
 const typeLabel = sale => sale.order?.orderType || sale.orderType || 'داخل الكوفي'
 const localDate = formatDateTime
 const businessDateLabel = sale => {
@@ -107,7 +107,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }
         <button disabled={!onEdit || sale.status === 'voided'} onClick={() => onEdit?.(sale)} title={onEdit ? 'تعديل آمن مع سجل تدقيق' : 'التعديل متاح فقط لليوم المفتوح'}><Icon name="edit" size={18} /> تعديل</button>
         {sale.status !== 'voided' && (
           confirmingVoid ? (
-            <span className="void-confirm"><b>تأكيد الإبطال؟</b><button onClick={() => onVoid(sale)}>تأكيد</button><button onClick={() => setConfirmingVoid(false)}>رجوع</button></span>
+            <span className="void-confirm"><b>تأكيد الإبطال؟</b><button onClick={async () => { await onVoid(sale); setConfirmingVoid(false) }}>تأكيد</button><button onClick={() => setConfirmingVoid(false)}>رجوع</button></span>
           ) : <button className="history-void" onClick={() => setConfirmingVoid(true)}><Icon name="trash" size={18} /> إبطال البيع</button>
         )}
       </div>}
@@ -115,7 +115,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }
   )
 }
 
-export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, canCorrectSaleItems = false, staff = [], correctionActor = null, correctionAuthorization = null, readOnly = false }) {
+export default function OrderHistoryMenu({ onClose, session, salesOverride = null, onEditSale = null, onVoidSale = null, canCorrectSaleItems = false, staff = [], correctionActor = null, correctionAuthorization = null, readOnly = false }) {
   const [sales, setSales] = useState(() => salesOverride ?? readSales())
   const [query, setQuery] = useState('')
   const [fromDate, setFromDate] = useState('')
@@ -170,7 +170,7 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
       const saleBusinessDate = businessDateForSale(sale)
       const dateMatches = (!fromDate || saleBusinessDate >= fromDate) && (!toDate || saleBusinessDate <= toDate)
       const methodMatches = method === 'all' || sale.paymentMethod === method || (method === 'electronic' && sale.paymentMethod === 'card')
-      const statusMatches = status === 'all' || (status === 'completed' && sale.status !== 'voided') || sale.status === status
+      const statusMatches = status === 'all' || (status === 'completed' && !['voided', 'void_pending_sync'].includes(sale.status)) || sale.status === status
       return textMatches && dateMatches && methodMatches && statusMatches
     }).toSorted((a, b) => b.createdAt - a.createdAt)
   }, [sales, query, fromDate, toDate, method, status])
@@ -181,7 +181,14 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const resetPage = action => { action(); setPage(1) }
 
   const reprint = sale => window.dispatchEvent(new CustomEvent('print-historical-sale', { detail: sale }))
-  const voidSale = sale => {
+  const voidSale = async sale => {
+    if (onVoidSale) {
+      const saved = await onVoidSale(sale)
+      const nextSales = sales.map(entry => (entry.saleId || entry.id) === (saved.saleId || saved.id) ? saved : entry)
+      setSales(nextSales)
+      setSelectedSale(saved)
+      return saved
+    }
     const voidedAt = Date.now()
     const audit = { id: crypto.randomUUID(), type: 'void', at: voidedAt, cashierId: session?.cashierId || null, cashierNameSnapshot: session?.cashierNameSnapshot || null }
     const nextSales = sales.map(entry => entry.id === sale.id ? { ...entry, status: 'voided', voidedAt, audit: [...(entry.audit || []), audit] } : entry)
