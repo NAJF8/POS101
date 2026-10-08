@@ -38,7 +38,7 @@ assert.match(diagnostic, /blockingItems/)
 const day = { id: 'day-2026-10-09', businessDate: '2026-10-09', status: 'open' }
 const baseSale = { saleId: 'sale-permanent-1', id: 'sale-permanent-1', operationKey: 'pos101:sale-permanent-1', orderNumber: 1801, businessDate: day.businessDate, operationalDayId: day.id, status: 'synced', syncStatus: 'synced', centralVerified: true, total: 1500, subtotal: 1500, discount: 0, paymentMethod: 'cash', items: [{ id: 'coffee', quantity: 1, price: 1500 }] }
 const centralSale = { ...baseSale }
-const ready = buildEndDayDiagnostic({ localSales: [baseSale], centralSales: [centralSale], operationalDay: day, liveCommit: 'commit-test', liveBundle: 'index-test.js' })
+const ready = buildEndDayDiagnostic({ localSales: [baseSale], centralSales: [centralSale], operationalDay: day, localOperationalDay: day, centralOperationalDay: day, liveCommit: 'commit-test', liveBundle: 'index-test.js' })
 assert.equal(ready.localActiveCount, 1)
 assert.equal(ready.firebaseActiveCount, 1)
 assert.equal(ready.localActiveTotal, 1500)

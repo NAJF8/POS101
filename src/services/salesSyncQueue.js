@@ -81,9 +81,11 @@ export const financialFingerprint = sale => JSON.stringify(stable({
 export const salePayloadMatches = (expected, actual) => Boolean(expected && actual
   && text(saleIdOf(expected)) === text(saleIdOf(actual))
   && (!operationKeyOf(expected) || text(operationKeyOf(expected)) === text(operationKeyOf(actual)))
+  && text(expected?.orderNumber) === text(actual?.orderNumber || actual?.order_number)
   && text(expected?.businessDate) === text(actual?.businessDate)
   && text(expected?.operationalDayId || expected?.operational_day_id) === text(actual?.operationalDayId || actual?.operational_day_id)
   && number(expected?.net ?? expected?.total ?? expected?.subtotal) === number(actual?.net ?? actual?.total ?? actual?.subtotal)
+  && saleItems(expected).length === saleItems(actual).length
   && text(expected?.paymentMethod || expected?.payment?.method) === text(actual?.paymentMethod || actual?.payment?.method)
   && financialFingerprint(expected) === financialFingerprint(actual))
 
@@ -204,6 +206,8 @@ export const classifyCentralSale = (sale, centralSales = []) => {
   const operationKey = text(operationKeyOf(sale))
   const byId = (centralSales || []).find(row => text(saleIdOf(row)) === id)
   const byOperation = operationKey && (centralSales || []).find(row => text(operationKeyOf(row)) === operationKey)
+  if (byId && isVoidedSale(byId)) return { action: 'quarantine', central: byId, reason: 'SALE_ID_VOIDED_COLLISION' }
+  if (byOperation && isVoidedSale(byOperation)) return { action: 'quarantine', central: byOperation, reason: 'OPERATION_KEY_VOIDED_COLLISION' }
   if (byId && salePayloadMatches(sale, byId)) return { action: 'duplicate', central: byId, reason: 'CENTRAL_DUPLICATE' }
   if (byId) return { action: 'quarantine', central: byId, reason: 'SALE_ID_COLLISION' }
   if (byOperation && !salePayloadMatches(sale, byOperation)) return { action: 'quarantine', central: byOperation, reason: 'OPERATION_KEY_COLLISION' }

@@ -879,10 +879,11 @@ export default function App() {
       await saveCentralSaleImmediately(sale)
       markSaleSynced(sale)
       setSaleSyncWarning('')
+      if (autoPrint) await requestSalePrint(sale)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
-      if (autoPrint) void requestSalePrint(sale)
       setPendingPayment(null)
       window.setTimeout(() => setModal(null), 350)
+      saleInFlight.current = false
       return true
     } catch (error) {
       if (isOperationalDayClosedError(error)) {

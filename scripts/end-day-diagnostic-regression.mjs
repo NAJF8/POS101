@@ -21,6 +21,8 @@ const result = buildEndDayDiagnostic({
   queueEntries: [queueEntry],
   centralSales: [central],
   operationalDay: day,
+  localOperationalDay: day,
+  centralOperationalDay: day,
   openOrderCount: 0,
   preCloseGuard: { state: 'real-pending', message: 'توجد مبيعات مكتملة غير متزامنة.', loading: false },
 })

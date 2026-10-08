@@ -35,7 +35,7 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
     running = Promise.resolve(hasEligibleQueue())
       .then(allowed => {
         if (!allowed) {
-          return diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'not-authenticated-or-no-permission' }).then(() => null)
+          return diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'ineligible', detail: 'not-authenticated-or-no-permission' }).then(() => null)
         }
         return processQueue()
       })

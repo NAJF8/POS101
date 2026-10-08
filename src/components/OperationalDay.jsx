@@ -164,10 +164,18 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
       `localActiveTotal=${report.localActiveTotal ?? 0}`,
       `firebaseActiveCount=${report.firebaseActiveCount ?? 0}`,
       `firebaseActiveTotal=${report.firebaseActiveTotal ?? 0}`,
+      `LOCAL_ACTIVE_COUNT=${report.LOCAL_ACTIVE_COUNT ?? report.localActiveCount ?? 0}`,
+      `LOCAL_ACTIVE_TOTAL=${report.LOCAL_ACTIVE_TOTAL ?? report.localActiveTotal ?? 0}`,
+      `FIREBASE_ACTIVE_COUNT=${report.FIREBASE_ACTIVE_COUNT ?? report.firebaseActiveCount ?? 0}`,
+      `FIREBASE_ACTIVE_TOTAL=${report.FIREBASE_ACTIVE_TOTAL ?? report.firebaseActiveTotal ?? 0}`,
+      `LOCAL_FIREBASE_ACTIVE_MATCH=${report.LOCAL_FIREBASE_ACTIVE_MATCH || 'FAIL'}`,
       `pendingSaleWrite=${report.pendingSaleWrite ?? 0}`,
       `pendingVoidUpdate=${report.pendingVoidUpdate ?? 0}`,
+      `PENDING_SALE_WRITE=${report.PENDING_SALE_WRITE ?? report.pendingSaleWrite ?? 0}`,
+      `PENDING_VOID_UPDATE=${report.PENDING_VOID_UPDATE ?? report.pendingVoidUpdate ?? 0}`,
       `voidedBeforeSyncResolved=${report.voidedBeforeSyncResolved ?? 0}`,
       `queueItems=${report.queueItems ?? 0}`,
+      `QUEUE_ITEMS=${report.QUEUE_ITEMS ?? report.queueItems ?? 0}`,
       `blockingItems=${report.blockingItems ?? 0}`,
       `END_DAY_READY=${report.END_DAY_READY || 'NO'}`,
       `pendingQueue=${report.pendingQueue}`,
@@ -266,10 +274,18 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           <span>localActiveTotal <b>{diagnosticReport.localActiveTotal}</b></span>
           <span>firebaseActiveCount <b>{diagnosticReport.firebaseActiveCount}</b></span>
           <span>firebaseActiveTotal <b>{diagnosticReport.firebaseActiveTotal}</b></span>
+          <span>LOCAL_ACTIVE_COUNT <b>{diagnosticReport.LOCAL_ACTIVE_COUNT ?? diagnosticReport.localActiveCount}</b></span>
+          <span>LOCAL_ACTIVE_TOTAL <b>{diagnosticReport.LOCAL_ACTIVE_TOTAL ?? diagnosticReport.localActiveTotal}</b></span>
+          <span>FIREBASE_ACTIVE_COUNT <b>{diagnosticReport.FIREBASE_ACTIVE_COUNT ?? diagnosticReport.firebaseActiveCount}</b></span>
+          <span>FIREBASE_ACTIVE_TOTAL <b>{diagnosticReport.FIREBASE_ACTIVE_TOTAL ?? diagnosticReport.firebaseActiveTotal}</b></span>
+          <span>LOCAL_FIREBASE_ACTIVE_MATCH <b>{diagnosticReport.LOCAL_FIREBASE_ACTIVE_MATCH || 'FAIL'}</b></span>
           <span>pendingSaleWrite <b>{diagnosticReport.pendingSaleWrite}</b></span>
           <span>pendingVoidUpdate <b>{diagnosticReport.pendingVoidUpdate}</b></span>
+          <span>PENDING_SALE_WRITE <b>{diagnosticReport.PENDING_SALE_WRITE ?? diagnosticReport.pendingSaleWrite}</b></span>
+          <span>PENDING_VOID_UPDATE <b>{diagnosticReport.PENDING_VOID_UPDATE ?? diagnosticReport.pendingVoidUpdate}</b></span>
           <span>voidedBeforeSyncResolved <b>{diagnosticReport.voidedBeforeSyncResolved}</b></span>
           <span>queueItems <b>{diagnosticReport.queueItems}</b></span>
+          <span>QUEUE_ITEMS <b>{diagnosticReport.QUEUE_ITEMS ?? diagnosticReport.queueItems}</b></span>
           <span>blockingItems <b>{diagnosticReport.blockingItems}</b></span>
           <span>pendingQueue <b>{diagnosticReport.pendingQueue}</b></span>
           <span>OPEN_SALES_QUEUE_COUNT <b>{diagnosticReport.OPEN_SALES_QUEUE_COUNT ?? 0}</b></span>

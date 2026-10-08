@@ -273,6 +273,9 @@ const saleReadbackMatches = (expected, actual) => {
 
 const centralSaleMatches = (expected, actual) => Boolean(
   salePayloadMatches(expected, actual)
+  && !isVoidedSale(actual)
+  && String(expected?.orderNumber ?? '') === String(actual?.orderNumber ?? actual?.order_number ?? '')
+  && saleItemsLength(expected) === saleItemsLength(actual)
   && financialFingerprint(expected) === financialFingerprint(actual)
 )
 
@@ -619,7 +622,19 @@ const normalizeOperationalDay = (day, fallbackId = '') => {
   const id = operationalDayIdOf(day) || String(fallbackId || '').trim()
   const status = day.status === 'closed' ? 'closed' : day.status === 'open' ? 'open' : ''
   if (!id || !day.businessDate || !status) return null
-  return { ...day, id, operationalDayId: String(day.operationalDayId || id), status }
+  return {
+    ...day,
+    id,
+    operationalDayId: String(day.operationalDayId || id),
+    openedAt: Number(day.openedAt || day.startedAt) || null,
+    openedBy: day.openedBy || day.startedBy || null,
+    closedAt: day.closedAt || null,
+    closedBy: day.closedBy || null,
+    closeSummary: day.closeSummary || null,
+    version: Number(day.version || 0),
+    updatedAt: Number(day.updatedAt || day.closedAt || day.startedAt || day.openedAt) || 0,
+    status,
+  }
 }
 const cacheOperationalDay = (day, { central = false } = {}) => {
   const normalized = normalizeOperationalDay(day)
@@ -1103,6 +1118,8 @@ export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, 
       businessDate: localBusinessDate(now),
       startedAt: now,
       startedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
+      openedAt: now,
+      openedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
       openingCashBalance: opening,
       openingCashSource: openingCashSource === 'previous_closing' ? 'previous_closing' : 'manual',
       previousOperationalDayId: String(previousOperationalDayId || ''),
@@ -1398,16 +1415,16 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
   let beforeCentral = centralValues(before)
-  const centralDay = await readCentralOperationalDay()
-  if (!centralDay || centralDay.status !== 'open') {
-    const reason = centralDay ? 'CENTRAL_DAY_CLOSED' : 'CENTRAL_DAY_UNAVAILABLE'
-    logQueueDecision(null, 'operational-day-blocked', reason, { queueLength: rawQueue.length, processingStarted: false, firebaseWriteResult: 'not-started', readbackResult: 'not-started', localUpdateResult: 'retained-in-queue' })
-    if (manualReport) manualReport.errors.push(reason)
-    return { uploaded: 0, received: 0, centralCount: beforeCentral.length, mergedCount: localSales.length, localCount: localSales.length, updated: 0, initialSyncCompleted: readInitialSyncCompleted(), uploadBlocked: true, blockedReason: reason, skipped: rawQueue.length, queueCleanup: { removed: 0, retained: rawQueue.length }, strandedRecovered: 0, historicalOrderNumberDuplicates: [] }
-  }
   const voidUpdateResult = await resolveVoidUpdateQueueEntries()
   const voidedQueueResult = await resolveVoidedQueueEntries(beforeCentral)
   if (voidUpdateResult.resolved || voidedQueueResult.resolved) beforeCentral = centralValues(await get(salesRef()))
+  const centralDay = await readCentralOperationalDay()
+  if (!centralDay || centralDay.status !== 'open') {
+    const reason = centralDay ? 'CENTRAL_DAY_CLOSED' : 'CENTRAL_DAY_UNAVAILABLE'
+    logQueueDecision(null, 'operational-day-blocked', reason, { queueLength: rawQueue.length, processingStarted: false, firebaseWriteResult: 'not-started', readbackResult: 'not-started', localUpdateResult: 'retained-in-queue', voidUpdateResolved: voidUpdateResult.resolved + voidedQueueResult.resolved })
+    if (manualReport) manualReport.errors.push(reason)
+    return { uploaded: 0, received: 0, centralCount: beforeCentral.length, mergedCount: localSales.length, localCount: localSales.length, updated: 0, initialSyncCompleted: readInitialSyncCompleted(), uploadBlocked: true, blockedReason: reason, skipped: rawQueue.length, queueCleanup: { removed: 0, retained: rawQueue.length }, voidUpdateResult, voidedQueueResult, strandedRecovered: 0, historicalOrderNumberDuplicates: [] }
+  }
   const known1056 = beforeCentral.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   const local1056 = localSales.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   if (known1056 || local1056) restoreManualReviewQuarantineMarker({ saleId: KNOWN_MANUAL_REVIEW_SALE_1056, orderNumber: 1056, reason: KNOWN_MANUAL_REVIEW_REASON_1056, centralExists: Boolean(known1056) })
@@ -1517,7 +1534,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     const readVerifiedSale = async () => {
       {
         const readBack = await get(saleRef)
-        if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) return null
+        if (!readBack?.exists() || isVoidedSale(readBack.val()) || !centralSaleMatches(sale, readBack.val()) || !saleReadbackRequiredFieldsMatch(sale, readBack.val())) return null
         return readBack
       }
     }
