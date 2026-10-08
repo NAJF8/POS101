@@ -1293,7 +1293,18 @@ export const recoverStaleSyncLock = () => syncLockManager.recoverStale()
 export const recoverStaleEmergencyRepairFlag = () => syncLockManager.recoverStaleEmergencyRepairFlag()
 
 export const runCashierCentralSync = ({ initial = false } = {}) => {
-  return runCashierCentralSyncInternal({ initial, trigger: 'worker' })
+  return processSaleSyncQueue({ reason: initial ? 'startup' : 'worker', initial })
+}
+
+// One in-tab promise is shared by the sale-created event and the explicit
+// after-sale call. This makes the immediate call await the exact worker run
+// already started by enqueueSale, without creating a competing sync lock.
+let activeSaleSyncPromise = null
+export const processSaleSyncQueue = ({ reason = 'worker', initial = false } = {}) => {
+  if (activeSaleSyncPromise) return activeSaleSyncPromise
+  activeSaleSyncPromise = runCashierCentralSyncInternal({ initial, trigger: reason })
+    .finally(() => { activeSaleSyncPromise = null })
+  return activeSaleSyncPromise
 }
 
 // Explicit user-triggered path. It reads the current tab's localStorage at

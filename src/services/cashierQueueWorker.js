@@ -5,6 +5,7 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
   let running = null
   let timer = null
   let stopped = false
+  let eventTarget = globalThis
 
   const diagnostic = async (event, detail = {}) => {
     let context = {}
@@ -17,8 +18,12 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
 
   const run = (trigger = 'manual') => {
     if (stopped) { void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'stopped' }); return Promise.resolve(null) }
+    if (eventTarget?.navigator?.onLine === false) {
+      void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'offline' })
+      return Promise.resolve(null)
+    }
     const repairState = defaultSyncLockManager.recoverStaleEmergencyRepairFlag()
-    if (repairState.active) {
+    if (repairState.active && repairState.activeInThisContext) {
       void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'emergency-repair-active' })
       return Promise.resolve(null)
     }
@@ -29,7 +34,9 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
     void diagnostic('WORKER_PROCESS_START', { trigger })
     running = Promise.resolve(hasEligibleQueue())
       .then(allowed => {
-        if (!allowed) { void diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'ineligible' }); return null }
+        if (!allowed) {
+          return diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'not-authenticated-or-no-permission' }).then(() => null)
+        }
         return processQueue()
       })
       .then(result => { void diagnostic('WORKER_PROCESS_COMPLETE', { trigger, result: result && typeof result === 'object' ? { uploaded: result.uploaded, updated: result.updated, centralCount: result.centralCount } : null }); return result })
@@ -40,6 +47,7 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
 
   const start = ({ events = [], target = globalThis } = {}) => {
     stopped = false
+    eventTarget = target
     const trigger = event => { void run(event).catch(() => {}) }
     const handlers = new Map(events.map(event => [event, () => trigger(event)]))
     for (const [event, handler] of handlers) target.addEventListener?.(event, handler)

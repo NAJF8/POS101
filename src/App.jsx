@@ -17,7 +17,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup, readSaleSyncStatus, readPendingSaleDiagnostics } from './services/salesSyncQueue'
-import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -662,9 +662,11 @@ export default function App() {
           queueSales: readPendingSaleDiagnostics(),
           canSync: Boolean(permission.allowed),
           authUser: user?.uid || user?.email || null,
+          online: navigator.onLine !== false,
           lockState: window.localStorage.getItem('pos101.syncLock') || null,
           repairFlagState: window.localStorage.getItem('pos101.emergencyRepairActive') || null,
           permissionError: permission.error || null,
+          permissionReason: permission.missingReason || null,
         }
       },
       onDiagnostic: payload => {
@@ -677,8 +679,10 @@ export default function App() {
     document.addEventListener('visibilitychange', onVisibility)
     const reconnectStop = subscribeCentralReconnect(() => { window.dispatchEvent(new Event('firebase-reconnect')) })
     const onSaleCreated = () => { void runNewSaleSyncDiagnostic().catch(error => console.info('POS101_NEW_SALE_SYNC_DIAGNOSTIC_ERROR', error?.code || error?.message || String(error))) }
+    const onWorkerDiagnostic = () => setSaleSyncStatus(readSaleSyncStatus())
     window.addEventListener('pos101-sale-created', onSaleCreated)
-    return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('pos101-sale-created', onSaleCreated) }
+    window.addEventListener('pos101-sync-worker-diagnostic', onWorkerDiagnostic)
+    return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('pos101-sale-created', onSaleCreated); window.removeEventListener('pos101-sync-worker-diagnostic', onWorkerDiagnostic) }
   }, [])
 
   // The auth callback and this worker effect are independent React effects.
@@ -871,6 +875,11 @@ export default function App() {
     // 2. Persist the local ledger and deferred queue. No Firebase, ACC, Auth,
     // or Cloud Function call is allowed on this cashier-critical path.
     enqueueSale(sale)
+    try {
+      await processSaleSyncQueue({ reason: 'after-sale-complete' })
+    } catch (error) {
+      console.warn('POS101_AFTER_SALE_AUTOSYNC_PENDING', error?.code || error?.message || String(error))
+    }
     window.setTimeout(() => { saleInFlight.current = false }, 350)
     return true
   }, [session, activeOrder, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
