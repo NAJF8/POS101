@@ -498,6 +498,7 @@ export default function App() {
       setFreshSettlementPreview(null)
       return result
     } catch (error) {
+      console.error('END_DAY_SUBMIT_ERROR', { code: error?.code || '', message: error?.message || String(error) })
       setOperationalDayError(error?.message || 'تعذر إنهاء اليوم التشغيلي.')
       throw error
     }

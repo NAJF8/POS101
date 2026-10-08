@@ -8,6 +8,7 @@
     "build": "vite build && node scripts/finalize-dist.cjs && node scripts/generate-deploy-meta.cjs",
     "preview": "vite preview",
     "test:end-day-diagnostic": "node scripts/end-day-diagnostic-regression.mjs",
+    "test:end-day-submit": "node scripts/end-day-submit-regression.mjs",
     "test:version-update": "node scripts/version-update-regression.mjs",
     "test:operational-day-close": "node scripts/operational-day-close-regression.mjs",
     "test:materials-report": "node scripts/materials-report-regression.mjs",

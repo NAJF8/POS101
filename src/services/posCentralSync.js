@@ -1446,6 +1446,13 @@ const countsPath = 'pos101_cashbox_counts'
 const safeKey = value => String(value || '').replace(/[.#$\[\]/]/g, '_')
 const settlementKey = operationalDayId => `settlement-${safeKey(operationalDayId)}`
 const financialAuditPayload = ({ id, user, action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => ({ id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', businessDate, timestamp: Date.now(), before, after, reason })
+const endDayLog = (event, details = {}) => { if (typeof console !== 'undefined') console.info(event, details) }
+const assertJsonNumbers = (value, path = 'payload') => {
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') throw new Error(`${path} يحتوي قيمة غير صالحة.`)
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new Error(`${path} يحتوي رقماً غير صالح.`)
+  if (Array.isArray(value)) return value.forEach((item, index) => assertJsonNumbers(item, `${path}[${index}]`))
+  if (value && typeof value === 'object') Object.entries(value).forEach(([key, item]) => assertJsonNumbers(item, `${path}.${key}`))
+}
 
 export const readCentralSettlements = async () => { await financialUser(false); return objectValues(await get(financialPath(settlementPath))) }
 export const subscribeCentralSettlements = (callback, onError = error => console.error('SETTLEMENT_SUBSCRIBE_ERROR', error)) => {
@@ -1537,6 +1544,7 @@ export const readFreshSettlementPreview = async operationalDay => calculateSettl
  
 
 export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {} } = {}) => {
+  endDayLog('END_DAY_SUBMIT_START', { operationalDayId: day?.id || day?.operationalDayId || '', businessDate: day?.businessDate || '', actualCash })
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
   if (!preClose.allowed) throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
   const centralBeforeWrite = centralValues(await get(salesRef()))
@@ -1564,7 +1572,9 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const existingCashbox = cashboxSnapshot.exists() ? cashboxSnapshot.val() : null
   const existingAudit = auditSnapshot.exists() ? auditSnapshot.val() : null
   if (!remoteDay) throw Object.assign(new Error('حالة اليوم التشغيلي غير موجودة في Firebase؛ لم يتم تغيير البيانات.'), { code: 'DAY_NOT_FOUND' })
-  if (remoteDay.status === 'closed' && existingSettlement && existingCashbox && existingAudit) {
+  const existingExpectedCash = existingSettlement ? Number(existingSettlement.expectedCash) : null
+  const existingCashboxRequired = existingExpectedCash == null || existingExpectedCash > 0
+  if (remoteDay.status === 'closed' && existingSettlement && (!existingCashboxRequired || existingCashbox) && existingAudit) {
     cacheOperationalDay(null)
     return { settlement: existingSettlement, day: remoteDay, duplicate: true, repaired: false }
   }
@@ -1580,14 +1590,30 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
     const difference = actual - summary.expectedCash
     const status = difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
     settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: remoteDay.businessDate, openingCashBalance: summary.openingCashBalance, cashSales: summary.cashSales, electronicSales: summary.electronicSales, expenses: summary.expenses, cashboxWithdrawals: summary.cashboxWithdrawals, managementWithdrawals: summary.managementWithdrawals, deposits: summary.deposits, dailyCashMovement: summary.dailyCashMovement, expectedCash: summary.expectedClosingCash, expectedClosingCash: summary.expectedClosingCash, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
+    assertJsonNumbers(settlement, 'settlement')
+    endDayLog('END_DAY_SETTLEMENT_PAYLOAD', { id: settlement.id, operationalDayId: settlement.operationalDayId, businessDate: settlement.businessDate, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status })
+    endDayLog('END_DAY_FIREBASE_WRITE_START', { path: `${settlementPath}/${key}`, writeType: 'settlement-once' })
+    await set(financialPath(`${settlementPath}/${key}`), settlement)
+    const settlementBack = await get(financialPath(`${settlementPath}/${key}`))
+    if (!settlementBack.exists()) throw Object.assign(new Error('تعذر قراءة التسوية بعد حفظها.'), { code: 'SETTLEMENT_READBACK_FAILED' })
+    settlement = settlementBack.val()
+    endDayLog('END_DAY_FIREBASE_WRITE_RESULT', { path: `${settlementPath}/${key}`, ok: true })
+    endDayLog('END_DAY_READBACK_RESULT', { path: `${settlementPath}/${key}`, ok: true, id: settlement.id, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference })
+  } else {
+    assertJsonNumbers(settlement, 'existingSettlement')
+    endDayLog('END_DAY_SETTLEMENT_PAYLOAD', { id: settlement.id, operationalDayId: settlement.operationalDayId, businessDate: settlement.businessDate, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status, existing: true })
+    endDayLog('END_DAY_READBACK_RESULT', { path: `${settlementPath}/${key}`, ok: true, existing: true })
   }
-  const expectedCash = Number(settlement.expectedCash || 0)
-  const cashbox = existingCashbox || { id: cashboxId, type: 'settlement', amount: Math.max(0, expectedCash), businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + Math.max(0, expectedCash) }
+  const expectedCash = Number(settlement.expectedCash)
+  if (!Number.isFinite(expectedCash)) throw Object.assign(new Error('المبلغ المتوقع للصندوق غير صالح.'), { code: 'EXPECTED_CASH_INVALID' })
+  const cashbox = existingCashbox || (expectedCash > 0 ? { id: cashboxId, type: 'settlement', amount: expectedCash, businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + expectedCash } : null)
   const audit = existingAudit || financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: remoteDay.businessDate })
   const closedDay = remoteDay.status === 'closed'
     ? remoteDay
     : { ...remoteDay, status: 'closed', endedAt: settlement.createdAt || Date.now(), endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, settlementId: key }
-  const updates = { [`${settlementPath}/${key}`]: settlement, [`${cashboxTransactionsPath}/${cashboxId}`]: cashbox, [`${auditPath}/${auditId}`]: audit, [`pos101_operational_days/${id}`]: closedDay }
+  const updates = { [`${auditPath}/${auditId}`]: audit, [`pos101_operational_days/${id}`]: closedDay }
+  if (cashbox) updates[`${cashboxTransactionsPath}/${cashboxId}`] = cashbox
+  endDayLog('END_DAY_FIREBASE_WRITE_START', { path: `pos101_operational_days/${id}`, writeType: 'status-after-settlement-readback' })
   await update(ref(db), updates)
   const [dayBack, settlementBack, cashboxBack, auditBack] = await Promise.all([
     get(financialPath(`pos101_operational_days/${id}`)),
@@ -1596,9 +1622,12 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
     get(financialPath(`${auditPath}/${auditId}`)),
   ])
   const verifiedDay = dayBack.exists() ? { ...dayBack.val(), id } : null
-  if (!verifiedDay || verifiedDay.status !== 'closed' || !settlementBack.exists() || !cashboxBack.exists() || !auditBack.exists()) {
+  endDayLog('END_DAY_FIREBASE_WRITE_RESULT', { path: `pos101_operational_days/${id}`, ok: Boolean(verifiedDay?.status === 'closed') })
+  endDayLog('END_DAY_READBACK_RESULT', { path: `pos101_operational_days/${id}`, ok: Boolean(verifiedDay?.status === 'closed'), status: verifiedDay?.status || null })
+  if (!verifiedDay || verifiedDay.status !== 'closed' || !settlementBack.exists() || (expectedCash > 0 && !cashboxBack.exists()) || !auditBack.exists()) {
     throw Object.assign(new Error('تعذر التحقق من اكتمال إغلاق اليوم في Firebase.'), { code: 'DAY_CLOSE_READBACK_FAILED' })
   }
+  endDayLog('END_DAY_STATUS_UPDATE_RESULT', { path: `pos101_operational_days/${id}`, status: 'closed', readback: true })
   cacheOperationalDay(null)
   return { settlement: settlementBack.val(), day: verifiedDay, duplicate: Boolean(existingSettlement), repaired: Boolean(existingSettlement) }
 }
