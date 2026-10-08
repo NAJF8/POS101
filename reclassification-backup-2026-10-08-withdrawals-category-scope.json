@@ -1,0 +1,65 @@
+{
+  "backupType": "POS101_WITHDRAWALS_TO_EXPENSE_CATEGORY_WITHDRAWALS_BEFORE_MIGRATION",
+  "businessDate": "2026-10-07",
+  "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+  "reason": "RECLASSIFIED_WITHDRAWAL_TO_EXPENSE_CATEGORY_WITHDRAWALS",
+  "sourcePath": "pos101_cashbox_transactions",
+  "records": [
+    {
+      "id": "cash-18061095-5b11-4faa-8ef8-28e1e6d90898",
+      "amount": 50000,
+      "type": "withdrawal",
+      "category": "سحوبات",
+      "description": "105",
+      "reason": "105",
+      "employeeId": "staff-mohammed-legacy",
+      "employeeNameSnapshot": "محمد",
+      "fundingSource": "cashbox",
+      "businessDate": "2026-10-07",
+      "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+      "status": "active"
+    },
+    {
+      "id": "cash-97f39b02-c09d-4c04-8359-10b340fc8810",
+      "amount": 10000,
+      "type": "withdrawal",
+      "category": "سحوبات",
+      "description": "102",
+      "reason": "102",
+      "employeeId": "staff-ali-legacy",
+      "employeeNameSnapshot": "علي",
+      "fundingSource": "cashbox",
+      "businessDate": "2026-10-07",
+      "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+      "status": "active"
+    },
+    {
+      "id": "cash-a2008a45-2b66-4e7f-ae7d-22725737a3c7",
+      "amount": 2000,
+      "type": "withdrawal",
+      "category": "سحوبات",
+      "description": "105",
+      "reason": "105",
+      "employeeId": "staff-mohammed-legacy",
+      "employeeNameSnapshot": "محمد",
+      "fundingSource": "cashbox",
+      "businessDate": "2026-10-07",
+      "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+      "status": "active"
+    },
+    {
+      "id": "cash-e36b5748-f4dd-40a7-bcbd-f87e23d46baf",
+      "amount": 50000,
+      "type": "withdrawal",
+      "category": "سحوبات",
+      "description": "109",
+      "reason": "109",
+      "employeeId": "staff-a57ab9ed-60d5-475d-bdf4-f22b57fcbab4",
+      "employeeNameSnapshot": "حيدر",
+      "fundingSource": "cashbox",
+      "businessDate": "2026-10-07",
+      "operationalDayId": "44d8267e-2bf9-43c4-a069-d5cb85364c03",
+      "status": "voided"
+    }
+  ]
+}

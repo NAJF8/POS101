@@ -280,7 +280,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const valid = isValidDateRange(periodFrom, periodTo)
     const rangeSales = reportSales
     const rangeExpenses = filterRowsByBusinessDate((Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)
-    const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo)
+    const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo).filter(row => row?.status !== 'voided' && row?.voided !== true)
     const dailyMap = new Map()
     const ensureDay = date => { if (!dailyMap.has(date)) dailyMap.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, adjustments: 0, net: 0, orders: 0 }); return dailyMap.get(date) }
     rangeSales.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.total ?? row.subtotal); day.sales += value; day.orders += 1; if ((row.paymentMethod || row.payment?.method) === 'cash') day.cash += value; if ((row.paymentMethod || row.payment?.method) === 'electronic') day.electronic += value })
