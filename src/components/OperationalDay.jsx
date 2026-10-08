@@ -3,17 +3,23 @@ import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/recoverySnapshot.js'
-import { calculateEndDayCashAnalysis, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
+import { calculateEndDayCashAnalysis, toMoneyNumber } from '../services/financialCenter.js'
 
 const money = value => formatMoney(toMoneyNumber(value, 0))
 const displayMoney = value => value === null || value === undefined || value === '' ? '—' : money(value)
 const differenceLabel = value => value === null || value === undefined || value === '' ? '' : toMoneyNumber(value, 0) === 0 ? 'مطابق' : toMoneyNumber(value, 0) < 0 ? 'نقص' : 'زيادة'
 const ACTUAL_CASH_PENDING = 'بانتظار إدخال الكاش الفعلي'
+const normalizeCashInput = value => String(value || '')
+  .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+  .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))
+  .replace(/[^0-9]/g, '')
+const formatCashInput = value => value === '' ? '' : Number(value).toLocaleString('en-US', { numberingSystem: 'latn' })
 
 export default function OperationalDay({ day = {}, summary = {}, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
+  const [shortageConfirmed, setShortageConfirmed] = useState(false)
   const [startOpen, setStartOpen] = useState(false)
   const [startBusy, setStartBusy] = useState(false)
   const [startError, setStartError] = useState('')
@@ -52,6 +58,10 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
     expectedCash: safeSettlementPreview.expectedClosingCash ?? safeSettlementPreview.expectedCash,
     actualCash,
   }), [safeSettlementPreview, day?.openingCashBalance, actualCash])
+  const differenceValue = endDayAnalysis.difference
+  const differenceState = differenceValue == null ? 'pending' : toMoneyNumber(differenceValue, 0) === 0 ? 'matched' : toMoneyNumber(differenceValue, 0) < 0 ? 'shortage' : 'surplus'
+  const shortageNeedsConfirmation = differenceState === 'shortage'
+  const closeDisabled = busy || actualCash === '' || preCloseGuard?.loading || preCloseGuard?.allowed === false || (shortageNeedsConfirmation && !shortageConfirmed)
 
   const start = async () => {
     if (busy || startBusy) return
@@ -83,6 +93,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
   const openEnd = async () => {
     if (busy) return
     setBusy(true)
+    setShortageConfirmed(false)
     try { await onPrepareEnd?.(); setEndOpen(true) } catch { /* App surfaces the guard error. */ } finally { setBusy(false) }
   }
   const openOpeningAdjust = () => {
@@ -271,33 +282,76 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
     </div></div>}
 
     {endOpen && <div className="overlay">
-      <div className="dialog operational-day-dialog">
-        <h2>إنهاء اليوم التشغيلي</h2>
-        <p>تاريخ اليوم التشغيلي: <b>{day.businessDate}</b></p>
-        <p>وقت البدء: <b>{startedLabel}</b></p>
-        <p>وقت الإغلاق الحالي: <b>{formatDateTime(Date.now())}</b></p>
-        {pendingTableCount > 0 && <p className="pending-day-warning" role="note">توجد طاولات معلقة غير مدفوعة، سيتم إبقاؤها في قسم الطاولات المعلقة ولا تُحسب ضمن المبيعات</p>}
-        <div className="operational-day-summary">
-          {preCloseGuard?.allowed === false && <p className="form-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
-          <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>
-          <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
-           <span>الرصيد الافتتاحي <b>{displayMoney(safeSettlementPreview.openingCashBalance ?? safeSettlementPreview.openingBalance ?? day?.openingCashBalance)}</b></span>
-           <span>مبيعات الكاش <b>{money(safeSettlementPreview.cashSales)}</b></span>
-           <span>مبيعات إلكترونية <b>{money(safeSettlementPreview.electronicSales)}</b></span>
-           <span>المصاريف <b>{money(safeSettlementPreview.expenses)}</b></span>
-           <span>السحوبات <b>{money(safeSettlementPreview.withdrawals)}</b></span>
-           <span>الرصيد المتوقع بالصندوق <b>{money(safeSettlementPreview.expectedClosingCash ?? (expectedCashOpening + toMoneyNumber(safeSettlementPreview.dailyCashMovement, 0)))}</b></span>
-           {(safeSettlementPreview.openingCashBalance == null && safeSettlementPreview.openingBalance == null && day?.openingCashBalance == null) && <small role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
-           <label className="settlement-actual-cash">أدخل الكاش الفعلي بالصندوق<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل الكاش الفعلي" /></label>
-           <span>الكاش الفعلي <b>{hasActualCash(actualCash) ? money(actualCash) : ACTUAL_CASH_PENDING}</b></span>
-           <span>الفرق <b>{endDayAnalysis.difference == null ? ACTUAL_CASH_PENDING : `${money(endDayAnalysis.difference)} ${differenceLabel(endDayAnalysis.difference)}`}</b></span>
-           <span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي <b>{endDayAnalysis.netDrawerMovement == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netDrawerMovement)}</b></span>
-           <span>صافي مبيعات اليوم النقدية <b>{endDayAnalysis.netCashSalesFromDrawer == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netCashSalesFromDrawer)}</b></span>
-           <span>فرق المبيعات النقدية <b>{endDayAnalysis.cashSalesDifference == null ? ACTUAL_CASH_PENDING : `${money(endDayAnalysis.cashSalesDifference)} ${differenceLabel(endDayAnalysis.cashSalesDifference)}`}</b></span>
+      <div className="dialog operational-day-dialog end-day-closing-dialog" dir="rtl" role="dialog" aria-modal="true" aria-labelledby="end-day-title">
+        <div className="end-day-modal-scroll">
+          <header className="end-day-modal-header">
+            <div>
+              <span className="end-day-eyebrow">التسوية المالية</span>
+              <h2 id="end-day-title">إنهاء اليوم التشغيلي</h2>
+              <p>راجع التسوية المالية قبل إغلاق اليوم</p>
+            </div>
+            <div className="end-day-meta" aria-label="بيانات اليوم التشغيلي">
+              <span><small>تاريخ اليوم التشغيلي</small><b dir="ltr">{day.businessDate}</b></span>
+              <span><small>وقت البدء</small><b dir="ltr">{startedLabel}</b></span>
+              <span><small>وقت الإغلاق الحالي</small><b dir="ltr">{formatDateTime(Date.now())}</b></span>
+            </div>
+          </header>
+
+          {pendingTableCount > 0 && <p className="pending-day-warning" role="note">توجد طاولات معلقة غير مدفوعة، سيتم إبقاؤها في قسم الطاولات المعلقة ولا تُحسب ضمن المبيعات</p>}
+          {preCloseGuard?.allowed === false && <p className="form-error end-day-guard-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
+
+          <section className="end-day-section" aria-labelledby="end-day-sales-title">
+            <div className="end-day-section-heading"><div><span className="end-day-section-kicker">الأداء</span><h3 id="end-day-sales-title">ملخص المبيعات</h3></div><span className="end-day-section-icon">↗</span></div>
+            <div className="sales-summary-grid">
+              <div className="sales-summary-card"><span>عدد الطلبات</span><b className="end-day-number">{formatNumber(summary.count)}</b><small>طلب مكتمل</small></div>
+              <div className="sales-summary-card"><span>إجمالي المبيعات</span><b className="end-day-number">{money(summary.total)}</b><small>إجمالي اليوم</small></div>
+              <div className="sales-summary-card"><span>مبيعات الكاش</span><b className="end-day-number">{money(safeSettlementPreview.cashSales)}</b><small>نقدي</small></div>
+              <div className="sales-summary-card"><span>المبيعات الإلكترونية</span><b className="end-day-number">{money(safeSettlementPreview.electronicSales)}</b><small>إلكتروني</small></div>
+            </div>
+          </section>
+
+          <section className="end-day-section settlement-section" aria-labelledby="end-day-settlement-title">
+            <div className="end-day-section-heading"><div><span className="end-day-section-kicker">الأولوية</span><h3 id="end-day-settlement-title">تسوية الصندوق</h3></div><span className="settlement-badge">أساسي</span></div>
+            <div className="settlement-formula" aria-label="معادلة الرصيد المتوقع"><span>الرصيد الافتتاحي</span><b>+</b><span>مبيعات الكاش</span><b>−</b><span>المصاريف</span><b>−</b><span>السحوبات</span><b>=</b><span>الرصيد المتوقع</span></div>
+            <div className="settlement-list">
+              <div className="settlement-row"><span>الرصيد الافتتاحي</span><strong className="end-day-number">{displayMoney(safeSettlementPreview.openingCashBalance ?? safeSettlementPreview.openingBalance ?? day?.openingCashBalance)}</strong></div>
+              <div className="settlement-row"><span>مبيعات الكاش</span><strong className="end-day-number">{money(safeSettlementPreview.cashSales)}</strong></div>
+              <div className="settlement-row"><span>المصاريف</span><strong className="end-day-number">{money(safeSettlementPreview.expenses)}</strong></div>
+              <div className="settlement-row"><span>السحوبات</span><strong className="end-day-number">{money(safeSettlementPreview.withdrawals)}</strong></div>
+              <div className="settlement-row expected"><span>الرصيد المتوقع بالصندوق</span><strong className="end-day-number">{money(safeSettlementPreview.expectedClosingCash ?? (expectedCashOpening + toMoneyNumber(safeSettlementPreview.dailyCashMovement, 0)))}</strong></div>
+            </div>
+            <p className="settlement-explanation">الرصيد المتوقع = الرصيد الافتتاحي + مبيعات الكاش - المصاريف - السحوبات</p>
+            {(safeSettlementPreview.openingCashBalance == null && safeSettlementPreview.openingBalance == null && day?.openingCashBalance == null) && <small className="settlement-note" role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
+          </section>
+
+          <section className="end-day-section actual-cash-section" aria-labelledby="actual-cash-title">
+            <div className="actual-cash-heading"><div><span className="end-day-section-kicker">التحقق الفعلي</span><h3 id="actual-cash-title">أدخل الكاش الفعلي بالصندوق</h3></div><span className="actual-cash-required">مطلوب</span></div>
+            <label className="actual-cash-input-block"><span>المبلغ الموجود فعليًا عند الإغلاق</span><input type="text" inputMode="numeric" pattern="[0-9٠-٩, ]*" dir="ltr" value={formatCashInput(actualCash)} onChange={event => { setActualCash(normalizeCashInput(event.target.value)); setShortageConfirmed(false) }} placeholder="مثال: 106500" aria-label="الكاش الفعلي بالصندوق" /><small>اكتب المبلغ بالأرقام، وسيُحدَّث الفرق مباشرة.</small></label>
+          </section>
+
+          <section className={`difference-card difference-${differenceState}`} aria-live="polite" role={differenceState === 'shortage' ? 'alert' : 'status'}>
+            <div className="difference-card-icon">{differenceState === 'matched' ? '✓' : differenceState === 'shortage' ? '!' : differenceState === 'surplus' ? '↑' : '—'}</div>
+            <div className="difference-card-content">
+              {differenceState === 'pending' && <><span className="difference-card-title">نتيجة التسوية</span><strong>{ACTUAL_CASH_PENDING}</strong></>}
+              {differenceState === 'matched' && <><span className="difference-card-title">الصندوق مطابق</span><strong>لا يوجد فرق</strong></>}
+              {differenceState === 'shortage' && <><span className="difference-card-title">نقص بالصندوق</span><strong className="end-day-number">{money(Math.abs(toMoneyNumber(differenceValue, 0)))} <em>نقص</em></strong></>}
+              {differenceState === 'surplus' && <><span className="difference-card-title">زيادة بالصندوق</span><strong className="end-day-number">{money(Math.abs(toMoneyNumber(differenceValue, 0)))} <em>زيادة</em></strong></>}
+            </div>
+          </section>
+          {shortageNeedsConfirmation && <label className="shortage-confirmation"><input type="checkbox" checked={shortageConfirmed} onChange={event => setShortageConfirmed(event.target.checked)} /><span>أؤكد وجود نقص بالصندوق وأريد إغلاق اليوم</span></label>}
+
+          <section className="end-day-section net-movement-section" aria-labelledby="net-movement-title">
+            <div className="end-day-section-heading"><div><span className="end-day-section-kicker">تفاصيل إضافية</span><h3 id="net-movement-title">حركة الصندوق</h3></div></div>
+            <div className="net-movement-grid">
+              <div><span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي</span><strong className="end-day-number">{endDayAnalysis.netDrawerMovement == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netDrawerMovement)}</strong></div>
+              <div><span>صافي مبيعات اليوم النقدية</span><strong className="end-day-number">{endDayAnalysis.netCashSalesFromDrawer == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netCashSalesFromDrawer)}</strong></div>
+              <div><span>فرق المبيعات النقدية</span><strong className="end-day-number">{endDayAnalysis.cashSalesDifference == null ? ACTUAL_CASH_PENDING : `${money(endDayAnalysis.cashSalesDifference)} ${differenceLabel(endDayAnalysis.cashSalesDifference)}`}</strong></div>
+            </div>
+          </section>
         </div>
-        <div className="dialog-actions">
+        <div className="dialog-actions end-day-action-row">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>
-          <button className="danger-button" type="button" disabled={busy || actualCash === '' || preCloseGuard?.loading || preCloseGuard?.allowed === false} aria-disabled={preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
+          <button className={`end-day-close-button ${shortageNeedsConfirmation ? 'is-shortage' : ''}`} type="button" disabled={closeDisabled} aria-disabled={closeDisabled || preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
         </div>
       </div>
     </div>}

@@ -1772,6 +1772,101 @@ input, textarea, select { cursor: text; }
   .operational-day-card { width: min(460px, 100%); }
 }
 
+/* End-day settlement redesign: presentation only; calculations remain in
+   OperationalDay and financialCenter. */
+.end-day-closing-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #F7F3EA;
+  color: #2B2723;
+  border: 1px solid #E7DDCC;
+  border-radius: 22px;
+  box-shadow: 0 22px 70px rgba(35, 28, 20, .22);
+}
+.end-day-modal-scroll { min-height: 0; overflow: auto; padding: 24px; scrollbar-color: #c9bda9 transparent; }
+.end-day-modal-header { display: grid; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #E7DDCC; }
+.end-day-eyebrow, .end-day-section-kicker { display: block; color: #8A8175; font-size: 11px; font-weight: 800; letter-spacing: .05em; }
+.end-day-modal-header h2 { margin: 4px 0 4px; color: #2B2723; font-size: clamp(23px, 3vw, 30px); line-height: 1.2; }
+.end-day-modal-header p { margin: 0; color: #8A8175; font-size: 13px; }
+.end-day-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.end-day-meta span { display: grid; gap: 4px; min-width: 0; padding: 9px 10px; background: #FFFDF7; border: 1px solid #E7DDCC; border-radius: 12px; }
+.end-day-meta small { color: #8A8175; font-size: 10px; }
+.end-day-meta b { color: #2B2723; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.end-day-closing-dialog .pending-day-warning, .end-day-guard-error { margin: 16px 0 0; }
+.end-day-section { margin-top: 16px; padding: 18px; background: #FFFDF7; border: 1px solid #E7DDCC; border-radius: 18px; }
+.end-day-section-heading, .actual-cash-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.end-day-section-heading h3, .actual-cash-heading h3 { margin: 3px 0 0; color: #2B2723; font-size: 17px; line-height: 1.25; }
+.end-day-section-icon, .settlement-badge, .actual-cash-required { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 26px; padding: 4px 9px; border-radius: 999px; background: #EAF1E6; color: #15803D; font-size: 11px; font-weight: 800; }
+.settlement-badge { background: #FEF3C7; color: #946200; }
+.actual-cash-required { background: #F3E9D6; color: #7D4C31; }
+.sales-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.sales-summary-card { display: grid; gap: 6px; min-width: 0; padding: 13px 12px; background: #F7F3EA; border: 1px solid #E7DDCC; border-radius: 14px; }
+.sales-summary-card span, .sales-summary-card small { color: #8A8175; font-size: 11px; }
+.sales-summary-card b { color: #2B2723; font-size: clamp(16px, 2vw, 20px); line-height: 1.15; }
+.sales-summary-card small { font-size: 10px; }
+.end-day-number { direction: ltr; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settlement-formula { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px 9px; margin-bottom: 14px; padding: 11px 12px; background: #F7F3EA; border: 1px dashed #D9CBB7; border-radius: 12px; color: #8A8175; font-size: 11px; text-align: center; }
+.settlement-formula b { color: #7D4C31; font-size: 16px; }
+.settlement-formula span:last-child { color: #2B2723; font-weight: 800; }
+.settlement-list { display: grid; gap: 2px; }
+.settlement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-width: 0; padding: 10px 11px; border-bottom: 1px solid #EFE7DA; color: #8A8175; font-size: 13px; }
+.settlement-row strong { color: #2B2723; font-size: 14px; }
+.settlement-row.expected { margin-top: 6px; padding: 15px 13px; background: #EAF1E6; border: 1px solid #CFE0C9; border-radius: 13px; color: #245A39; }
+.settlement-row.expected strong { color: #15803D; font-size: clamp(20px, 3vw, 25px); }
+.settlement-explanation { margin: 12px 0 0; color: #8A8175; font-size: 11px; }
+.settlement-note { display: block; margin-top: 7px; color: #946200; font-size: 11px; }
+.actual-cash-section { background: #FBF7EE; }
+.actual-cash-input-block { display: grid; gap: 8px; color: #2B2723; font-size: 13px; font-weight: 800; }
+.actual-cash-input-block input { width: 100%; min-height: 68px; box-sizing: border-box; padding: 8px 16px; border: 2px solid #CDBEA8; border-radius: 15px; background: #FFFDF7; color: #2B2723; font-size: clamp(28px, 5vw, 40px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; text-align: left; direction: ltr; outline: none; }
+.actual-cash-input-block input:focus { border-color: #7D4C31; box-shadow: 0 0 0 4px rgba(125, 76, 49, .12); }
+.actual-cash-input-block input::placeholder { color: #B9AD9D; font-size: .55em; font-weight: 600; }
+.actual-cash-input-block small { color: #8A8175; font-size: 11px; font-weight: 500; }
+.difference-card { display: flex; align-items: center; gap: 14px; min-width: 0; margin-top: 16px; padding: 20px; border: 1px solid #E7DDCC; border-radius: 18px; }
+.difference-card-icon { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 13px; background: rgba(255,255,255,.62); font-size: 22px; font-weight: 900; }
+.difference-card-content { display: grid; gap: 5px; min-width: 0; }
+.difference-card-title { font-size: 14px; font-weight: 800; }
+.difference-card strong { color: #2B2723; font-size: clamp(22px, 4vw, 31px); line-height: 1.15; }
+.difference-card strong em { font-style: normal; font-size: .72em; }
+.difference-pending { background: #F7F3EA; color: #8A8175; }
+.difference-matched { background: #DCFCE7; border-color: #BBE6C7; color: #15803D; }
+.difference-matched strong { color: #15803D; }
+.difference-shortage { background: #FEE2E2; border-color: #F7BABA; color: #B91C1C; }
+.difference-shortage strong { color: #B91C1C; }
+.difference-surplus { background: #FEF3C7; border-color: #F3D890; color: #946200; }
+.difference-surplus strong { color: #946200; }
+.shortage-confirmation { display: flex; align-items: flex-start; gap: 9px; margin-top: 10px; padding: 12px 13px; border: 1px solid #F7BABA; border-radius: 12px; background: #FFF2F2; color: #8F1D1D; font-size: 12px; font-weight: 800; cursor: pointer; }
+.shortage-confirmation input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; accent-color: #B91C1C; }
+.net-movement-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.net-movement-grid > div { display: grid; gap: 8px; min-width: 0; padding: 12px; background: #F7F3EA; border: 1px solid #EFE7DA; border-radius: 13px; }
+.net-movement-grid span { color: #8A8175; font-size: 10px; line-height: 1.45; }
+.net-movement-grid strong { color: #5E564D; font-size: 14px; }
+.end-day-action-row { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: row; gap: 10px; margin: 0; padding: 15px 24px 20px; background: rgba(247, 243, 234, .97); border-top: 1px solid #E7DDCC; }
+.end-day-action-row > button { flex: 1 1 0; min-height: 48px; border-radius: 12px; font-size: 13px; font-weight: 800; }
+.end-day-close-button { border: 1px solid #7D4C31; background: #7D4C31; color: #fff; box-shadow: 0 5px 12px rgba(125, 76, 49, .18); }
+.end-day-close-button:hover:not(:disabled) { background: #633B28; }
+.end-day-close-button.is-shortage { border-color: #B91C1C; background: #B91C1C; }
+.end-day-close-button:disabled { opacity: .46; cursor: not-allowed; box-shadow: none; }
+.end-day-action-row .secondary-action { order: 2; }
+.end-day-action-row .end-day-close-button { order: 1; }
+@media (max-width: 800px) {
+  .end-day-closing-dialog { max-height: calc(100vh - 24px); }
+  .sales-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .net-movement-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .end-day-closing-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); border-radius: 18px; }
+  .end-day-modal-scroll { padding: 16px; }
+  .end-day-meta { grid-template-columns: 1fr; }
+  .end-day-section { padding: 14px; border-radius: 15px; }
+  .settlement-formula { justify-content: flex-start; }
+  .settlement-row { font-size: 12px; }
+  .end-day-action-row { padding: 12px 16px 16px; }
+}
+
 /* Thermal receipt print contract: 80mm paper, 72.1mm driver printable limit.
    Keep receipt content at 70mm for a small physical margin on both sides. */
 @media print {
