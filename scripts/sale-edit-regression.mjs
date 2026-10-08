@@ -24,6 +24,7 @@ const manager = { id: 'manager-1', name: 'مدير الاختبار', code: 'M12
 assert.equal(validateCorrectionIdentity({ name: manager.name, code: manager.code, staff: [manager], requireAdmin: true }).valid, true)
 assert.equal(validateCorrectionIdentity({ name: manager.name, code: 'wrong', staff: [manager], requireAdmin: true }).valid, false)
 assert.equal(validateCorrectionIdentity({ name: 'كاشير', code: 'C100', staff: [{ name: 'كاشير', code: 'C100', role: 'cashier', active: true }], requireAdmin: true }).valid, false)
+assert.equal(validateCorrectionIdentity({ name: 'كاشير', code: 'C100', staff: [{ name: 'كاشير', code: 'C100', role: 'cashier', active: true }], requireAdmin: false }).valid, true)
 assert.equal(maskCorrectionCode('M1296'), '***296')
 assert.equal(maskCorrectionCode('M1296').includes('M1296'), false)
 console.log('SALE_EDIT_REGRESSION=PASS')

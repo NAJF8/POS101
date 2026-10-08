@@ -3,6 +3,7 @@ import fs from 'node:fs'
 
 const css = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const jsx = fs.readFileSync(new URL('../src/components/OrderHistoryMenu.jsx', import.meta.url), 'utf8')
+const service = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
 const modal = css.match(/\.history-edit-modal\s*\{([^}]*)\}/)?.[1] || ''
 const body = css.match(/\.history-edit-body\s*\{([^}]*)\}/)?.[1] || ''
 const actions = css.match(/\.history-edit-actions\s*\{([^}]*)\}/)?.[1] || ''
@@ -31,6 +32,7 @@ assert.match(itemsTable, /table-layout:\s*fixed/)
 assert.match(jsx, /<input|<select|<textarea/)
 assert.match(jsx, /EditableSoldProducts items=\{correctionItems\}/)
 assert.match(jsx, /تفعيل تصحيح المنتجات/)
+assert.doesNotMatch(jsx, /تصحيح المنتجات متاح للمدير أو الإدارة فقط/)
 assert.match(jsx, /حفظ التصحيح/)
 assert.match(jsx, /history-edit-delete-item/)
 assert.match(jsx, /الإجمالي السابق/)
@@ -50,6 +52,10 @@ assert.match(jsx, /تأكيد وحفظ/)
 assert.match(jsx, /validateCorrectionIdentity/)
 assert.match(jsx, /تم حفظ التعديل باسم/)
 assert.match(jsx, /type="password"/)
+assert.match(jsx, /dir="ltr" type="number"/)
+assert.match(service, /codeVerified: true/)
+assert.match(service, /maskedCode:/)
+assert.doesNotMatch(service, /correctedByCode:\s*identity\.code/)
 console.log('SOLD_ORDER_EDIT_MODAL_FITS_1366x768=PASS')
 console.log('SOLD_ORDER_EDIT_MODAL_FITS_1024x768=PASS')
 console.log('EDIT_MODAL_HEADER_FIXED=PASS')

@@ -596,11 +596,10 @@ export const updateCentralSale = async (sale, changes = {}) => {
 
 export const correctCentralSaleItems = async (sale, changes = {}) => {
   const user = await staffUser(true)
-  if (!isCentralAdminUser(user)) throw Object.assign(new Error('تصحيح منتجات الطلبات متاح للمدير أو الإدارة فقط.'), { code: 'SALE_CORRECTION_PERMISSION_REQUIRED' })
   const reason = String(changes.reason || '').trim()
   if (!reason) throw Object.assign(new Error('سبب تصحيح المنتجات مطلوب.'), { code: 'SALE_CORRECTION_REASON_REQUIRED' })
   const identity = changes.correctionIdentity || {}
-  const identityCheck = validateCorrectionIdentity({ name: identity.name, code: identity.code, staff: await readCentralStaff(), actor: user, authorization: user.pos101Authorization || user.authorization, requireAdmin: true })
+  const identityCheck = validateCorrectionIdentity({ name: identity.name, code: identity.code, staff: await readCentralStaff(), actor: user, authorization: user.pos101Authorization || user.authorization, requireAdmin: false })
   if (!identityCheck.valid) throw Object.assign(new Error('اسم الكاشير أو الرمز غير صحيح'), { code: 'SALE_CORRECTION_IDENTITY_INVALID' })
   const id = saleIdOf(sale)
   if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
@@ -634,6 +633,8 @@ export const correctCentralSaleItems = async (sale, changes = {}) => {
     changedFields: saleCorrectionChangedFields(current, next),
     correctedByName: identityCheck.name,
     correctedByCode: identityCheck.maskedCode || maskCorrectionCode(identity.code),
+    maskedCode: identityCheck.maskedCode || maskCorrectionCode(identity.code),
+    codeVerified: true,
     correctedByRole: identityCheck.role,
     correctedByUid: user.uid || '',
     correctionReason: reason,

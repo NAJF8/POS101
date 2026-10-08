@@ -1041,7 +1041,7 @@ export default function App() {
           salesOverride={adminReady ? adminCentralSales : null}
           readOnly={!adminReady}
           onEditSale={adminReady ? saveSaleEdit : null}
-          canCorrectSaleItems={adminReady}
+          canCorrectSaleItems
           staff={staff}
           correctionActor={centralAuthUser || adminAuthUser}
           correctionAuthorization={staffAuthorizationRecord}
@@ -1079,7 +1079,7 @@ export default function App() {
             onNewOrder={newOrder}
             session={session}
           />
-          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} canCorrectSaleItems={adminReady} staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
+          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} canCorrectSaleItems staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
         </div>
       )}
 

@@ -36,7 +36,7 @@ export const validateCorrectionIdentity = ({ name, code, staff = [], actor = nul
   const actorNameMatches = normalizedText(actor?.displayName || actor?.name || actor?.email) === normalizedName
   const actorCodeMatches = [authorization?.code, actor?.code, actor?.pos101Code, actor?.customClaims?.pos101Code].some(value => String(value || '').trim() === normalizedCode)
   const actorRole = String(authorization?.role || actor?.role || '').trim().toLowerCase()
-  const actorMatches = actorNameMatches && actorCodeMatches && ['super_admin', 'admin', 'manager', 'admin-viewer'].includes(actorRole)
+  const actorMatches = actorNameMatches && actorCodeMatches && ['super_admin', 'admin', 'manager', 'admin-viewer', 'cashier', 'cashier-sync', 'employee'].includes(actorRole)
   const role = String(matchingStaff?.role || (actorMatches ? actorRole : '')).trim().toLowerCase()
   const roleAllowed = ['super_admin', 'admin', 'manager', 'admin-viewer'].includes(role)
   if (requireAdmin && !(roleAllowed && (matchingStaff || actorMatches))) return { valid: false, message: 'اسم الكاشير أو الرمز غير صحيح' }
