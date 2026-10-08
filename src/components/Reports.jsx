@@ -181,7 +181,7 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], settlements = [], settlementCorrections = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, onBeforePrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], settlements = [], settlementCorrections = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
   const [reportType, setReportType] = useState(initialReportType)
   const [employeeQuery, setEmployeeQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -357,7 +357,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     setReportType('employees')
   }
 
-  const printReport = (format) => {
+  const printReport = async (format) => {
+    try { await onBeforePrint?.() } catch (error) { console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
     const paper = document.querySelector('.report-paper')
     if (!paper) return
 
@@ -400,8 +401,9 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     window.setTimeout(writePrintDocument, 500)
   }
 
-  const printReportDirect = () => {
+  const printReportDirect = async () => {
     if (!directThermalReady || !onDirectThermalPrint) return
+    try { await onBeforePrint?.() } catch (error) { console.warn('REPORT_DIRECT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
     const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات بلي وتوترز', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)

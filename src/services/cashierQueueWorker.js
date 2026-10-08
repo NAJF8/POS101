@@ -1,6 +1,6 @@
 import { defaultSyncLockManager } from './syncLockManager.js'
 
-export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () => true, intervalMs = 30000, onDiagnostic = null } = {}) => {
+export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () => true, intervalMs = 15000, onDiagnostic = null } = {}) => {
   if (typeof processQueue !== 'function') throw new TypeError('processQueue is required')
   let running = null
   let timer = null

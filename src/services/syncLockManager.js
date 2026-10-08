@@ -79,6 +79,7 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
       tabId,
       deviceId,
       startedAt: timestamp,
+      expiresAt: timestamp + SYNC_LOCK_STALE_MS,
       heartbeatAt: timestamp,
       trigger,
       processingSaleIds: [...processingSaleIds],
@@ -93,7 +94,8 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
   const heartbeat = ({ processingSaleIds = [], trigger } = {}) => {
     const current = read(storage)
     if (!current || current.ownerId !== ownerId) return false
-    write(storage, { ...current, heartbeatAt: now(), trigger: trigger || current.trigger, processingSaleIds: [...processingSaleIds] })
+    const heartbeatAt = now()
+    write(storage, { ...current, heartbeatAt, expiresAt: heartbeatAt + SYNC_LOCK_STALE_MS, trigger: trigger || current.trigger, processingSaleIds: [...processingSaleIds] })
     return true
   }
 

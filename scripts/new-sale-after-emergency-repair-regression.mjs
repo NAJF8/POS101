@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
-const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
+const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const worker = fs.readFileSync(new URL('../src/services/cashierQueueWorker.js', import.meta.url), 'utf8')
 const locks = fs.readFileSync(new URL('../src/services/syncLockManager.js', import.meta.url), 'utf8')
 const queue = fs.readFileSync(new URL('../src/services/salesSyncQueue.js', import.meta.url), 'utf8')

@@ -16,7 +16,7 @@ import { Purchases } from './components/Purchases'
 import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
+import { enqueueSale, buildSalesBackup, readSaleSyncStatus } from './services/salesSyncQueue'
 import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
@@ -109,6 +109,7 @@ export default function App() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
+  const [saleSyncStatus, setSaleSyncStatus] = useState(() => readSaleSyncStatus())
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
@@ -461,13 +462,18 @@ export default function App() {
 
   useEffect(() => {
     const refreshOperationalSummary = () => setLedgerVersion(value => value + 1)
+    const refreshSaleSyncStatus = () => setSaleSyncStatus(readSaleSyncStatus())
     window.addEventListener('pos101-sale-created', refreshOperationalSummary)
     window.addEventListener('pos101-sale-updated', refreshOperationalSummary)
     window.addEventListener('pos101-expenses-updated', refreshOperationalSummary)
+    window.addEventListener('pos101-sale-created', refreshSaleSyncStatus)
+    window.addEventListener('pos101-sale-updated', refreshSaleSyncStatus)
     return () => {
       window.removeEventListener('pos101-sale-created', refreshOperationalSummary)
       window.removeEventListener('pos101-sale-updated', refreshOperationalSummary)
       window.removeEventListener('pos101-expenses-updated', refreshOperationalSummary)
+      window.removeEventListener('pos101-sale-created', refreshSaleSyncStatus)
+      window.removeEventListener('pos101-sale-updated', refreshSaleSyncStatus)
     }
   }, [])
 
@@ -628,6 +634,12 @@ export default function App() {
     onSuccess: onCentralSyncSuccess,
     onError: onCentralSyncError,
   }), [onCentralSyncStart, onCentralSyncSuccess, onCentralSyncError])
+
+  const syncBeforeReportPrint = useCallback(async () => {
+    const permission = await canSyncPosSales(centralAuth()?.currentUser)
+    if (!permission.allowed) throw Object.assign(new Error('تسجيل الدخول مطلوب قبل طباعة التقرير المركزي.'), { code: 'CENTRAL_ROLE_BLOCKED' })
+    await runCashierCentralSync()
+  }, [])
 
   useEffect(() => {
     recoverStaleEmergencyRepairFlag()
@@ -1066,6 +1078,7 @@ export default function App() {
           onSync={handleCentralSyncClick}
           syncBusy={syncBusy}
           syncLabel={syncLabel}
+          syncStatus={saleSyncStatus}
           currentView={currentView}
           onNavigate={requestView}
         />
@@ -1145,6 +1158,7 @@ export default function App() {
           products={catalogProducts}
           categories={catalogCategories}
           onNavigate={requestView}
+          onBeforePrint={syncBeforeReportPrint}
           onDirectThermalPrint={session ? printReportDirect : undefined}
           directThermalReady={Boolean(session && directThermalReady)}
         />
@@ -1156,7 +1170,7 @@ export default function App() {
       {currentView === 'expense-entry' && session && (
         <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
-      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} operationalDays={centralOperationalDays} settlements={settlements} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} />}
+      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} operationalDays={centralOperationalDays} settlements={settlements} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} onBeforePrint={syncBeforeReportPrint} />}
 
       {currentView === 'backup-recovery' && (
         <section className="settings-page backup-recovery-route" dir="rtl">
@@ -1173,7 +1187,7 @@ export default function App() {
           </header>
           <div className="admin-central-actions"><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
-          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} salesOverride={adminCentralSales} products={catalogProducts} categories={catalogCategories} onNavigate={() => {}} />
+          <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} salesOverride={adminCentralSales} products={catalogProducts} categories={catalogCategories} onNavigate={() => {}} onBeforePrint={syncBeforeReportPrint} />
         </section>
       )}
 

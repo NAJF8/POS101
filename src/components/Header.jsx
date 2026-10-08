@@ -13,7 +13,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, onSync, syncBusy = false, syncLabel = 'المزامنة جاهزة' }) {
+export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, onSync, syncBusy = false, syncLabel = 'المزامنة جاهزة', syncStatus = {} }) {
   const now = useLiveClock()
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
@@ -53,9 +53,14 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
           </button>
         )}
 
-        {session && <button className="header-btn outline-btn" type="button" onClick={onSync} disabled={syncBusy} title={syncLabel}>
-          <span>{syncBusy ? 'جارٍ المزامنة…' : 'مزامنة الآن'}</span>
-        </button>}
+        {session && <div className="sync-card" role="status" aria-live="polite">
+          <span>{syncStatus.pendingCount > 0 ? `طلبات بانتظار المزامنة: ${syncStatus.pendingCount}` : 'متزامن بالكامل'}</span>
+          {syncStatus.lastAttemptAt && <small>آخر محاولة: {new Date(syncStatus.lastAttemptAt).toLocaleTimeString('ar-IQ')}</small>}
+          {syncStatus.lastError && <small>آخر خطأ: {syncStatus.lastError}</small>}
+          <button className="header-btn outline-btn" type="button" onClick={onSync} disabled={syncBusy} title={syncLabel}>
+            <span>{syncBusy ? 'جارٍ المزامنة…' : 'فحص ومزامنة الطلبات الناقصة'}</span>
+          </button>
+        </div>}
 
         {session && currentView === 'pos' && (
           <>

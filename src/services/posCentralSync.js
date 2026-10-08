@@ -1202,14 +1202,21 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     }
     const attemptedEntry = queueEntry ? markSaleAttempt(queueEntry) : null
     const saleRef = ref(db, `pos101_sales/${saleIdOf(sale)}`)
+    const readVerifiedSale = async () => {
+      {
+        const readBack = await get(saleRef)
+        if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) return null
+        return readBack
+      }
+    }
     if (manualSale) { manualSale.writeAttempted = true; manualSale.writeResult = 'PASS' }
     try {
       await set(saleRef, serializeSale(sale))
     } catch (error) {
       // Another authorized device may have created the same sale concurrently.
       // Continue only when the complete sale identity and business fields read back.
-      const readBack = await get(saleRef).catch(() => null)
-      if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
+      const readBack = await readVerifiedSale().catch(() => null)
+      if (!readBack) {
         if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
         if (manualSale) { manualSale.writeResult = 'FAIL'; manualSale.error = error?.message || String(error) }
         logQueueDecision(sale, 'Firebase error', error?.message || '', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'failed', readbackResult: 'failed', localUpdateResult: 'retained-in-queue' })
@@ -1217,8 +1224,8 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
       }
       if (manualSale) manualSale.writeResult = 'PASS'
     }
-    const readBack = await get(saleRef).catch(() => null)
-    if (!readBack?.exists() || !centralSaleMatches(sale, readBack.val())) {
+    const readBack = await readVerifiedSale().catch(() => null)
+    if (!readBack) {
       const error = Object.assign(new Error('تعذر التحقق من حفظ المبيعة المركزية.'), { code: 'SALE_READBACK_FAILED' })
       if (attemptedEntry) retainQueuedSale(attemptedEntry, error)
       if (manualSale) manualSale.error = error.message

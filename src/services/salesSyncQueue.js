@@ -285,7 +285,7 @@ export const resolveLegacyExpenseQueueEntries = (centralExpenses = []) => {
 const isSaleEntry = entry => Boolean(entry?.sale && isSaleSyncEligible(entry.sale))
 const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
   const pending = pendingSale(sale, error)
-  const attempts = Number(existing?.attempts)
+  const attempts = Number(existing?.attemptCount ?? existing?.attempts)
   return {
     kind: 'sale',
     queueKey: String(saleIdOf(sale)),
@@ -301,6 +301,7 @@ const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.
     status: 'pending',
     queuedAt: existing?.queuedAt || queuedAt,
     attempts: Number.isFinite(attempts) && attempts >= 0 ? attempts : 0,
+    attemptCount: Number.isFinite(attempts) && attempts >= 0 ? attempts : 0,
     lastAttemptAt: existing?.lastAttemptAt || null,
     lastError: error ? String(error?.message || error) : (existing?.lastError || ''),
     lastErrorCode: error ? String(error?.code || '') : (existing?.lastErrorCode || ''),
@@ -323,6 +324,20 @@ export const readPendingSaleCount = () => {
     if (operationKey) seenOperationKeys.add(operationKey)
     return count + 1
   }, 0)
+}
+
+export const readSaleSyncStatus = () => {
+  const queue = readRawSaleQueue().filter(isSaleEntry)
+  const pending = queue.filter(entry => String(entry?.status || 'pending').toLowerCase() === 'pending')
+  const failed = queue.filter(entry => String(entry?.status || '').toLowerCase() === 'failed')
+  const attempts = queue.map(entry => entry?.lastAttemptAt).filter(Boolean).sort((a, b) => Number(b) - Number(a))
+  const errors = queue.map(entry => entry?.lastError).filter(Boolean)
+  return {
+    pendingCount: pending.length,
+    failedCount: failed.length,
+    lastAttemptAt: attempts[0] || null,
+    lastError: errors[0] || '',
+  }
 }
 
 const centralIdentity = sale => ({
@@ -394,6 +409,10 @@ export const enqueueSale = (sale, { error, queuedAt = Date.now() } = {}) => {
     writeJson(SALES_KEY, persistedSales.map(row => sameSaleIdentity(row, sale) ? { ...row, ...persisted } : row))
     throw Object.assign(new Error('تعذر حفظ المبيعة في طابور المزامنة المحلي.'), { code: 'SALE_QUEUE_PERSISTENCE_FAILED' })
   }
+  const backup = buildSalesBackup(new Date(queuedAt).toISOString())
+  writeJson('lastCompletedSaleBackup', backup)
+  writeJson('dailySalesBackup', backup)
+  localStorage.setItem('lastSaleBackupAt', String(queuedAt))
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: sale }))
   return persistedSales.find(row => sameSaleIdentity(row, sale)) || localSale
 }
@@ -470,7 +489,8 @@ export const markSaleAttempt = (entry, attemptedAt = Date.now()) => {
       existing: row,
       queuedAt: row.queuedAt,
     })
-    updated.attempts = Number(row.attempts || 0) + 1
+    updated.attempts = Number(row.attemptCount ?? row.attempts ?? 0) + 1
+    updated.attemptCount = updated.attempts
     updated.lastAttemptAt = attemptedAt
     updated.lastError = ''
     updated.lastErrorCode = ''
