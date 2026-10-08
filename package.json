@@ -55,6 +55,7 @@
     ,"test:report-page-crash": "node scripts/report-page-crash-regression.mjs"
     ,"test:actual-cash-pending-input": "node scripts/actual-cash-pending-input-regression.mjs"
     ,"test:immediate-sale-void": "node scripts/immediate-sale-void-regression.mjs"
+    ,"test:permanent-sync-fix": "node scripts/permanent-sync-fix-regression.mjs"
     ,"test:report-final-net-reorder": "node scripts/report-final-net-reorder-regression.mjs"
   },
   "dependencies": {

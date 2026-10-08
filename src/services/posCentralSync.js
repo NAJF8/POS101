@@ -951,12 +951,14 @@ export const readEndDayDiagnostic = async (operationalDay, { openOrderCount = 0,
   const centralSales = centralValues(await get(salesRef()))
   return buildEndDayDiagnostic({
     localSales: readLocalSales(),
-    queueEntries: readSaleQueue(),
+    queueEntries: readRawSaleQueue(),
     voidQueueEntries: readVoidUpdateQueue(),
     centralSales,
     operationalDay,
     openOrderCount,
     preCloseGuard,
+    liveCommit: BUILD_SHA,
+    liveBundle: typeof document !== 'undefined' ? document.querySelector('script[src*="assets/index-"]')?.src?.split('/').pop() || '' : '',
   })
 }
 

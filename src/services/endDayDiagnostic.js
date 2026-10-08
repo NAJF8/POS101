@@ -1,4 +1,4 @@
-import { financialFingerprint, isSaleSyncEligible, salePayloadMatches } from './salesSyncQueue.js'
+import { financialFingerprint, isSaleSyncEligible, isVoidedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { reconcileCanonicalSales } from './canonicalSales.js'
 
@@ -47,9 +47,12 @@ const sameIdentity = (left, right) => Boolean(
   || (operationKeyOf(left) && operationKeyOf(left) === operationKeyOf(right))
 )
 
-export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, preCloseGuard = null } = {}) => {
-  const local = (Array.isArray(localSales) ? localSales : []).filter(sale => belongsToCurrentDay(sale, operationalDay) && isSaleSyncEligible(sale))
-  const queue = (Array.isArray(queueEntries) ? queueEntries : []).filter(entry => entry?.sale && belongsToCurrentDay(entry.sale, operationalDay) && isSaleSyncEligible(entry.sale))
+export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, preCloseGuard = null, liveCommit = '', liveBundle = '' } = {}) => {
+  const localRows = (Array.isArray(localSales) ? localSales : []).filter(sale => belongsToCurrentDay(sale, operationalDay))
+  const currentQueueEntries = (Array.isArray(queueEntries) ? queueEntries : []).filter(entry => entry?.sale && belongsToCurrentDay(entry.sale, operationalDay))
+  const local = localRows.filter(sale => isSaleSyncEligible(sale))
+  const queue = currentQueueEntries.filter(entry => entry?.sale && isSaleSyncEligible(entry.sale))
+  const currentVoidQueue = (Array.isArray(voidQueueEntries) ? voidQueueEntries : []).filter(entry => belongsToCurrentDay(entry, operationalDay))
   const central = Array.isArray(centralSales) ? centralSales : []
   const reconciliation = reconcilePreCloseSales({ localSales, queueEntries: queue, voidQueueEntries, centralSales: central, operationalDay, openOrderCount })
   const financialReconciliation = reconcileCanonicalSales({ localSales, centralSales, operationalDay })
@@ -89,14 +92,40 @@ export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], void
       })),
     })
   }
+  const unresolvedVoids = [
+    ...localRows.filter(sale => isVoidedSale(sale) && sale?.queueResolution !== 'voided_before_central_sync'),
+    ...currentVoidQueue.map(entry => ({ saleId: entry.saleId, id: entry.saleId, orderNumber: entry.orderNumber, businessDate: entry.businessDate, operationalDayId: entry.operationalDayId, status: 'void_pending_sync' })),
+  ].filter(sale => {
+    const remote = central.find(row => sameIdentity(row, sale))
+    return !remote || !isVoidedSale(remote)
+  })
+  const unresolvedVoidIds = new Set(unresolvedVoids.map(sale => saleIdOf(sale)).filter(Boolean))
+  const blockingItems = blockers.length + unresolvedVoidIds.size + (reconciliation.activeTotalsMatch ? 0 : 1)
+  const endDayReady = Boolean(reconciliation.allowed && financialReconciliation.allowed && Number(openOrderCount) === 0)
+  const resolvedVoidedBeforeSync = new Set(localRows.filter(sale => sale?.queueResolution === 'voided_before_central_sync').map(sale => saleIdOf(sale)).filter(Boolean)).size
   return {
-    status: preCloseGuard?.state || (blockers.length || Number(openOrderCount) ? 'real-pending' : 'verified'),
+    LIVE_COMMIT: liveCommit,
+    LIVE_BUNDLE: liveBundle,
+    businessDate: operationalDay?.businessDate || '',
+    operationalDayId: operationalDay?.id || '',
+    localActiveCount: reconciliation.localActiveCount,
+    localActiveTotal: reconciliation.localActiveTotal,
+    firebaseActiveCount: reconciliation.centralActiveCount,
+    firebaseActiveTotal: reconciliation.centralActiveTotal,
+    pendingSaleWrite: currentQueueEntries.filter(entry => entry?.type === 'sale_write' || entry?.kind === 'sale' || !entry?.type).length,
+    pendingVoidUpdate: currentVoidQueue.length,
+    voidedBeforeSyncResolved: resolvedVoidedBeforeSync,
+    queueItems: currentQueueEntries.length + currentVoidQueue.length,
+    blockingItems,
+    END_DAY_READY: endDayReady ? 'YES' : 'NO',
+    status: preCloseGuard?.state || (blockingItems || Number(openOrderCount) ? 'real-pending' : 'verified'),
     message: preCloseGuard?.message || '',
     pendingQueue: reconciliation.pendingQueue,
     openOrderCount: Number(openOrderCount) || 0,
     openOrderFlag: (Number(openOrderCount) || 0) > 0,
     reconciliationState: preCloseGuard?.loading ? 'loading' : 'completed',
     blockers,
+    unresolvedVoids: [...unresolvedVoidIds],
     financialReconciliation,
   }
 }

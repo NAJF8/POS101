@@ -877,7 +877,6 @@ export default function App() {
     // complete before local sync metadata, printing, or cart clearing.
     try {
       await saveCentralSaleImmediately(sale)
-      enqueueSale(sale, { dispatchEvent: false })
       markSaleSynced(sale)
       setSaleSyncWarning('')
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
@@ -892,8 +891,10 @@ export default function App() {
       try {
         // The emergency fallback remains the canonical enqueueSale(sale) path.
         enqueueSale(sale, { error })
-        setSaleSyncWarning('تعذر رفع الطلب مركزيًا، تم حفظه مؤقتًا وسيعاد رفعه')
+        const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
+        setSaleSyncWarning(`تعذر رفع الطلب مركزيًا؛ تم حفظه للطوارئ. السبب: ${reason}. اضغط «مزامنة الآن».`)
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
+        void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       } catch (queueError) {
         setOperationalDayError(queueError?.message || error?.message || 'تعذر حفظ الطلب مؤقتًا.')
         setModal('operational-day-required')
@@ -932,8 +933,10 @@ export default function App() {
       return result.sale || pending
     } catch (error) {
       enqueueVoidUpdate(pending, voidPayload, { error })
-      setSaleSyncWarning('إبطال غير مثبت مركزيًا')
+      const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
+      setSaleSyncWarning(`الإبطال غير مثبت مركزيًا؛ حُفظ للطوارئ. السبب: ${reason}. اضغط «مزامنة الآن».`)
       console.warn('POS101_IMMEDIATE_VOID_SYNC_PENDING', error?.code || error?.message || String(error))
+      void processSaleSyncQueue({ reason: 'void-update-failure' }).catch(retryError => console.warn('POS101_VOID_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       return pending
     }
   }, [session])

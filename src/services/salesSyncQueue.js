@@ -397,7 +397,7 @@ export const readSaleSyncStatus = () => {
   const pending = queue.filter(entry => String(entry?.status || 'pending').toLowerCase() === 'pending')
   const failed = queue.filter(entry => String(entry?.status || '').toLowerCase() === 'failed')
   const attempts = queue.map(entry => entry?.lastAttemptAt).filter(Boolean).sort((a, b) => Number(b) - Number(a))
-  const errors = queue.map(entry => entry?.lastError).filter(Boolean)
+  const errors = [...queue, ...voidQueue].map(entry => entry?.lastError).filter(Boolean)
   return {
     pendingCount: pending.length,
     failedCount: failed.length,
@@ -545,18 +545,53 @@ export const buildSalesBackup = (createdAt = new Date().toISOString()) => {
 export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
   const saleId = saleIdOf(sale)
   const sales = readJson(SALES_KEY, [])
-  writeJson(SALES_KEY, sales.map(row => sameSale(row, saleId)
-    ? { ...row, status: 'synced', syncStatus: 'synced', centralVerified: true, centralVerifiedAt: syncConfirmedAt, syncConfirmedAt }
-    : row))
+  const operationKey = operationKeyOf(sale)
+  const existingIndex = sales.findIndex(row => saleIdOf(row) === saleId)
+  const operationIndex = existingIndex < 0 && operationKey
+    ? sales.findIndex(row => operationKeyOf(row) === operationKey)
+    : -1
+  const index = existingIndex >= 0 ? existingIndex : operationIndex
+  const synced = {
+    ...sale,
+    saleId,
+    id: saleId,
+    status: 'synced',
+    syncStatus: 'synced',
+    centralVerified: true,
+    centralVerifiedAt: syncConfirmedAt,
+    syncConfirmedAt,
+  }
+  const nextSales = index >= 0
+    ? sales.map((row, rowIndex) => rowIndex === index ? { ...row, ...synced } : row)
+    : sales.some(row => saleIdOf(row) === saleId) ? sales : [...sales, synced]
+  writeJson(SALES_KEY, nextSales)
   writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => !entry?.sale || !sameSaleIdentity(entry.sale, sale)))
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: synced }))
 }
 
 export const markSaleVoidedCentral = (sale, { voidConfirmedAt = Date.now(), queueResolution = 'void_status_synced', audit = null } = {}) => {
   const saleId = saleIdOf(sale)
   const sales = readJson(SALES_KEY, [])
-  writeJson(SALES_KEY, sales.map(row => sameSale(row, saleId)
-    ? { ...row, status: 'voided', voided: true, voidedAt: sale?.voidedAt || voidConfirmedAt, voidCentralVerified: true, voidConfirmedAt, queueResolution, audit: audit && !(Array.isArray(row.audit) && row.audit.some(item => item?.id && item.id === audit.id)) ? [...(Array.isArray(row.audit) ? row.audit : []), audit] : row.audit }
-    : row))
+  const existingIndex = sales.findIndex(row => saleIdOf(row) === saleId)
+  const existing = existingIndex >= 0 ? sales[existingIndex] : null
+  const auditRowsForSale = Array.isArray(existing?.audit) ? existing.audit : Array.isArray(sale?.audit) ? sale.audit : []
+  const nextAudit = audit && !auditRowsForSale.some(item => item?.id && item.id === audit.id) ? [...auditRowsForSale, audit] : auditRowsForSale
+  const voided = {
+    ...sale,
+    saleId,
+    id: saleId,
+    status: 'voided',
+    voided: true,
+    voidedAt: sale?.voidedAt || voidConfirmedAt,
+    voidCentralVerified: true,
+    voidConfirmedAt,
+    queueResolution,
+    audit: nextAudit,
+  }
+  const nextSales = existingIndex >= 0
+    ? sales.map((row, rowIndex) => rowIndex === existingIndex ? { ...row, ...voided } : row)
+    : [...sales, voided]
+  writeJson(SALES_KEY, nextSales)
   writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => {
     if (isVoidUpdateEntry(entry)) return String(entry.saleId) !== String(saleId)
     return !entry?.sale || !sameSaleIdentity(entry.sale, sale)

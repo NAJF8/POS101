@@ -134,8 +134,28 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
   }
   const diagnosticText = report => {
     if (!report) return ''
-    const ready = report.reconciliationState === 'completed' && report.pendingQueue === 0 && !report.openOrderFlag && (report.blockers || []).length === 0
-    const lines = ['END_DAY_DIAGNOSTIC', `pendingQueue=${report.pendingQueue}`, `openOrderFlag=${report.openOrderFlag}`, `END_DAY_READY=${ready ? 'YES' : 'NO'}`, `reconciliationState=${report.reconciliationState}`, `status=${report.status}`, `message=${report.message || ''}`]
+    const lines = [
+      'END_DAY_DIAGNOSTIC',
+      `LIVE_COMMIT=${report.LIVE_COMMIT || ''}`,
+      `LIVE_BUNDLE=${report.LIVE_BUNDLE || ''}`,
+      `businessDate=${report.businessDate || ''}`,
+      `operationalDayId=${report.operationalDayId || ''}`,
+      `localActiveCount=${report.localActiveCount ?? 0}`,
+      `localActiveTotal=${report.localActiveTotal ?? 0}`,
+      `firebaseActiveCount=${report.firebaseActiveCount ?? 0}`,
+      `firebaseActiveTotal=${report.firebaseActiveTotal ?? 0}`,
+      `pendingSaleWrite=${report.pendingSaleWrite ?? 0}`,
+      `pendingVoidUpdate=${report.pendingVoidUpdate ?? 0}`,
+      `voidedBeforeSyncResolved=${report.voidedBeforeSyncResolved ?? 0}`,
+      `queueItems=${report.queueItems ?? 0}`,
+      `blockingItems=${report.blockingItems ?? 0}`,
+      `END_DAY_READY=${report.END_DAY_READY || 'NO'}`,
+      `pendingQueue=${report.pendingQueue}`,
+      `openOrderFlag=${report.openOrderFlag}`,
+      `reconciliationState=${report.reconciliationState}`,
+      `status=${report.status}`,
+      `message=${report.message || ''}`,
+    ]
     for (const blocker of report.blockers || []) {
       lines.push('', `ORDER=${blocker.orderNumber}`, `saleId=${blocker.saleId}`, `source=${blocker.source}`, `businessDate=${blocker.businessDate}`, `operationalDayId=${blocker.operationalDayId}`, `operationKey=${blocker.operationKey}`, `localStatus=${blocker.localStatus}`, `localSyncStatus=${blocker.localSyncStatus}`, `centralExists=${blocker.centralExists}`, `centralStatus=${blocker.centralStatus}`, `centralSyncStatus=${blocker.centralSyncStatus}`, `salePayloadMatches=${blocker.salePayloadMatches}`, `mismatchFields=${blocker.mismatchFields.join(',')}`, `queueEntryExists=${blocker.queueEntryExists}`)
       for (const entry of blocker.queueEntries || []) lines.push(`queueOperationType=${entry.operationType}`, `queueId=${entry.id}`, `queueBusinessDate=${entry.businessDate}`, `queueOperationalDayId=${entry.operationalDayId}`)
@@ -173,9 +193,9 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
             <span>اليوم السابق ما زال مفتوحاً</span>
             <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
             <button type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button>
-            <button type="button" onClick={openDiagnostic}>تشخيص المزامنة</button>
+            <button type="button" onClick={openDiagnostic}>فحص المزامنة</button>
           </div>
-        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>تشخيص المزامنة</button></div>}
+        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>فحص المزامنة</button></div>}
     </div> : <div className="operational-day-body">
       <div className="operational-day-empty">
         <strong>لا يوجد يوم تشغيلي مفتوح</strong>
@@ -197,7 +217,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
     </div></div>}
 
     {diagnosticOpen && <div className="overlay"><div className="dialog operational-day-dialog end-day-diagnostic-dialog" dir="rtl">
-      <h2>تشخيص المزامنة</h2>
+      <h2>فحص المزامنة</h2>
       {!diagnosticReport && <>
         <p>هذا التقرير للقراءة فقط ولا يغيّر المبيعات أو الطابور.</p>
         <label>رمز النظام<input autoFocus type="password" inputMode="numeric" value={diagnosticCode} onChange={event => setDiagnosticCode(event.target.value)} /></label>
@@ -208,9 +228,22 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
         <div className="diagnostic-runtime" aria-label="قيم حارس إنهاء اليوم">
           <span>preCloseGuard.status <b>{diagnosticReport.status}</b></span>
           <span>preCloseGuard.message <b>{diagnosticReport.message || '—'}</b></span>
+          <span>LIVE_COMMIT <b>{diagnosticReport.LIVE_COMMIT || '—'}</b></span>
+          <span>LIVE_BUNDLE <b>{diagnosticReport.LIVE_BUNDLE || '—'}</b></span>
+          <span>businessDate <b>{diagnosticReport.businessDate || '—'}</b></span>
+          <span>operationalDayId <b>{diagnosticReport.operationalDayId || '—'}</b></span>
+          <span>localActiveCount <b>{diagnosticReport.localActiveCount}</b></span>
+          <span>localActiveTotal <b>{diagnosticReport.localActiveTotal}</b></span>
+          <span>firebaseActiveCount <b>{diagnosticReport.firebaseActiveCount}</b></span>
+          <span>firebaseActiveTotal <b>{diagnosticReport.firebaseActiveTotal}</b></span>
+          <span>pendingSaleWrite <b>{diagnosticReport.pendingSaleWrite}</b></span>
+          <span>pendingVoidUpdate <b>{diagnosticReport.pendingVoidUpdate}</b></span>
+          <span>voidedBeforeSyncResolved <b>{diagnosticReport.voidedBeforeSyncResolved}</b></span>
+          <span>queueItems <b>{diagnosticReport.queueItems}</b></span>
+          <span>blockingItems <b>{diagnosticReport.blockingItems}</b></span>
           <span>pendingQueue <b>{diagnosticReport.pendingQueue}</b></span>
           <span>openOrderFlag <b>{String(diagnosticReport.openOrderFlag)}</b></span>
-          <span>END_DAY_READY <b>{diagnosticReport.reconciliationState === 'completed' && diagnosticReport.pendingQueue === 0 && !diagnosticReport.openOrderFlag && (diagnosticReport.blockers || []).length === 0 ? 'YES' : 'NO'}</b></span>
+          <span>END_DAY_READY <b>{diagnosticReport.END_DAY_READY || 'NO'}</b></span>
           <span>reconciliation <b>{diagnosticReport.reconciliationState}</b></span>
         </div>
         {(diagnosticReport.blockers || []).map(blocker => <article className="diagnostic-blocker" key={`${blocker.saleId}|${blocker.operationKey}`}>
