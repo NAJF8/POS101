@@ -53,7 +53,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     window.setTimeout(() => setSuccessMessage(''), 3200)
   }
 
-  const resetForm = () => { const activePerson = staff.find(row => row.active) || null; setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(activePerson?.name || 'علي'); setPersonId(activePerson?.id || ''); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setFundingSource('cashbox'); setWithdrawalFundingSource('cashbox') }
+  const resetForm = () => { const activePerson = staff.find(row => row.active) || null; setEditingId(null); setAmount(''); setCategory('مشتريات'); setPerson(activePerson?.name || 'علي'); setPersonId(activePerson?.id || ''); setDescription(''); setNotes(''); setEntryType('current'); setHistoricalDate(''); setFundingSource('cashbox') }
   const submit = async e => {
     e.preventDefault()
     const numericAmount = Number(amount)
