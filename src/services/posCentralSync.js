@@ -1386,12 +1386,13 @@ const readLocalSalesForBackupTool = () => {
   } catch { return [] }
 }
 
-export const inspectBackupSales = async ({ sales = [] } = {}) => {
+export const inspectBackupSales = async ({ sales = [], syncQueueItems = [] } = {}) => {
   const { candidates: normalized, invalidQueueItems } = buildRecoveryCandidates({ sales, syncQueueItems })
   const localOnly = error => ({
     centralAvailable: false,
     centralCount: null,
     centralReadError: error?.code || error?.message || 'CENTRAL_READ_UNAVAILABLE',
+    invalidQueueItems,
     results: normalized.map(sale => ({ sale, classification: 'LOCAL_ONLY', reason: 'تم تحليل الملف محليًا. الفحص المركزي غير متاح لهذا الحساب.', centralSale: null, directExists: false, directSale: null, firebasePath: sale.saleId ? `pos101_sales/${sale.saleId}` : '' })),
     openDays: [],
   })
@@ -1413,7 +1414,7 @@ export const inspectBackupSales = async ({ sales = [] } = {}) => {
     const direct = directSnapshots[index]
     return { ...result, directExists: Boolean(direct?.exists()), directSale: direct?.exists() ? direct.val() : null }
   })
-  return { centralAvailable: true, centralCount: centralSales.length, results, openDays: [...days.values()].filter(Boolean) }
+  return { centralAvailable: true, centralCount: centralSales.length, results, openDays: [...days.values()].filter(Boolean), invalidQueueItems }
 }
 
 export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) => {
@@ -1629,22 +1630,26 @@ export const runOneClickSyncRepair = async ({
   const finalSummary = summarizeCanonicalSales(canonical)
   const endDayReady = retainedQueue.length === 0 && conflicts.length === 0 && finalSummary.salesBalanced && finalSummary.paymentsBalanced
   return {
+    ok: true,
     oneClickSyncRepair: 'PASS',
     trueOneButtonRepair: 'PASS',
     tempOpenOneButtonRepair: TEMP_OPEN_ONE_BUTTON_REPAIR ? 'ON' : 'OFF',
     businessDate: targetDate,
     operationalDayId: targetDayId,
+    backupSalesCount: Array.isArray(sales) ? sales.length : 0,
     localCount: finalLocalSales.filter(sale => !targetDate || sale.businessDate === targetDate).length,
     localTotal: finalLocalSales.filter(sale => !targetDate || sale.businessDate === targetDate).reduce((sum, sale) => sum + Number(sale.total || 0), 0),
+    localActiveCount: finalLocalSales.filter(sale => (!targetDate || sale.businessDate === targetDate) && !['voided', 'cancelled', 'canceled'].includes(String(sale?.status || '').toLowerCase())).length,
+    localActiveTotal: finalLocalSales.filter(sale => (!targetDate || sale.businessDate === targetDate) && !['voided', 'cancelled', 'canceled'].includes(String(sale?.status || '').toLowerCase())).reduce((sum, sale) => sum + Number(sale.total || 0), 0),
     firebaseMatched: readbackOnly.length + recoveredOnce.length,
     readbackOnly,
     recoveredOnce,
-    queueItemsResolved: queueActions.length,
+    queueItemsResolved: queueActions,
     conflicts,
     skipped,
     invalidQueueItems: invalidQueue,
     activeSyncQueueLengthAfter: retainedQueue.length,
-    endDayReady,
+    endDayReady: endDayReady ? 'YES' : 'NO',
     currentDayFinalCount: finalSummary.count,
     currentDayFinalTotal: finalSummary.net,
     noDuplicateSaleId: 'PASS',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildRecoveryCandidates, classifyBackupSale, ORDER_1309_SALE_ID, parseBackupRecoveryInput, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
+import { buildRecoveryCandidates, classifyBackupSale, DEFAULT_REPAIR_RESULT, normalizeRepairResult, ORDER_1309_SALE_ID, parseBackupRecoveryInput, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
 import { canonicalSalesForOperationalDay, summarizeCanonicalSales } from '../src/services/canonicalSales.js'
 import { buildEndDayDiagnostic } from '../src/services/endDayDiagnostic.js'
 
@@ -30,6 +30,14 @@ const candidates = buildRecoveryCandidates({ sales: [sale({ saleId: 'same' })], 
 assert.equal(candidates.candidates.length, 1)
 assert.equal(candidates.candidates[0].queueDuplicateCount, 1)
 assert.equal(candidates.invalidQueueItems.length, 1)
+assert.throws(() => parseBackupRecoveryInput('{malformed'), /JSON/)
+const missingFields = parseBackupRecoveryInput(JSON.stringify({ businessDate: '2026-10-08', syncQueue: [{ type: 'sale' }, null, 'bad-entry'] }))
+assert.equal(missingFields.syncQueueItems.length, 3)
+const safeDefault = normalizeRepairResult({ invalidQueueItems: null, conflicts: undefined, endDayReady: undefined }, 'caught-error')
+assert.deepEqual(safeDefault.invalidQueueItems, [])
+assert.deepEqual(safeDefault.conflicts, [])
+assert.equal(safeDefault.endDayReady, DEFAULT_REPAIR_RESULT.endDayReady)
+assert.equal(safeDefault.error, 'caught-error')
 
 const day = { id: 'day-1', operationalDayId: 'day-1', businessDate: '2026-10-08', status: 'open' }
 const exact = classifyBackupSale({ sale: sale(), centralSales: [sale({ status: 'synced', syncStatus: 'synced' })], openDay: day })
@@ -104,10 +112,15 @@ assert.match(service, /noRealSaleDelete: 'PASS'/)
 assert.match(service, /noOrderNumberChange: 'PASS'/)
 assert.match(service, /noTouchClosedDay/)
 assert.match(service, /invalidQueueItems = \[\]/)
-assert.match(component, /const safeResult = useMemo\(\(\) => \(\{/)
+assert.match(component, /const safeResult = useMemo\(\(\) => normalizeRepairResult\(repairReport\)/)
 assert.match(component, /TRUE_ONE_BUTTON_REPAIR=\{safeResult\.trueOneButtonRepair/)
 assert.match(component, /ERROR=\$\{safeResult\.error\}/)
 assert.match(component, /activeSyncQueueLengthAfter: activeQueueLength/)
+assert.match(component, /try \{[\s\S]*onRepair[\s\S]*finally \{ setBusy\(false\) \}/)
+assert.match(component, /POS101_TRUE_ONE_BUTTON_REPAIR_RESULT/)
+assert.match(component, /normalizeRepairResult\(repairReport\)/)
+assert.match(component, /safeResult\.queueItemsResolved\.length/)
+assert.match(component, /safeResult\.invalidQueueItems\.length/)
 assert.match(component, /recoveryForm\.name/)
 assert.match(component, /recoveryForm\.code/)
 assert.match(component, /recoveryForm\.reason/)
@@ -124,6 +137,7 @@ assert.match(service, /expected\.saleId !== ORDER_1309_SALE_ID/)
 assert.match(service, /ORDER_1309_READBACK_ONLY/)
 assert.match(service, /export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = true/)
 assert.match(service, /export const runOneClickSyncRepair/)
+assert.match(service, /inspectBackupSales = async \(\{ sales = \[\], syncQueueItems = \[\] \}/)
 assert.match(service, /recoveryMode: 'one-click-safe-sync-dedupe'/)
 assert.match(service, /pos101\.queueCleanupReport/)
 assert.match(service, /resolved-after-readback/)

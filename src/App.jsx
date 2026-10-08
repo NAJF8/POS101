@@ -998,7 +998,7 @@ export default function App() {
   // async authorization record loaded, so it could permanently miss admin-viewer.
   const adminReady = isCentralAdminUser(adminAuthUser) || isCentralAdminUser(centralAuthUser)
   const saveSaleEdit = useCallback((sale, changes) => changes?.itemCorrection ? correctCentralSaleItems(sale, changes) : updateCentralSale(sale, changes), [])
-  const inspectBackup = useCallback(({ sales }) => inspectBackupSales({ sales }), [])
+  const inspectBackup = useCallback(({ sales, syncQueueItems }) => inspectBackupSales({ sales, syncQueueItems }), [])
   const markBackupLocal = useCallback(({ sale, centralSale }) => markBackupSaleReadbackLocally({ sale, centralSale }), [])
   const recoverBackup = useCallback(payload => recoverBackupSale(payload), [])
   const repairBackup = useCallback(payload => runOneClickSyncRepair(payload), [])

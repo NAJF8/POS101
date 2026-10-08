@@ -9,6 +9,58 @@ export const ORDER_1309_SALE_ID = '809aa958-256d-44a8-83bd-33c8b82dca56'
 export const ORDER_1309_NUMBER = 1309
 export const KNOWN_CLOSED_BUSINESS_DATE = '2026-10-07'
 
+export const DEFAULT_REPAIR_RESULT = Object.freeze({
+  ok: false,
+  trueOneButtonRepair: 'FAIL',
+  tempOpenOneButtonRepair: 'ON',
+  businessDate: '',
+  backupSalesCount: 0,
+  localActiveCount: 0,
+  localActiveTotal: 0,
+  firebaseMatched: 0,
+  readbackOnly: [],
+  recoveredOnce: [],
+  duplicateQueueResolved: [],
+  queueItemsResolved: [],
+  conflicts: [],
+  invalidQueueItems: [],
+  voidedSkipped: [],
+  skipped: [],
+  errors: [],
+  warnings: [],
+  activeSyncQueueLengthAfter: null,
+  currentDayFinalCount: null,
+  currentDayFinalTotal: null,
+  endDayReady: 'NO',
+  noBlindUpload: 'PASS',
+  noRealSaleDelete: 'PASS',
+  noOrderNumberChange: 'PASS',
+  noDuplicateSaleId: 'PASS',
+  noTouch1056: 'PASS',
+  noTouchClosedDay: 'PASS',
+})
+
+const REPAIR_ARRAY_FIELDS = ['readbackOnly', 'recoveredOnce', 'duplicateQueueResolved', 'queueItemsResolved', 'conflicts', 'invalidQueueItems', 'voidedSkipped', 'skipped', 'errors', 'warnings']
+const REPAIR_NUMBER_FIELDS = ['backupSalesCount', 'localActiveCount', 'localActiveTotal', 'firebaseMatched', 'activeSyncQueueLengthAfter', 'currentDayFinalCount', 'currentDayFinalTotal']
+const REPAIR_STATUS_FIELDS = ['trueOneButtonRepair', 'tempOpenOneButtonRepair', 'endDayReady', 'noBlindUpload', 'noRealSaleDelete', 'noOrderNumberChange', 'noDuplicateSaleId', 'noTouch1056', 'noTouchClosedDay']
+
+export const normalizeRepairResult = (result, errorMessage = '') => {
+  const source = result && typeof result === 'object' ? result : {}
+  const normalized = { ...DEFAULT_REPAIR_RESULT, ...source }
+  for (const field of REPAIR_ARRAY_FIELDS) normalized[field] = Array.isArray(source[field]) ? source[field] : []
+  for (const field of REPAIR_NUMBER_FIELDS) {
+    if (normalized[field] !== null && !Number.isFinite(Number(normalized[field]))) normalized[field] = DEFAULT_REPAIR_RESULT[field]
+    else if (normalized[field] !== null) normalized[field] = Number(normalized[field])
+  }
+  for (const field of REPAIR_STATUS_FIELDS) {
+    if (typeof normalized[field] !== 'string' && typeof normalized[field] !== 'boolean') normalized[field] = DEFAULT_REPAIR_RESULT[field]
+  }
+  const message = String(errorMessage || normalized.error || '').trim()
+  normalized.error = message
+  if (message && !normalized.errors.some(item => String(item) === message)) normalized.errors = [...normalized.errors, message]
+  return normalized
+}
+
 const parseMaybeJson = value => {
   if (typeof value !== 'string') return value
   try { return JSON.parse(value) } catch { return null }
@@ -58,7 +110,10 @@ export const parseBackupRecoveryInput = input => {
   const sourceOperationalDayId = String(parsed?.operationalDayId || parsed?.operationalDay?.id || '').trim()
   const parsedSales = parseBackupSales(parsed)
   const queueSales = syncQueueItems
-    .map(entry => ({ ...(entry?.sale || entry?.payload || entry), businessDate: (entry?.sale || entry?.payload || entry)?.businessDate || sourceBusinessDate, operationalDayId: (entry?.sale || entry?.payload || entry)?.operationalDayId || sourceOperationalDayId }))
+    .map(entry => {
+      const row = entry?.sale || entry?.payload || entry
+      return row && typeof row === 'object' ? { ...row, businessDate: row.businessDate || sourceBusinessDate, operationalDayId: row.operationalDayId || sourceOperationalDayId } : null
+    })
     .filter(row => row && typeof row === 'object' && (saleIdOf(row) || row.orderNumber != null || row.total != null))
   const sales = parseBackupSales({ sales: [...parsedSales, ...queueSales] })
   const businessDate = String(sourceBusinessDate || sales.find(sale => sale.businessDate)?.businessDate || '').trim()
