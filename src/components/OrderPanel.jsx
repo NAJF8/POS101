@@ -6,7 +6,7 @@ import { productNames } from '../data/menu'
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
   onContinue, onHold, onDiscount, onClear, 
-  onPrintMenu, onReturn, disabled, scrollRequest
+  onPrintMenu, onReturn, onSavePending, disabled, scrollRequest
 }) {
   const itemsAreaRef = useRef(null)
   const subtotal = order.items.reduce((s, i) => s + i.price * i.quantity, 0)
@@ -122,6 +122,10 @@ export default function OrderPanel({
             <span>بيع</span>
           </button>
         </div>
+
+        <button className="btn-pending-table" type="button" onClick={onSavePending} disabled={!order.items.length}>
+          حفظ كطاولة معلقة
+        </button>
 
         <button className="btn-cancel-order" onClick={onClear} disabled={!order.items.length}>
           <Icon name="trash" size={18} />

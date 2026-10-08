@@ -6,7 +6,7 @@ import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/re
 
 const money = value => formatMoney(Number(value || 0))
 
-export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
+export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
@@ -230,6 +230,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
         <p>تاريخ اليوم التشغيلي: <b>{day.businessDate}</b></p>
         <p>وقت البدء: <b>{startedLabel}</b></p>
         <p>وقت الإغلاق الحالي: <b>{formatDateTime(Date.now())}</b></p>
+        {pendingTableCount > 0 && <p className="pending-day-warning" role="note">توجد طاولات معلقة غير مدفوعة، سيتم إبقاؤها في قسم الطاولات المعلقة ولا تُحسب ضمن المبيعات</p>}
         <div className="operational-day-summary">
           {preCloseGuard?.allowed === false && <p className="form-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
           <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>

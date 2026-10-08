@@ -3,6 +3,8 @@ import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
 import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, FinancialPinDialog, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
+import PendingTables from './components/PendingTables.jsx'
+import SavePendingTableDialog from './components/SavePendingTableDialog.jsx'
 import OrderHistoryMenu from './components/OrderHistoryMenu'
 import Dashboard from './components/Dashboard'
 import Settings from './components/Settings'
@@ -15,7 +17,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale } from './services/posCentralSync.js'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -118,6 +120,7 @@ export default function App() {
   const [productAuthUser, setProductAuthUser] = useState(null)
   const [adminCentralSales, setAdminCentralSales] = useState([])
   const [centralSales, setCentralSales] = useState([])
+  const [pendingTables, setPendingTables] = useState([])
   const [centralOperationalDays, setCentralOperationalDays] = useState([])
   const centralListener = useRef(null)
   const productListener = useRef(null)
@@ -138,6 +141,7 @@ export default function App() {
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
   const settlementCorrectionListener = useRef(null)
+  const pendingTablesListener = useRef(null)
   const [settlementCorrections, setSettlementCorrections] = useState([])
   const saleInFlight = useRef(false)
   const staffMigrationAttempted = useRef(false)
@@ -295,11 +299,13 @@ export default function App() {
       cashboxListener.current?.(); cashboxListener.current = null
       settlementListener.current?.(); settlementListener.current = null
       settlementCorrectionListener.current?.(); settlementCorrectionListener.current = null
+      pendingTablesListener.current?.(); pendingTablesListener.current = null
       productListener.current?.()
       productListener.current = null
       setCentralProducts([])
       setCentralSales([])
       setCentralOperationalDays([])
+      setPendingTables([])
       staffMigrationAttempted.current = false
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setProductAuthUser(isCentralProductManager(user) ? user : null)
@@ -316,6 +322,7 @@ export default function App() {
         settlementListener.current = subscribeCentralSettlements(setSettlements)
         settlementCorrectionListener.current = subscribeCentralSettlementCorrections(setSettlementCorrections)
         operationalDayListener.current = subscribeOperationalDay(setOperationalDay)
+        pendingTablesListener.current = subscribePendingTables(setPendingTables)
         // Migrate the device cache before attaching the listener. Otherwise an
         // initial empty RTDB snapshot could overwrite legacy local expenses.
         void runExpenseCentralSync({ initial: true }).then(() => {
@@ -352,6 +359,7 @@ export default function App() {
       cashboxListener.current?.()
       settlementListener.current?.()
       settlementCorrectionListener.current?.()
+      pendingTablesListener.current?.()
       setAdminCentralSales([])
       setProductAuthUser(null)
     }
@@ -962,6 +970,15 @@ export default function App() {
     setSession(null); setModal(null)
   }, [session])
   const clearCart = useCallback(() => update(o => ({ ...o, items: [], discount: null, table: null, orderType: null, held: false })), [update])
+  const saveCurrentPendingTable = useCallback(async details => {
+    if (!session || !activeOrder.items.length) return false
+    const day = await readOpenOperationalDay()
+    if (!day || day.status !== 'open') throw new Error('يجب بدء اليوم التشغيلي أولاً.')
+    await savePendingTable({ ...details, items: activeOrder.items, subtotal, discount: activeDiscount, total, businessDate: day.businessDate, operationalDayId: day.id, cashierName: session.name || session.shiftName || '', cashierId: session.cashierId || session.shiftId || '', orderType: activeOrder.orderType })
+    setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
+    setModal(null)
+    return true
+  }, [session, activeOrder, subtotal, activeDiscount, total, active])
   const activateKiosk = useCallback(async code => {
     setKioskActivationBusy(true)
     setKioskActivationError('')
@@ -1032,7 +1049,7 @@ export default function App() {
       )}
 
       {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
-        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} onPrepareEnd={prepareEndOperationalDay} onPrepareStart={prepareStartOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onSetOpeningCashBalance={handleSetOpeningCashBalance} onEndOperationalDay={handleEndOperationalDay} onReadDiagnostic={readDiagnostic} />
+        <Dashboard onNavigate={requestView} onLogout={logout} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTables.filter(row => row.status === 'open').length} onPrepareEnd={prepareEndOperationalDay} onPrepareStart={prepareStartOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onSetOpeningCashBalance={handleSetOpeningCashBalance} onEndOperationalDay={handleEndOperationalDay} onReadDiagnostic={readDiagnostic} />
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
@@ -1054,6 +1071,7 @@ export default function App() {
           onClose={() => setCurrentView('dashboard')}
         />
       )}
+      {currentView === 'pending-tables' && (session || adminReady) && <PendingTables tables={pendingTables} session={session} onClose={() => setCurrentView('dashboard')} onPay={payPendingTable} onEdit={updatePendingTable} onTransition={transitionPendingTable} />}
 
       {currentView === 'pos' && session && (
         <div className="pos-body">
@@ -1063,6 +1081,7 @@ export default function App() {
             removeItem={removeItem}
             onEdit={i => (setSelected(i), setModal('options'))}
             onContinue={() => setModal('orderType')}
+            onSavePending={() => setModal('save-pending-table')}
             onHold={hold}
             onDiscount={() => setModal('discount')}
             onClear={() => setModal('confirm-clear')}
@@ -1146,6 +1165,7 @@ export default function App() {
       {modal === 'financial-pin' && <FinancialPinDialog staff={staff} onClose={() => { setFinancialPinTarget(null); setModal(null) }} onUnlock={unlockFinancialView} />}
       {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>{operationalDayError ? 'تعذر إكمال البيع' : 'يجب بدء اليوم التشغيلي أولاً'}</h2><p>{operationalDayError || 'لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.'}</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => { setModal(null); setOperationalDayError('') }}>رجوع</button><button type="button" className="primary-action" onClick={() => { setModal(null); setOperationalDayError(''); setCurrentView('dashboard') }}>الانتقال إلى بدء اليوم</button></div></div></div>}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
+      {modal === 'save-pending-table' && <SavePendingTableDialog total={total} session={session} onClose={() => setModal(null)} onSave={saveCurrentPendingTable} />}
       {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}
       {modal === 'options' && <ProductOptions product={selected} onClose={() => setModal(null)} onAdd={addProduct} />}
       {modal === 'variants' && selected && <VariantModal product={selected} variants={selected.variantProducts || []} onClose={() => setModal(null)} onSelect={child => selectVariant(selected, child)} />}

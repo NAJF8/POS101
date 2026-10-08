@@ -114,6 +114,7 @@ const authorizationCache = new Map()
 const tokenClaimsCache = new Map()
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
+const pendingTablesRef = () => ref(db, 'pos101_pending_tables')
 const productsRef = () => ref(db, 'pos101_products')
 const operationalDaysRef = () => ref(db, 'pos101_operational_days')
 const expensesRef = () => ref(db, 'pos101_expenses')
@@ -593,6 +594,113 @@ export const updateCentralSale = async (sale, changes = {}) => {
   if (index >= 0) { local[index] = saved; writeSales(local); dispatchUpdated() }
   window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: saved }))
   return saved
+}
+
+// Pending tables are a separate operational ledger. They must never be sent
+// through the completed-sales queue until the cashier explicitly collects a
+// payment. Every mutating operation reads its canonical node back.
+const pendingTableIdOf = table => String(table?.tabId || table?.id || '').trim()
+const pendingTableStatus = new Set(['open', 'paid', 'cancelled', 'unpaid_lost'])
+const pendingTableValues = snapshot => snapshot.exists()
+  ? Object.entries(snapshot.val() || {}).map(([id, value]) => ({ ...value, tabId: String(value?.tabId || id), id: String(value?.id || value?.tabId || id) }))
+  : []
+const pendingTableAudit = ({ id, user, action, before = null, after = null, reason = '', businessDate = '' }) => financialAuditPayload({ id, user, action, entityType: 'pending_table', entityId: id, before, after, reason, businessDate })
+
+export const readPendingTables = async () => {
+  await financialUser(false)
+  return pendingTableValues(await get(pendingTablesRef()))
+}
+
+export const subscribePendingTables = (callback, onError = error => console.error('PENDING_TABLES_SUBSCRIBE_ERROR', error)) => {
+  if (!configured || !db || !isOperationalDayUser(auth?.currentUser)) return () => {}
+  return onValue(pendingTablesRef(), snapshot => callback(pendingTableValues(snapshot)), onError)
+}
+
+export const savePendingTable = async ({ customerName, tableNumber = '', phone = '', note = '', items = [], subtotal = 0, discount = 0, total = 0, businessDate = '', operationalDayId = '', cashierName = '', cashierId = '', orderType = '' } = {}) => {
+  const user = await financialUser(true)
+  const name = String(customerName || '').trim()
+  if (!name) throw Object.assign(new Error('اسم الزبون مطلوب.'), { code: 'CUSTOMER_NAME_REQUIRED' })
+  if (!Array.isArray(items) || !items.length) throw Object.assign(new Error('أضف منتجاً واحداً على الأقل.'), { code: 'PENDING_TABLE_ITEMS_REQUIRED' })
+  const tabId = `tab-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  const now = Date.now()
+  const payload = {
+    tabId, id: tabId, status: 'open', customerName: name, tableNumber: String(tableNumber || '').trim(), phone: String(phone || '').trim(), note: String(note || '').trim(),
+    openedAt: now, businessDate: String(businessDate || ''), operationalDayId: String(operationalDayId || ''), cashierName: String(cashierName || user.displayName || user.email || '').trim(), cashierId: String(cashierId || '').trim(), orderType: String(orderType || ''),
+    items: items.map(item => ({ ...item, quantity: Number(item.quantity || 0), price: Number(item.price || item.unitPrice || 0), lineTotal: Number(item.price || item.unitPrice || 0) * Number(item.quantity || 0) })), subtotal: Number(subtotal || 0), discount: Number(discount || 0), total: Number(total || 0), createdByUid: user.uid, updatedAt: now,
+  }
+  assertJsonNumbers(payload, 'pendingTable')
+  await set(ref(db, `pos101_pending_tables/${tabId}`), payload)
+  const back = await get(ref(db, `pos101_pending_tables/${tabId}`))
+  if (!back.exists() || back.val()?.status !== 'open' || back.val()?.customerName !== name) throw Object.assign(new Error('تعذر التحقق من حفظ الطاولة المعلقة.'), { code: 'PENDING_TABLE_READBACK_FAILED' })
+  return back.val()
+}
+
+export const updatePendingTable = async (table, changes = {}) => {
+  const user = await financialUser(true)
+  const id = pendingTableIdOf(table)
+  if (!id) throw Object.assign(new Error('معرف الطاولة المعلقة غير موجود.'), { code: 'PENDING_TABLE_ID_REQUIRED' })
+  const currentSnapshot = await get(ref(db, `pos101_pending_tables/${id}`))
+  if (!currentSnapshot.exists()) throw Object.assign(new Error('الطاولة المعلقة غير موجودة.'), { code: 'PENDING_TABLE_NOT_FOUND' })
+  const current = { ...currentSnapshot.val(), tabId: id, id }
+  if (current.status !== 'open') throw Object.assign(new Error('يمكن تعديل الطاولة المعلقة المفتوحة فقط.'), { code: 'PENDING_TABLE_NOT_OPEN' })
+  const items = Array.isArray(changes.items) ? changes.items.map(item => ({ ...item, quantity: Number(item.quantity || 0), price: Number(item.price || item.unitPrice || 0), lineTotal: Number(item.price || item.unitPrice || 0) * Number(item.quantity || 0) })) : current.items
+  const subtotal = items.reduce((sum, item) => sum + Number(item.lineTotal || Number(item.price || 0) * Number(item.quantity || 0)), 0)
+  const discount = Number(changes.discount ?? current.discount ?? 0)
+  const next = { ...current, ...changes, items, subtotal, discount, total: Math.max(0, subtotal - discount), updatedAt: Date.now(), updatedByUid: user.uid, updatedByName: user.displayName || user.email || '' }
+  delete next.reason
+  const auditId = `audit-pending-table-edit-${safeKey(id)}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  await update(ref(db), { [`pos101_pending_tables/${id}`]: next, [`${auditPath}/${auditId}`]: pendingTableAudit({ id: auditId, user, action: 'pending_table_edit', before: current, after: next, reason: String(changes.auditReason || '').trim(), businessDate: current.businessDate || '' }) })
+  const [back, auditBack] = await Promise.all([get(ref(db, `pos101_pending_tables/${id}`)), get(financialPath(`${auditPath}/${auditId}`))])
+  if (!back.exists() || !auditBack.exists()) throw Object.assign(new Error('تعذر التحقق من تعديل الطاولة المعلقة وسجل التدقيق.'), { code: 'PENDING_TABLE_EDIT_READBACK_FAILED' })
+  return back.val()
+}
+
+export const transitionPendingTable = async (table, { status, reason, confirmationName, confirmationCode = '' } = {}) => {
+  const user = await staffUser(true)
+  const id = pendingTableIdOf(table)
+  if (!pendingTableStatus.has(status) || status === 'open' || status === 'paid') throw Object.assign(new Error('حالة الطاولة غير صالحة لهذه العملية.'), { code: 'PENDING_TABLE_STATUS_INVALID' })
+  if (!String(reason || '').trim()) throw Object.assign(new Error('السبب مطلوب.'), { code: 'PENDING_TABLE_REASON_REQUIRED' })
+  const currentSnapshot = await get(ref(db, `pos101_pending_tables/${id}`))
+  if (!currentSnapshot.exists()) throw Object.assign(new Error('الطاولة المعلقة غير موجودة.'), { code: 'PENDING_TABLE_NOT_FOUND' })
+  const current = currentSnapshot.val()
+  if (current.status !== 'open') throw Object.assign(new Error('تمت معالجة هذه الطاولة مسبقاً.'), { code: 'PENDING_TABLE_ALREADY_PROCESSED' })
+  const confirmation = String(confirmationName || '').trim()
+  const staffRows = await readCentralStaff()
+  const identityMatches = confirmation && (confirmation === String(user.displayName || '').trim() || confirmation === String(user.email || '').trim() || staffRows.some(row => confirmation === String(row.name || '').trim() || confirmation === String(row.code || '').trim()))
+  if (!identityMatches) throw Object.assign(new Error('تأكيد الاسم/الكود غير مطابق للمستخدم الحالي.'), { code: 'PENDING_TABLE_CONFIRMATION_INVALID' })
+  const now = Date.now()
+  const next = { ...current, id, tabId: id, status, statusReason: String(reason).trim(), updatedAt: now, [`${status}At`]: now, [`${status}ByUid`]: user.uid, [`${status}ByName`]: user.displayName || user.email || '' }
+  const auditId = `audit-pending-table-${status}-${safeKey(id)}-${now}-${crypto.randomUUID().slice(0, 8)}`
+  await update(ref(db), { [`pos101_pending_tables/${id}`]: next, [`${auditPath}/${auditId}`]: pendingTableAudit({ id: auditId, user, action: `pending_table_${status}`, before: current, after: next, reason: String(reason).trim(), businessDate: current.businessDate || '' }) })
+  const [back, auditBack] = await Promise.all([get(ref(db, `pos101_pending_tables/${id}`)), get(financialPath(`${auditPath}/${auditId}`))])
+  if (!back.exists() || back.val()?.status !== status || !auditBack.exists()) throw Object.assign(new Error('تعذر التحقق من تحديث حالة الطاولة وسجل التدقيق.'), { code: 'PENDING_TABLE_STATUS_READBACK_FAILED' })
+  return back.val()
+}
+
+export const payPendingTable = async (table, { paymentMethod = 'cash', sellerName = '' } = {}) => {
+  const user = await financialUser(true)
+  const id = pendingTableIdOf(table)
+  const currentSnapshot = await get(ref(db, `pos101_pending_tables/${id}`))
+  if (!currentSnapshot.exists()) throw Object.assign(new Error('الطاولة المعلقة غير موجودة.'), { code: 'PENDING_TABLE_NOT_FOUND' })
+  const current = currentSnapshot.val()
+  if (current.status === 'paid' && current.linkedSaleId) return { pendingTable: current, sale: (await get(ref(db, `pos101_sales/${current.linkedSaleId}`))).val(), duplicate: true }
+  if (current.status !== 'open') throw Object.assign(new Error('لا يمكن تحصيل طاولة غير مفتوحة.'), { code: 'PENDING_TABLE_NOT_OPEN' })
+  const day = await readOpenOperationalDay()
+  if (!day?.id || day.status !== 'open') throw Object.assign(new Error('يجب وجود يوم تشغيلي مفتوح عند التحصيل.'), { code: 'OPERATIONAL_DAY_REQUIRED' })
+  const saleId = String(current.linkedSaleId || `sale-from-${id}`)
+  const existingSale = await get(ref(db, `pos101_sales/${saleId}`))
+  const centralOrder = existingSale.exists() ? { orderNumber: existingSale.val().orderNumber } : await allocateCentralOrderNumber({ operationalDayId: day.id, businessDate: day.businessDate })
+  const sale = existingSale.exists() ? existingSale.val() : {
+    saleId, id: saleId, operationKey: `pos101:${saleId}`, orderNumber: centralOrder.orderNumber, cashierId: current.cashierId || '', cashierNameSnapshot: String(sellerName || current.cashierName || user.displayName || user.email || ''), seller: String(sellerName || current.cashierName || user.displayName || user.email || ''), createdAt: Date.now(), businessDate: day.businessDate, operationalDayId: day.id, subtotal: Number(current.subtotal || 0), discount: Number(current.discount || 0), total: Number(current.total || 0), paymentMethod, payment: { method: paymentMethod }, items: current.items || [], order: { ...current, items: current.items || [] }, source: 'pending_table', pendingTableId: id,
+  }
+  const now = Date.now()
+  const paid = { ...current, id, tabId: id, status: 'paid', linkedSaleId: saleId, paidAt: current.paidAt || now, paidByUid: user.uid, paidByName: user.displayName || user.email || '', paymentMethod: sale.paymentMethod || paymentMethod, updatedAt: now }
+  const auditId = `audit-pending-table-paid-${safeKey(id)}`
+  const updates = { [`pos101_sales/${saleId}`]: sale, [`pos101_pending_tables/${id}`]: paid, [`${auditPath}/${auditId}`]: pendingTableAudit({ id: auditId, user, action: 'pending_table_paid', before: current, after: paid, businessDate: current.businessDate || day.businessDate || '' }) }
+  await update(ref(db), updates)
+  const [saleBack, pendingBack, auditBack] = await Promise.all([get(ref(db, `pos101_sales/${saleId}`)), get(ref(db, `pos101_pending_tables/${id}`)), get(financialPath(`${auditPath}/${auditId}`))])
+  if (!saleBack.exists() || !pendingBack.exists() || pendingBack.val()?.status !== 'paid' || pendingBack.val()?.linkedSaleId !== saleId || !auditBack.exists()) throw Object.assign(new Error('فشل read-back لتحصيل الطاولة المعلقة.'), { code: 'PENDING_TABLE_PAYMENT_READBACK_FAILED' })
+  return { pendingTable: pendingBack.val(), sale: saleBack.val(), duplicate: false }
 }
 
 export const correctCentralSaleItems = async (sale, changes = {}) => {
