@@ -59,10 +59,36 @@ export const parseBackupRecoveryInput = input => {
   const queueSales = syncQueueItems
     .map(entry => ({ ...(entry?.sale || entry?.payload || entry), businessDate: (entry?.sale || entry?.payload || entry)?.businessDate || sourceBusinessDate, operationalDayId: (entry?.sale || entry?.payload || entry)?.operationalDayId || sourceOperationalDayId }))
     .filter(row => row && typeof row === 'object' && (saleIdOf(row) || row.orderNumber != null || row.total != null))
-  const sales = parsedSales.length ? parsedSales : parseBackupSales({ sales: queueSales })
+  const sales = parseBackupSales({ sales: [...parsedSales, ...queueSales] })
   const businessDate = String(sourceBusinessDate || sales.find(sale => sale.businessDate)?.businessDate || '').trim()
   const operationalDayId = String(sourceOperationalDayId || sales.find(sale => sale.operationalDayId)?.operationalDayId || '').trim()
   return { sales, syncQueueItems, businessDate, operationalDayId, source: parsed }
+}
+
+// Keep one canonical payload per saleId, while retaining queue duplicates for
+// the repair report. A duplicate is only safe to resolve after Firebase
+// readback (or a successful one-time recovery) proves the canonical sale.
+export const buildRecoveryCandidates = ({ sales = [], syncQueueItems = [] } = {}) => {
+  const bySaleId = new Map()
+  const invalidQueueItems = []
+  const add = (raw, source = 'backup') => {
+    const row = normalizeBackupSale(raw)
+    const id = saleIdOf(row)
+    if (!id) {
+      if (source === 'queue') invalidQueueItems.push({ item: raw, classification: 'INVALID_QUEUE_MANUAL_REVIEW', reason: 'لا يوجد saleId قابل للاسترداد.' })
+      return
+    }
+    const current = bySaleId.get(id)
+    if (!current || (!current.operationKey && row.operationKey) || (!current.items?.length && row.items?.length)) {
+      bySaleId.set(id, { ...row, candidateSources: [source], queueDuplicateCount: current?.queueDuplicateCount || 0 })
+      return
+    }
+    const sources = [...new Set([...(current.candidateSources || []), source])]
+    bySaleId.set(id, { ...current, candidateSources: sources, queueDuplicateCount: current.queueDuplicateCount + (source === 'queue' ? 1 : 0) })
+  }
+  ;(Array.isArray(sales) ? sales : []).forEach(row => add(row, 'sales'))
+  ;(Array.isArray(syncQueueItems) ? syncQueueItems : []).forEach(entry => add(entry?.sale || entry?.payload || entry, 'queue'))
+  return { candidates: [...bySaleId.values()], invalidQueueItems }
 }
 
 export const summarizeBackupSales = sales => {
@@ -94,15 +120,15 @@ export const classifyBackupSale = ({ sale, centralSales = [], openDay = null, qu
   const sameOrder = centralSales.filter(remote => String(remote?.orderNumber ?? '') === String(row?.orderNumber ?? '')
     && text(remote?.businessDate) === row.businessDate
     && text(remote?.operationalDayId || remote?.operational_day_id) === row.operationalDayId)
-  const exact = sameId.find(remote => salePayloadMatches(row, remote)) || sameOperation.find(remote => salePayloadMatches(row, remote))
+  const exact = sameId.find(remote => salePayloadMatches(row, remote))
   const invalid = !isSaleSyncEligible(row) || row.status === 'voided' || row.status === 'cancelled'
   const alreadySynced = row.syncStatus === 'synced' || row.status === 'synced' || row.centralVerified === true
   const quarantined = id === KNOWN_MANUAL_REVIEW_SALE_1056 || quarantinedSaleIds.includes(id)
   let classification = 'MISSING_SAFE_TO_RECOVER'
   let reason = 'لم يوجد saleId أو operationKey أو رقم طلب متعارض، واليوم التشغيلي مفتوح.'
   if (quarantined) { classification = 'SKIP'; reason = 'المبيعة محجوزة للمراجعة اليدوية.' }
+  else if (exact) { classification = 'EXISTS_EXACT_MATCH'; reason = 'المبيعة المركزية تطابق saleId والبصمة المالية.' }
   else if (invalid) { classification = 'SKIP'; reason = 'payload غير صالح أو المبيعة مبطلة.' }
-  else if (exact) { classification = 'EXISTS_EXACT_MATCH'; reason = 'المبيعة المركزية تطابق الهوية والبصمة المالية.' }
   else if (alreadySynced) { classification = 'SKIP'; reason = 'المبيعة معلّمة محلياً كمزامنة؛ لا يجوز رفعها دون مراجعة.' }
   else if (sameId.length) { classification = 'CONFLICT'; reason = 'saleId موجود مركزياً لكن payload مختلف.' }
   else if (sameOperation.length || sameOrder.length) { classification = 'CONFLICT'; reason = sameOperation.length ? 'operationKey متعارض.' : 'رقم الطلب متعارض في نفس اليوم التشغيلي.' }

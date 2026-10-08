@@ -38,7 +38,7 @@ import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, ret
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
 import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
-import { classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
+import { buildRecoveryCandidates, classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -1376,7 +1376,7 @@ const requireAuthenticatedBackupViewer = async () => {
 // Recovery/readback writes stay disabled until the owner explicitly enables
 // this release-gated mode. UI visibility and read-only inspection do not imply
 // permission to mutate Firebase or the cashier ledger.
-export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = false
+export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = true
 
 const readLocalSalesForBackupTool = () => {
   try {
@@ -1386,7 +1386,7 @@ const readLocalSalesForBackupTool = () => {
 }
 
 export const inspectBackupSales = async ({ sales = [] } = {}) => {
-  const normalized = (Array.isArray(sales) ? sales : []).map(normalizeBackupSale)
+  const { candidates: normalized, invalidQueueItems } = buildRecoveryCandidates({ sales, syncQueueItems })
   const localOnly = error => ({
     centralAvailable: false,
     centralCount: null,
@@ -1509,6 +1509,7 @@ export const runOneClickSyncRepair = async ({
   const recoveredOnce = []
   const conflicts = []
   const skipped = []
+  const invalidQueue = [...invalidQueueItems]
   const resolvedSaleIds = new Set()
   const firebaseWrites = []
 
@@ -1546,8 +1547,10 @@ export const runOneClickSyncRepair = async ({
       id: candidate.saleId,
       saleId: candidate.saleId,
       recoveredFromBackup: true,
-      recoveryMode: 'one-click-sync-repair',
+      recoveryMode: 'one-click-safe-sync-dedupe',
       recoverySourceFile: String(sourceFile || ''),
+      sourceFile: String(sourceFile || ''),
+      recoveredBy: actor,
       recoveredByName: actor,
       recoveredAt,
       recoveryReason: reason,
@@ -1562,7 +1565,7 @@ export const runOneClickSyncRepair = async ({
       continue
     }
     const auditId = `audit-one-click-sync-repair-${candidate.saleId}-${recoveredAt}`
-    const audit = financialAuditPayload({ id: auditId, user, action: 'one_click_sync_repair', entityType: 'sale', entityId: candidate.saleId, after: { saleId: candidate.saleId, orderNumber: candidate.orderNumber, total: candidate.total, recoveryMode: 'one-click-sync-repair', sourceFile: String(sourceFile || '') }, reason, businessDate: candidate.businessDate })
+    const audit = financialAuditPayload({ id: auditId, user, action: 'one_click_sync_repair', entityType: 'sale', entityId: candidate.saleId, after: { saleId: candidate.saleId, orderNumber: candidate.orderNumber, total: candidate.total, recoveryMode: 'one-click-safe-sync-dedupe', sourceFile: String(sourceFile || ''), recoveredBy: actor }, reason, businessDate: candidate.businessDate })
     await set(financialPath(`${auditPath}/${auditId}`), audit)
     const auditBack = await get(financialPath(`${auditPath}/${auditId}`))
     if (!auditBack.exists()) throw Object.assign(new Error(`تعذر قراءة سجل التدقيق للطلب ${candidate.orderNumber || candidate.saleId}.`), { code: 'BACKUP_RECOVERY_AUDIT_READBACK_FAILED' })
@@ -1576,12 +1579,15 @@ export const runOneClickSyncRepair = async ({
   const rawQueueValue = readRawSaleQueue()
   const rawQueue = Array.isArray(rawQueueValue) ? rawQueueValue : []
   const queueActions = []
+  const queueDuplicateCounts = new Map()
   const retainedQueue = rawQueue.filter(entry => {
     const type = String(entry?.type || entry?.kind || '').toLowerCase()
     const isSaleEntry = Boolean(entry?.sale || type === 'sale' || type === 'sales' || type === 'order')
     const id = queueEntrySaleId(entry)
     if (!isSaleEntry || !id || !resolvedSaleIds.has(id)) return true
-    queueActions.push({ saleId: id, action: 'resolved-after-readback' })
+    const removedCount = (queueDuplicateCounts.get(id) || 0) + 1
+    queueDuplicateCounts.set(id, removedCount)
+    queueActions.push({ saleId: id, action: 'resolved-after-readback', reason: 'SAME_SALE_ID_DUPLICATE_QUEUE_ENTRIES' })
     return false
   })
   const queueCleanupReport = {
@@ -1594,6 +1600,8 @@ export const runOneClickSyncRepair = async ({
     activeQueueBefore: rawQueue.length,
     activeQueueAfter: retainedQueue.length,
     actions: queueActions,
+    duplicateResolutions: [...queueDuplicateCounts.entries()].map(([saleId, removedCount]) => ({ reason: 'SAME_SALE_ID_DUPLICATE_QUEUE_ENTRIES', saleId, removedCount })),
+    invalidQueueItems: invalidQueue,
     retainedUnmatched: retainedQueue.length,
     firebaseWrites: firebaseWrites,
     noBlindDelete: true,
@@ -1619,6 +1627,7 @@ export const runOneClickSyncRepair = async ({
     queueItemsResolved: queueActions.length,
     conflicts,
     skipped,
+    invalidQueueItems: invalidQueue,
     activeSyncQueueLengthAfter: retainedQueue.length,
     endDayReady,
     currentDayFinalCount: finalSummary.count,

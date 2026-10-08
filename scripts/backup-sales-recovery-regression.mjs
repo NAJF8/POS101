@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { classifyBackupSale, ORDER_1309_SALE_ID, parseBackupRecoveryInput, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
+import { buildRecoveryCandidates, classifyBackupSale, ORDER_1309_SALE_ID, parseBackupRecoveryInput, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
 import { canonicalSalesForOperationalDay, summarizeCanonicalSales } from '../src/services/canonicalSales.js'
 import { buildEndDayDiagnostic } from '../src/services/endDayDiagnostic.js'
 
@@ -24,6 +24,12 @@ assert.equal(queueOnly.syncQueueItems.length, 1)
 assert.equal(queueOnly.sales.length, 1)
 assert.equal(queueOnly.sales[0].orderNumber, 1410)
 assert.equal(queueOnly.sales[0].businessDate, '2026-10-08')
+const combined = parseBackupRecoveryInput(JSON.stringify({ sales: [sale({ saleId: 'combined' })], syncQueue: [{ type: 'sale', saleId: 'queue-only', orderNumber: 1411, total: 1000, items: [{ id: 'x', quantity: 1, price: 1000 }], businessDate: '2026-10-08', operationalDayId: 'day-1' }] }))
+assert.equal(combined.sales.length, 2)
+const candidates = buildRecoveryCandidates({ sales: [sale({ saleId: 'same' })], syncQueueItems: [{ type: 'sale', saleId: 'same', sale: sale({ saleId: 'same' }) }, { type: 'sale', orderNumber: 999 }] })
+assert.equal(candidates.candidates.length, 1)
+assert.equal(candidates.candidates[0].queueDuplicateCount, 1)
+assert.equal(candidates.invalidQueueItems.length, 1)
 
 const day = { id: 'day-1', operationalDayId: 'day-1', businessDate: '2026-10-08', status: 'open' }
 const exact = classifyBackupSale({ sale: sale(), centralSales: [sale({ status: 'synced', syncStatus: 'synced' })], openDay: day })
@@ -65,15 +71,17 @@ assert.match(app, /backupRecoveryVisible = Boolean\(session \|\| adminReady \|\|
 assert.match(app, /canAccessBackupRecovery=\{backupRecoveryVisible\}/)
 assert.match(app, /canRecover=\{backupRecoveryCanWrite\}/)
 assert.match(dashboard, /فحص واسترداد نسخة المبيعات/)
+assert.match(dashboard, /\{ id: 'backup-recovery', title: 'فحص واسترداد نسخة المبيعات'/)
 assert.match(settings, /onNavigate\('backup-recovery'\)/)
+assert.match(settings, /<section className="settings-card backup-recovery-entry">/)
 assert.doesNotMatch(app, /adminReady && !session && currentView === 'backup-recovery'/)
-assert.match(app, /غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية/)
+assert.match(component, /تم الفحص، لكن الإصلاح يحتاج صلاحية إدارة/) 
 assert.match(app, /<SalesBackupRecovery adminUser=/)
 assert.match(component, /الفحص وقراءة ملف النسخة متاحان للجميع ولا يكتبان أي بيانات/)
 assert.match(component, /الإصلاح والاسترداد يتطلبان موافقة الإدارة ولا يعملان تلقائيًا/)
 assert.match(component, /نسخ تقرير الفحص/)
 assert.match(component, /navigator\.clipboard\.writeText/)
-assert.match(component, /إصلاح المزامنة تلقائيًا/)
+assert.match(component, /إصلاح المزامنة وتنظيف التكرار/)
 assert.match(component, /تأكيد إصلاح المزامنة/)
 assert.match(component, /onRepair/)
 assert.match(component, /recoveryForm\.name/)
@@ -90,12 +98,12 @@ assert.match(app, /canReadback=\{adminReady\}/)
 assert.match(service, /Number\(expected\.orderNumber\) !== ORDER_1309_NUMBER/)
 assert.match(service, /expected\.saleId !== ORDER_1309_SALE_ID/)
 assert.match(service, /ORDER_1309_READBACK_ONLY/)
-assert.match(service, /export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = false/)
-assert.match(service, /OWNER_APPROVAL_REQUIRED/)
+assert.match(service, /export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = true/)
 assert.match(service, /export const runOneClickSyncRepair/)
-assert.match(service, /recoveryMode: 'one-click-sync-repair'/)
+assert.match(service, /recoveryMode: 'one-click-safe-sync-dedupe'/)
 assert.match(service, /pos101\.queueCleanupReport/)
 assert.match(service, /resolved-after-readback/)
+assert.match(service, /SAME_SALE_ID_DUPLICATE_QUEUE_ENTRIES/)
 assert.match(service, /KNOWN_MANUAL_REVIEW_SALE_1056/)
 assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
 assert.match(service, /pos101_operational_days/)
