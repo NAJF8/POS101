@@ -7,6 +7,7 @@ const rowsOf = value => Array.isArray(value) ? value : value && typeof value ===
 
 export const ORDER_1309_SALE_ID = '809aa958-256d-44a8-83bd-33c8b82dca56'
 export const ORDER_1309_NUMBER = 1309
+export const KNOWN_CLOSED_BUSINESS_DATE = '2026-10-07'
 
 const parseMaybeJson = value => {
   if (typeof value !== 'string') return value
@@ -124,9 +125,11 @@ export const classifyBackupSale = ({ sale, centralSales = [], openDay = null, qu
   const invalid = !isSaleSyncEligible(row) || row.status === 'voided' || row.status === 'cancelled'
   const alreadySynced = row.syncStatus === 'synced' || row.status === 'synced' || row.centralVerified === true
   const quarantined = id === KNOWN_MANUAL_REVIEW_SALE_1056 || quarantinedSaleIds.includes(id)
+  const closedRecoveryDay = row.businessDate === KNOWN_CLOSED_BUSINESS_DATE
   let classification = 'MISSING_SAFE_TO_RECOVER'
   let reason = 'لم يوجد saleId أو operationKey أو رقم طلب متعارض، واليوم التشغيلي مفتوح.'
   if (quarantined) { classification = 'SKIP'; reason = 'المبيعة محجوزة للمراجعة اليدوية.' }
+  else if (closedRecoveryDay && !exact) { classification = 'CONFLICT'; reason = 'يوم 2026-10-07 مغلق؛ لا كتابة أو تنظيف تلقائي.' }
   else if (exact) { classification = 'EXISTS_EXACT_MATCH'; reason = 'المبيعة المركزية تطابق saleId والبصمة المالية.' }
   else if (invalid) { classification = 'SKIP'; reason = 'payload غير صالح أو المبيعة مبطلة.' }
   else if (alreadySynced) { classification = 'SKIP'; reason = 'المبيعة معلّمة محلياً كمزامنة؛ لا يجوز رفعها دون مراجعة.' }
