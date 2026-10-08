@@ -659,7 +659,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
       const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)
-      const { grossSales, discounts, expenses: expensesTotal, cashboxExpenses, managementExpenses, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll, cashSales, cashboxWithdrawals, managementWithdrawals, withdrawals, deposits, finalAfterAllSettlements } = summary
+      const { grossSales, discounts, expenses: expensesTotal, cashboxExpenses, managementExpenses, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll, cashSales, electronicSales, cashboxWithdrawals, managementWithdrawals, withdrawals, deposits, finalAfterAllSettlements, finalNetSaleWithoutOpening, cashOnlyNetWithoutOpening } = summary
       const actualCashMissingLabel = selectedClosedDay ? 'غير مسجل في هذا التقرير القديم' : ACTUAL_CASH_PENDING
       const actualCashValue = hasActualCash(summary.actualCash) ? format(toMoneyNumber(summary.actualCash, 0)) : actualCashMissingLabel
       const actualDifferenceValue = summary.endDayDifference == null ? actualCashMissingLabel : `${format(toMoneyNumber(summary.endDayDifference, 0))} ${summary.endDayDifference === 0 ? 'مطابق' : summary.endDayDifference < 0 ? 'نقص' : 'زيادة'}`
@@ -689,35 +689,45 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         {/* ── Summary Table ── */}
         <table className="print-table report-summary">
           <tbody>
+            <tr className="summary-section"><th colSpan="2">ملخص المبيعات</th></tr>
             <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(grossSales)}</td></tr>
             <tr><td>إجمالي الخصومات</td><td className="number-cell">{format(discounts)}</td></tr>
-            <tr><td>إجمالي المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
-            <tr><td>مصاريف من الصندوق</td><td className="number-cell">{format(cashboxExpenses)}</td></tr>
-            <tr><td>مصاريف من الإدارة</td><td className="number-cell">{format(managementExpenses)}</td></tr>
-            <tr><td>صافي البيع بعد الخصومات</td><td className="number-cell">{format(netAfterDiscount)}</td></tr>
-            <tr><td>صافي البيع بعد المصاريف</td><td className="number-cell">{format(netAfterExpenses)}</td></tr>
-            <tr className="summary-highlight"><td>صافي البيع بعد المصاريف والخصومات</td><td className="number-cell">{format(netAfterExpensesAndDiscount)}</td></tr>
-            <tr><td>صافي البيع بدون الإلكتروني والمصاريف والخصومات</td><td className="number-cell">{format(netCashAfterAll)}</td></tr>
-            <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(totalServiceCharge)}</td></tr>
-            <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
-            <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
-            <tr><td>الإلكتروني</td><td className="number-cell">{format(electronicTotal)}</td></tr>
-            <tr><td>الرصيد الافتتاحي</td><td className="number-cell">{summary.openingCashBalance == null ? 'غير متوفر' : format(summary.openingCashBalance)}</td></tr>
-            <tr><td>مبيعات الكاش</td><td className="number-cell">{format(summary.cashSales)}</td></tr>
-            <tr><td>المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
-            <tr><td>السحوبات</td><td className="number-cell">{format(withdrawals)}</td></tr>
-            <tr className="summary-highlight"><td>الرصيد المتوقع بالصندوق</td><td className="number-cell">{summary.expectedClosingCash == null ? 'غير متوفر' : format(summary.expectedClosingCash)}</td></tr>
+            <tr className="summary-highlight"><td>صافي البيع بعد الخصومات</td><td className="number-cell">{format(netAfterDiscount)}</td></tr>
+            <tr className="summary-section"><th colSpan="2">طرق الدفع</th></tr>
+            <tr><td>النقدي</td><td className="number-cell">{format(toMoneyNumber(cashSales, 0))}</td></tr>
+            <tr><td>الإلكتروني</td><td className="number-cell">{format(toMoneyNumber(electronicSales, 0))}</td></tr>
+            <tr className="summary-section"><th colSpan="2">الصندوق</th></tr>
+            <tr><td>الرصيد الافتتاحي</td><td className="number-cell">{summary.openingCashBalance == null ? 'غير متوفر' : format(toMoneyNumber(summary.openingCashBalance, 0))}</td></tr>
+            <tr><td>مبيعات الكاش</td><td className="number-cell">{format(toMoneyNumber(cashSales, 0))}</td></tr>
+            <tr><td>المصاريف</td><td className="number-cell">{format(toMoneyNumber(expensesTotal, 0))}</td></tr>
+            <tr><td>السحوبات</td><td className="number-cell">{format(toMoneyNumber(withdrawals, 0))}</td></tr>
+            <tr><td>الإيداعات</td><td className="number-cell">{format(toMoneyNumber(deposits, 0))}</td></tr>
+            <tr className="summary-highlight"><td>الرصيد المتوقع بالصندوق</td><td className="number-cell">{summary.expectedClosingCash == null ? 'غير متوفر' : format(toMoneyNumber(summary.expectedClosingCash, 0))}</td></tr>
+            <tr className="summary-section"><th colSpan="2">الجرد / الإغلاق</th></tr>
             <tr><td>الكاش الفعلي</td><td className="number-cell">{actualCashValue}</td></tr>
             <tr><td>الفرق</td><td className="number-cell">{actualDifferenceValue}</td></tr>
+            <tr className="summary-section"><th colSpan="2">الصافي النهائي</th></tr>
+            <tr><td>صافي الكاش بعد المصاريف والسحوبات بدون الرصيد الافتتاحي</td><td className="number-cell">{format(toMoneyNumber(cashOnlyNetWithoutOpening, 0))}</td></tr>
+            <tr className="summary-highlight"><td>صافي البيع النهائي بعد كلشي بدون الرصيد الافتتاحي</td><td className="number-cell">{format(toMoneyNumber(finalNetSaleWithoutOpening, 0))}</td></tr>
+          </tbody>
+        </table>
+
+        <h3>تفاصيل إضافية</h3>
+        <table className="print-table report-summary">
+          <tbody>
+            <tr><td>صافي البيع بعد المصاريف</td><td className="number-cell">{format(toMoneyNumber(netAfterExpenses, 0))}</td></tr>
+            <tr><td>صافي البيع بعد المصاريف والخصومات</td><td className="number-cell">{format(toMoneyNumber(netAfterExpensesAndDiscount, 0))}</td></tr>
+            <tr><td>صافي البيع بدون الإلكتروني والمصاريف والخصومات</td><td className="number-cell">{format(toMoneyNumber(netCashAfterAll, 0))}</td></tr>
             <tr><td>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي</td><td className="number-cell">{netDrawerMovementValue}</td></tr>
             <tr><td>صافي مبيعات اليوم النقدية</td><td className="number-cell">{netCashSalesValue}</td></tr>
             <tr><td>فرق المبيعات النقدية</td><td className="number-cell">{cashSalesDifferenceValue}</td></tr>
-            <tr><td>سحوبات من الصندوق</td><td className="number-cell">{format(cashboxWithdrawals)}</td></tr>
-            <tr><td>سحوبات من الإدارة</td><td className="number-cell">{format(managementWithdrawals)}</td></tr>
-            <tr><td>إجمالي السحوبات</td><td className="number-cell">{format(toMoneyNumber(withdrawals, 0))}</td></tr>
-            <tr><td>الإيداعات</td><td className="number-cell">{format(deposits)}</td></tr>
-            <tr className="summary-highlight"><td>المجموع بعد كل التصفيات</td><td className="number-cell">{format(finalAfterAllSettlements)}</td></tr>
-            <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(stats.count)}</td></tr>
+            <tr><td>مصاريف من الصندوق</td><td className="number-cell">{format(toMoneyNumber(cashboxExpenses, 0))}</td></tr>
+            <tr><td>مصاريف من الإدارة</td><td className="number-cell">{format(toMoneyNumber(managementExpenses, 0))}</td></tr>
+            <tr><td>سحوبات من الصندوق</td><td className="number-cell">{format(toMoneyNumber(cashboxWithdrawals, 0))}</td></tr>
+            <tr><td>سحوبات من الإدارة</td><td className="number-cell">{format(toMoneyNumber(managementWithdrawals, 0))}</td></tr>
+            <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(toMoneyNumber(totalServiceCharge, 0))}</td></tr>
+            <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
+            <tr><td>المجموع بعد كل التصفيات</td><td className="number-cell">{format(toMoneyNumber(finalAfterAllSettlements, 0))}</td></tr>
           </tbody>
         </table>
 

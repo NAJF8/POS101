@@ -51,6 +51,7 @@
     ,"test:end-day-opening-balance-report": "node scripts/end-day-opening-balance-report-regression.mjs"
     ,"test:report-page-crash": "node scripts/report-page-crash-regression.mjs"
     ,"test:actual-cash-pending-input": "node scripts/actual-cash-pending-input-regression.mjs"
+    ,"test:report-final-net-reorder": "node scripts/report-final-net-reorder-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

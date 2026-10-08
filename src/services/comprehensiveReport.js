@@ -30,6 +30,9 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
   const cashSales = toMoneyNumber(report?.cashSales ?? financial.cashSales, 0)
   const expensesForAnalysis = toMoneyNumber(report?.expenses ?? financial.expenses, 0)
   const withdrawalsForAnalysis = toMoneyNumber(report?.withdrawals ?? financial.withdrawals, 0)
+  const depositsForAnalysis = toMoneyNumber(report?.deposits ?? financial.deposits, 0)
+  const finalNetSaleWithoutOpening = cashSales + electronicSales - expensesForAnalysis - withdrawalsForAnalysis + depositsForAnalysis
+  const cashOnlyNetWithoutOpening = cashSales - expensesForAnalysis - withdrawalsForAnalysis + depositsForAnalysis
   const expectedClosingCash = report
     ? toMoneyNumber(report.expectedClosingCash ?? report.expectedCash ?? (openingCashBalance ?? 0) + cashSales - expensesForAnalysis - withdrawalsForAnalysis, 0)
     : null
@@ -50,6 +53,8 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
     netAfterExpensesAndDiscount,
     netCashAfterAll,
     cashSales,
+    finalNetSaleWithoutOpening,
+    cashOnlyNetWithoutOpening,
     cashboxWithdrawals: financial.cashboxWithdrawals,
     managementWithdrawals: financial.managementWithdrawals,
     withdrawals: financial.withdrawals,
