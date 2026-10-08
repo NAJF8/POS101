@@ -892,7 +892,7 @@ export default function App() {
         // The emergency fallback remains the canonical enqueueSale(sale) path.
         enqueueSale(sale, { error })
         const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
-        setSaleSyncWarning(`تعذر رفع الطلب مركزيًا؛ تم حفظه للطوارئ. السبب: ${reason}. اضغط «مزامنة الآن».`)
+        setSaleSyncWarning(`تعذر رفع الطلب مركزيًا؛ تم حفظه للطوارئ. السبب: ${reason}. اضغط زر المزامنة.`)
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
         void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       } catch (queueError) {
@@ -934,7 +934,7 @@ export default function App() {
     } catch (error) {
       enqueueVoidUpdate(pending, voidPayload, { error })
       const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
-      setSaleSyncWarning(`الإبطال غير مثبت مركزيًا؛ حُفظ للطوارئ. السبب: ${reason}. اضغط «مزامنة الآن».`)
+      setSaleSyncWarning(`الإبطال غير مثبت مركزيًا؛ حُفظ للطوارئ. السبب: ${reason}. اضغط زر المزامنة.`)
       console.warn('POS101_IMMEDIATE_VOID_SYNC_PENDING', error?.code || error?.message || String(error))
       void processSaleSyncQueue({ reason: 'void-update-failure' }).catch(retryError => console.warn('POS101_VOID_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       return pending
