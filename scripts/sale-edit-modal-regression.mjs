@@ -6,9 +6,17 @@ const jsx = fs.readFileSync(new URL('../src/components/OrderHistoryMenu.jsx', im
 const modal = css.match(/\.history-edit-modal\s*\{([^}]*)\}/)?.[1] || ''
 const body = css.match(/\.history-edit-body\s*\{([^}]*)\}/)?.[1] || ''
 const actions = css.match(/\.history-edit-actions\s*\{([^}]*)\}/)?.[1] || ''
-assert.match(modal, /max-height:\s*85vh/)
+assert.match(modal, /width:\s*min\(620px,\s*calc\(100vw\s*-\s*32px\)\)/)
+assert.match(modal, /max-height:\s*min\(86vh,\s*680px\)/)
 assert.match(modal, /grid-template-rows:\s*auto minmax\(0, 1fr\) auto/)
 assert.match(modal, /overflow:\s*hidden/)
+assert.match(jsx, /createPortal\(/)
+assert.match(jsx, /document\.body\)/)
+assert.match(jsx, /document\.documentElement/)
+assert.match(jsx, /body\.style\.overflow\s*=\s*'hidden'/)
+assert.match(jsx, /تعديل الطلب رقم/)
+assert.match(jsx, /placeholder="0"/)
+assert.match(jsx, /history-edit-close/)
 assert.match(body, /overflow-y:\s*auto/)
 assert.match(body, /overscroll-behavior:\s*contain/)
 assert.match(actions, /border-top:/)
