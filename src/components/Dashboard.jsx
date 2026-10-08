@@ -2,7 +2,7 @@
 import { Icon } from './Icons'
 import OperationalDay from './OperationalDay'
 
-export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, preCloseGuard, pendingTableCount = 0, onPrepareEnd, onPrepareStart, operationalDayLoading, operationalDayError, onStartOperationalDay, onSetOpeningCashBalance, onEndOperationalDay, onReadDiagnostic }) {
+export default function Dashboard({ onNavigate, onLogout, canAccessBackupRecovery = false, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, preCloseGuard, pendingTableCount = 0, onPrepareEnd, onPrepareStart, operationalDayLoading, operationalDayError, onStartOperationalDay, onSetOpeningCashBalance, onEndOperationalDay, onReadDiagnostic }) {
   const cards = [
     { id: 'pos', title: 'الكاشير', icon: 'monitor', action: () => onNavigate('pos') },
     { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => onNavigate('orders') },
@@ -15,6 +15,7 @@ export default function Dashboard({ onNavigate, onLogout, operationalDayEnabled 
     { id: 'settings', title: 'الإعدادات', icon: 'settings', action: () => onNavigate('settings') },
     { id: 'captain-sales', title: 'مبيعات الكابتن', icon: 'user', action: () => onNavigate('reports-captain') },
     { id: 'purchases', title: 'المشتريات', icon: 'shopping-bag', action: () => onNavigate('purchases') },
+    ...(canAccessBackupRecovery ? [{ id: 'backup-recovery', title: 'فحص واسترداد نسخة المبيعات', icon: 'download', action: () => onNavigate('backup-recovery') }] : []),
     { id: 'inventory-reconciliation', title: 'التسويات والجرد', icon: 'clipboard', action: () => alert('تحت التطوير') },
     { id: 'logout', title: 'إغلاق النظام', icon: 'logout', action: () => {
       if (window.confirm('هل أنت متأكد من إغلاق النظام؟')) {

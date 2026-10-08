@@ -27,6 +27,9 @@ const syncedWithoutCentral = classifyBackupSale({ sale: sale({ syncStatus: 'sync
 assert.equal(syncedWithoutCentral.classification, 'SKIP')
 const component = fs.readFileSync(new URL('../src/components/SalesBackupRecovery.jsx', import.meta.url), 'utf8')
 const service = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
+const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+const dashboard = fs.readFileSync(new URL('../src/components/Dashboard.jsx', import.meta.url), 'utf8')
+const settings = fs.readFileSync(new URL('../src/components/Settings.jsx', import.meta.url), 'utf8')
 assert.match(component, /type="file"/)
 assert.match(component, /فحص Firebase/)
 assert.match(component, /استرداد هذه المبيعة/)
@@ -35,9 +38,17 @@ assert.match(service, /export const recoverBackupSale/)
 assert.match(service, /runTransaction\(saleRef/)
 assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
 assert.match(service, /audit-backup-recovery/)
+assert.match(app, /currentView === 'backup-recovery'/)
+assert.match(app, /backupRecoveryAuthorized/)
+assert.match(dashboard, /فحص واسترداد نسخة المبيعات/)
+assert.match(settings, /onNavigate\('backup-recovery'\)/)
+assert.doesNotMatch(app, /adminReady && !session && currentView === 'backup-recovery'/)
+assert.match(app, /غير مصرح لك باستخدام أداة استرداد النسخ الاحتياطية/)
+assert.match(app, /<SalesBackupRecovery adminUser=/)
 
 console.log(JSON.stringify({
   BACKUP_FILE_UPLOAD_UI: 'PASS', BACKUP_JSON_PARSE: 'PASS', BACKUP_SUMMARY: 'PASS', PENDING_SALES_DETECTED: 'PASS', SALE_1309_DETECTED_FROM_BACKUP: 'PASS', AUTH_FIREBASE_CHECK_WIRING: 'PASS',
+  BACKUP_RECOVERY_VISIBLE_FOR_ADMIN: 'PASS', BACKUP_RECOVERY_HIDDEN_FOR_CASHIER: 'PASS', BACKUP_RECOVERY_ROUTE_WORKS: 'PASS', NO_REQUIRE_NOT_SESSION: 'PASS', SAFETY_GUARDS_UNCHANGED: 'PASS',
   EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
   CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
 }, null, 2))
