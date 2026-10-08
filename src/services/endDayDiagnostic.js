@@ -47,7 +47,7 @@ const sameIdentity = (left, right) => Boolean(
   || (operationKeyOf(left) && operationKeyOf(left) === operationKeyOf(right))
 )
 
-export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, preCloseGuard = null, liveCommit = '', liveBundle = '' } = {}) => {
+export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, localOperationalDay = null, centralOperationalDay = null, openOrderCount = 0, preCloseGuard = null, liveCommit = '', liveBundle = '' } = {}) => {
   const localRows = (Array.isArray(localSales) ? localSales : []).filter(sale => belongsToCurrentDay(sale, operationalDay))
   const currentQueueEntries = (Array.isArray(queueEntries) ? queueEntries : []).filter(entry => entry?.sale && belongsToCurrentDay(entry.sale, operationalDay))
   const local = localRows.filter(sale => isSaleSyncEligible(sale))
@@ -103,11 +103,25 @@ export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], void
   const blockingItems = blockers.length + unresolvedVoidIds.size + (reconciliation.activeTotalsMatch ? 0 : 1)
   const endDayReady = Boolean(reconciliation.allowed && financialReconciliation.allowed && Number(openOrderCount) === 0)
   const resolvedVoidedBeforeSync = new Set(localRows.filter(sale => sale?.queueResolution === 'voided_before_central_sync').map(sale => saleIdOf(sale)).filter(Boolean)).size
+  const localDay = localOperationalDay || operationalDay || null
+  const centralDay = centralOperationalDay || null
+  const dayMatches = Boolean(localDay?.id && centralDay?.id && String(localDay.id) === String(centralDay.id) && String(localDay.businessDate || '') === String(centralDay.businessDate || ''))
+  const saleAllowed = Boolean(centralDay?.status === 'open' && localDay?.status === 'open' && dayMatches)
+  const blockReason = !centralDay ? 'CENTRAL_DAY_UNAVAILABLE' : centralDay.status !== 'open' ? 'CENTRAL_DAY_CLOSED' : !dayMatches ? 'LOCAL_CENTRAL_DAY_MISMATCH' : ''
   return {
     LIVE_COMMIT: liveCommit,
     LIVE_BUNDLE: liveBundle,
     businessDate: operationalDay?.businessDate || '',
     operationalDayId: operationalDay?.id || '',
+    LOCAL_OPERATIONAL_DAY_ID: localDay?.id || '',
+    LOCAL_BUSINESS_DATE: localDay?.businessDate || '',
+    LOCAL_DAY_STATUS: localDay?.status || 'closed',
+    CENTRAL_OPERATIONAL_DAY_ID: centralDay?.id || '',
+    CENTRAL_BUSINESS_DATE: centralDay?.businessDate || '',
+    CENTRAL_DAY_STATUS: centralDay?.status || 'unavailable',
+    LOCAL_CENTRAL_DAY_MATCH: dayMatches ? 'PASS' : 'FAIL',
+    SALE_ALLOWED: saleAllowed ? 'YES' : 'NO',
+    BLOCK_REASON: blockReason,
     localActiveCount: reconciliation.localActiveCount,
     localActiveTotal: reconciliation.localActiveTotal,
     firebaseActiveCount: reconciliation.centralActiveCount,
@@ -121,6 +135,7 @@ export const buildEndDayDiagnostic = ({ localSales = [], queueEntries = [], void
     status: preCloseGuard?.state || (blockingItems || Number(openOrderCount) ? 'real-pending' : 'verified'),
     message: preCloseGuard?.message || '',
     pendingQueue: reconciliation.pendingQueue,
+    OPEN_SALES_QUEUE_COUNT: reconciliation.pendingQueue,
     openOrderCount: Number(openOrderCount) || 0,
     openOrderFlag: (Number(openOrderCount) || 0) > 0,
     reconciliationState: preCloseGuard?.loading ? 'loading' : 'completed',

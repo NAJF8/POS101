@@ -20,10 +20,10 @@ const getCategoryIcon = (category) => {
 
 export default function ProductGrid({ 
   products, category, setCategory, categories, query, setQuery, onSelect,
-  orders, activeOrderIndex, setActiveOrderIndex, onNewOrder, session
+  orders, activeOrderIndex, setActiveOrderIndex, onNewOrder, session, disabled = false
 }) {
   return (
-    <section className="catalog-panel">
+    <section className="catalog-panel" inert={disabled || undefined}>
       {/* Top Toolbar: Quick Orders + Search */}
       <div className="catalog-toolbar">
         {orders && (

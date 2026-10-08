@@ -46,6 +46,7 @@ jobs:
       - run: node scripts/central-firebase-regression.mjs
       - run: node scripts/ui-hardening-regression.mjs
       - run: node scripts/stale-cache-regression.mjs
+      - run: npm run test:operational-day-central-realtime
       - run: node scripts/staff-eligibility-regression.mjs
       - run: node scripts/sales-sync-queue-regression.mjs
       - run: node scripts/expense-business-date-regression.mjs

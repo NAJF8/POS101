@@ -47,7 +47,7 @@ assert.match(app, /allocateCentralOrderNumber\(/)
 assert.doesNotMatch(app, /orderNumber:\s*nextNumber/)
 assert.match(sync, /reconcileSalesQueue\(beforeCentral/)
 assert.match(sync, /findActiveOrderNumberCollision\(sale, beforeCentral\)/)
-assert.match(sync, /runTransaction\(dayRef/)
+assert.match(sync, /runTransaction\(operationalDayCurrentRef\(\)/)
 assert.match(sync, /SALE_READBACK_FAILED|ORDER_NUMBER_READBACK_FAILED/)
 
 console.log(JSON.stringify({

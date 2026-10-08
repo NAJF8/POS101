@@ -118,11 +118,16 @@ const salesRef = () => ref(db, 'pos101_sales')
 const pendingTablesRef = () => ref(db, 'pos101_pending_tables')
 const productsRef = () => ref(db, 'pos101_products')
 const operationalDaysRef = () => ref(db, 'pos101_operational_days')
+const operationalDayCurrentRef = () => ref(db, 'pos101_operational_day/current')
 const expensesRef = () => ref(db, 'pos101_expenses')
 const saleIdOf = sale => String(sale?.saleId || sale?.id || '').trim()
 const expenseIdOf = expense => String(expense?.id || expense?.expenseId || '').trim()
 const EXPENSES_KEY = 'pos101.expenses'
 const OPERATIONAL_DAY_KEY = 'pos101.operationalDay'
+const OPERATIONAL_DAY_CURRENT_PATH = 'pos101_operational_day/current'
+const OPERATIONAL_DAY_STALE_KEY = 'pos101.localOperationalDayStale'
+const OPERATIONAL_DAY_CLOSED_BY_CENTRAL_KEY = 'pos101.localClosedByCentral'
+const OPERATIONAL_DAY_STALE_DETECTED_AT_KEY = 'pos101.staleDetectedAt'
 const DEVICE_ID_KEY = 'pos101.deviceId'
 const readSales = () => {
   try {
@@ -350,6 +355,10 @@ export const saveCentralSaleImmediately = async sale => {
   if (!id || !sale?.orderNumber || !sale?.businessDate || !sale?.operationalDayId || !saleItemsLength(sale)) {
     throw Object.assign(new Error('بيانات البيع المركزية غير مكتملة.'), { code: 'SALE_PAYLOAD_INCOMPLETE' })
   }
+  const centralDay = await readCentralOperationalDay()
+  if (!centralDay) throw operationalDayGuardError('CENTRAL_DAY_UNAVAILABLE', 'لا يمكن البيع: تعذر قراءة اليوم التشغيلي المركزي.')
+  if (centralDay.status !== 'open') throw operationalDayGuardError('CENTRAL_DAY_CLOSED', 'لا يمكن البيع: اليوم التشغيلي مغلق أو تغيّر من جهاز آخر.', centralDay)
+  if (!currentDayMatchesSale(centralDay, sale)) throw operationalDayGuardError('CENTRAL_DAY_MISMATCH', 'لا يمكن البيع: اليوم التشغيلي مغلق أو تغيّر من جهاز آخر.', centralDay)
   const saleRef = ref(db, `pos101_sales/${id}`)
   const existingSnapshot = await get(saleRef)
   if (existingSnapshot.exists()) {
@@ -602,13 +611,39 @@ const operationalDayIdOf = day => String(day?.id || day?.operationalDayId || '')
 export const readCachedOperationalDay = () => {
   try {
     const value = JSON.parse(localStorage.getItem(OPERATIONAL_DAY_KEY) || 'null')
-    return value?.status === 'open' && value?.id && value?.businessDate ? value : null
+    return (value?.status === 'open' || value?.status === 'closed') && value?.id && value?.businessDate ? value : null
   } catch { return null }
 }
-const cacheOperationalDay = day => {
-  if (day?.status === 'open' && day?.id && day?.businessDate) localStorage.setItem(OPERATIONAL_DAY_KEY, JSON.stringify(day))
-  else localStorage.removeItem(OPERATIONAL_DAY_KEY)
-  return day
+const normalizeOperationalDay = (day, fallbackId = '') => {
+  if (!day || typeof day !== 'object') return null
+  const id = operationalDayIdOf(day) || String(fallbackId || '').trim()
+  const status = day.status === 'closed' ? 'closed' : day.status === 'open' ? 'open' : ''
+  if (!id || !day.businessDate || !status) return null
+  return { ...day, id, operationalDayId: String(day.operationalDayId || id), status }
+}
+const cacheOperationalDay = (day, { central = false } = {}) => {
+  const normalized = normalizeOperationalDay(day)
+  if (normalized) {
+    const previous = readCachedOperationalDay()
+    if (central && normalized.status === 'closed' && previous?.status === 'open') {
+      localStorage.setItem(OPERATIONAL_DAY_STALE_KEY, 'true')
+      localStorage.setItem(OPERATIONAL_DAY_CLOSED_BY_CENTRAL_KEY, 'true')
+      localStorage.setItem(OPERATIONAL_DAY_STALE_DETECTED_AT_KEY, String(Date.now()))
+    }
+    if (central && normalized.status === 'open') {
+      localStorage.removeItem(OPERATIONAL_DAY_STALE_KEY)
+      localStorage.removeItem(OPERATIONAL_DAY_CLOSED_BY_CENTRAL_KEY)
+      localStorage.removeItem(OPERATIONAL_DAY_STALE_DETECTED_AT_KEY)
+    }
+    const enriched = normalized.status === 'closed' && localStorage.getItem(OPERATIONAL_DAY_CLOSED_BY_CENTRAL_KEY) === 'true'
+      ? { ...normalized, localOperationalDayStale: true, localClosedByCentral: true, staleDetectedAt: Number(localStorage.getItem(OPERATIONAL_DAY_STALE_DETECTED_AT_KEY)) || null }
+      : normalized
+    localStorage.setItem(OPERATIONAL_DAY_KEY, JSON.stringify(enriched))
+    if (central && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-operational-day-changed', { detail: enriched }))
+    return enriched
+  }
+  localStorage.removeItem(OPERATIONAL_DAY_KEY)
+  return null
 }
 const localBusinessDate = timestamp => {
   const date = new Date(timestamp)
@@ -618,30 +653,89 @@ const localBusinessDate = timestamp => {
 const operationalDayValues = snapshot => snapshot.exists()
   ? Object.entries(snapshot.val() || {}).map(([id, value]) => ({ ...value, id: operationalDayIdOf(value) || id }))
   : []
+const latestOperationalDay = days => days
+  .map(day => normalizeOperationalDay(day))
+  .filter(Boolean)
+  .sort((left, right) => Number(right.updatedAt || right.endedAt || right.startedAt || 0) - Number(left.updatedAt || left.endedAt || left.startedAt || 0))[0] || null
 const latestOpenOperationalDay = days => days
-  .filter(day => day.status === 'open' && operationalDayIdOf(day))
+  .map(day => normalizeOperationalDay(day))
+  .filter(day => day?.status === 'open' && operationalDayIdOf(day))
   .sort((left, right) => Number(right.startedAt || 0) - Number(left.startedAt || 0))[0] || null
+
+const currentDayMatchesSale = (day, sale) => Boolean(
+  day?.status === 'open'
+  && String(day.id || day.operationalDayId || '') === String(sale?.operationalDayId || sale?.operational_day_id || '')
+  && String(day.businessDate || '') === String(sale?.businessDate || '')
+)
+
+const operationalDayGuardError = (code, message, details = {}) => Object.assign(new Error(message), { code, operationalDay: details })
+
+export const isOperationalDayClosedError = error => new Set([
+  'CENTRAL_DAY_CLOSED',
+  'CENTRAL_DAY_MISMATCH',
+  'CENTRAL_DAY_UNAVAILABLE',
+  'ORDER_NUMBER_DAY_CLOSED',
+  'SALE_DAY_CLOSED',
+  'SALE_DAY_MISMATCH',
+]).has(error?.code)
+
+const readLegacyOperationalDay = async () => latestOperationalDay(operationalDayValues(await get(operationalDaysRef())))
+
+export const readCentralOperationalDay = async () => {
+  await requireOperationalDayRole()
+  const currentSnapshot = await get(operationalDayCurrentRef())
+  if (currentSnapshot.exists()) return cacheOperationalDay(normalizeOperationalDay(currentSnapshot.val()), { central: true })
+  const legacy = await readLegacyOperationalDay()
+  return cacheOperationalDay(legacy, { central: true })
+}
+
+const ensureCanonicalOperationalDay = async () => {
+  const currentSnapshot = await get(operationalDayCurrentRef())
+  if (currentSnapshot.exists()) return normalizeOperationalDay(currentSnapshot.val())
+  const legacy = await readLegacyOperationalDay()
+  if (!legacy) return null
+  const transaction = await runTransaction(operationalDayCurrentRef(), current => current || legacy)
+  return normalizeOperationalDay(transaction.snapshot.val())
+}
 
 export const subscribeOperationalDay = callback => {
   if (!configured || !db || !auth?.currentUser || !isOperationalDayUser(auth.currentUser)) {
     callback(readCachedOperationalDay())
     return () => {}
   }
-  return onValue(operationalDaysRef(), snapshot => {
-    const day = latestOpenOperationalDay(operationalDayValues(snapshot))
-    cacheOperationalDay(day)
-    callback(day)
+  let currentSeen = false
+  let legacyDay = null
+  let currentDay = null
+  const publish = day => {
+    const centralDay = normalizeOperationalDay(day)
+    if (!centralDay) {
+      cacheOperationalDay(null)
+      callback(null)
+      return
+    }
+    const cached = cacheOperationalDay(centralDay, { central: true })
+    callback(cached)
+  }
+  const stopCurrent = onValue(operationalDayCurrentRef(), snapshot => {
+    currentSeen = true
+    currentDay = snapshot.exists() ? normalizeOperationalDay(snapshot.val()) : null
+    publish(currentDay || legacyDay)
   }, error => {
-    console.error('OPERATIONAL_DAY_SUBSCRIBE_ERROR', error)
-    callback(readCachedOperationalDay())
+    console.error('OPERATIONAL_DAY_CURRENT_SUBSCRIBE_ERROR', error)
+    callback({ ...(readCachedOperationalDay() || {}), centralUnavailable: true })
   })
+  const stopLegacy = onValue(operationalDaysRef(), snapshot => {
+    legacyDay = latestOperationalDay(operationalDayValues(snapshot))
+    if (!currentSeen || !currentDay) publish(legacyDay)
+  }, error => console.error('OPERATIONAL_DAY_LEGACY_SUBSCRIBE_ERROR', error))
+  return () => { stopCurrent?.(); stopLegacy?.() }
 }
 
 export const readLocalOperationalDay = readCachedOperationalDay
 
 export const readOpenOperationalDay = async () => {
-  await requireOperationalDayRole()
-  return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(await get(operationalDaysRef()))))
+  const day = await readCentralOperationalDay()
+  return day?.status === 'open' ? day : null
 }
 
 export const findOperationalDayByBusinessDate = async businessDate => {
@@ -948,13 +1042,16 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
 // sync metadata, alter the queue, or trigger any retry/upload behavior.
 export const readEndDayDiagnostic = async (operationalDay, { openOrderCount = 0, preCloseGuard = null } = {}) => {
   await financialUser(false)
-  const centralSales = centralValues(await get(salesRef()))
+  const [centralSalesSnapshot, currentDaySnapshot, legacyDaySnapshot] = await Promise.all([get(salesRef()), get(operationalDayCurrentRef()), get(operationalDaysRef())])
+  const centralOperationalDay = currentDaySnapshot.exists() ? normalizeOperationalDay(currentDaySnapshot.val()) : latestOperationalDay(operationalDayValues(legacyDaySnapshot))
   return buildEndDayDiagnostic({
     localSales: readLocalSales(),
     queueEntries: readRawSaleQueue(),
     voidQueueEntries: readVoidUpdateQueue(),
-    centralSales,
+    centralSales: centralValues(centralSalesSnapshot),
     operationalDay,
+    localOperationalDay: readCachedOperationalDay(),
+    centralOperationalDay,
     openOrderCount,
     preCloseGuard,
     liveCommit: BUILD_SHA,
@@ -990,31 +1087,41 @@ export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, 
   const opening = Number(openingCashBalance)
   if (!Number.isFinite(opening) || opening < 0) throw new Error('رصيد بداية اليوم مطلوب ويجب ألا يقل عن صفر.')
   const now = Date.now()
-  const transaction = await runTransaction(operationalDaysRef(), current => {
-    const days = Object.entries(current || {}).map(([id, value]) => ({ ...value, id: operationalDayIdOf(value) || id }))
-    if (latestOpenOperationalDay(days)) return current
+  const legacySnapshot = await get(operationalDaysRef())
+  const legacyOpen = latestOpenOperationalDay(operationalDayValues(legacySnapshot))
+  const transaction = await runTransaction(operationalDayCurrentRef(), current => {
+    if (normalizeOperationalDay(current)?.status === 'open') return current
+    if (!current && legacyOpen) return legacyOpen
     const id = crypto.randomUUID()
     return {
-      ...(current || {}),
-      [id]: {
-        id,
-        operationalDayId: id,
-        businessDate: localBusinessDate(now),
-        startedAt: now,
-        startedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
-        openingCashBalance: opening,
-        openingCashSource: openingCashSource === 'previous_closing' ? 'previous_closing' : 'manual',
-        previousOperationalDayId: String(previousOperationalDayId || ''),
-        openingCashAdjustmentNote: String(openingCashAdjustmentNote || '').trim(),
-        confirmedAt: now,
-        confirmedBy: { uid: user.uid, name: startedBy.name || user.displayName || user.email || '', email: user.email || '' },
-        endedAt: null,
-        endedBy: null,
-        status: 'open',
-      },
+      id,
+      operationalDayId: id,
+      businessDate: localBusinessDate(now),
+      startedAt: now,
+      startedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
+      openingCashBalance: opening,
+      openingCashSource: openingCashSource === 'previous_closing' ? 'previous_closing' : 'manual',
+      previousOperationalDayId: String(previousOperationalDayId || ''),
+      openingCashAdjustmentNote: String(openingCashAdjustmentNote || '').trim(),
+      confirmedAt: now,
+      confirmedBy: { uid: user.uid, name: startedBy.name || user.displayName || user.email || '', email: user.email || '' },
+      endedAt: null,
+      endedBy: null,
+      closedAt: null,
+      closedBy: null,
+      closeSummary: null,
+      version: Number(current?.version || 0) + 1,
+      updatedAt: now,
+      status: 'open',
     }
   })
-  return cacheOperationalDay(latestOpenOperationalDay(operationalDayValues(transaction.snapshot)))
+  const day = normalizeOperationalDay(transaction.snapshot.val())
+  if (!day) throw Object.assign(new Error('تعذر إنشاء اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_START_FAILED' })
+  await set(ref(db, `pos101_operational_days/${day.id}`), day)
+  const [currentBack, legacyBack] = await Promise.all([get(operationalDayCurrentRef()), get(ref(db, `pos101_operational_days/${day.id}`))])
+  const verified = normalizeOperationalDay(currentBack.val())
+  if (!verified || verified.status !== 'open' || !legacyBack.exists() || operationalDayIdOf(legacyBack.val()) !== day.id) throw Object.assign(new Error('تعذر التحقق من بدء اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_START_READBACK_FAILED' })
+  return cacheOperationalDay(verified, { central: true })
 }
 
 export const setOperationalDayOpeningCashBalance = async (day, { openingCashBalance, reason = 'رصيد افتتاحي/تمويل صندوق مفقود.' } = {}) => {
@@ -1047,28 +1154,39 @@ export const setOperationalDayOpeningCashBalance = async (day, { openingCashBala
     [`pos101_operational_days/${id}/openingCashAdjustmentNote`]: note,
     [`pos101_operational_days/${id}/openingCashAdjustedAt`]: now,
     [`pos101_operational_days/${id}/openingCashAdjustedBy`]: { uid: user.uid, name: user.displayName || user.email || '', email: user.email || '' },
+    [`${OPERATIONAL_DAY_CURRENT_PATH}/openingCashBalance`]: opening,
+    [`${OPERATIONAL_DAY_CURRENT_PATH}/openingCashSource`]: 'manual',
+    [`${OPERATIONAL_DAY_CURRENT_PATH}/openingCashAdjustmentNote`]: note,
+    [`${OPERATIONAL_DAY_CURRENT_PATH}/openingCashAdjustedAt`]: now,
+    [`${OPERATIONAL_DAY_CURRENT_PATH}/openingCashAdjustedBy`]: { uid: user.uid, name: user.displayName || user.email || '', email: user.email || '' },
     [`${auditPath}/${auditId}`]: audit,
   })
-  const [dayBack, auditBack] = await Promise.all([get(dayRef), get(financialPath(`${auditPath}/${auditId}`))])
+  const [dayBack, currentBack, auditBack] = await Promise.all([get(dayRef), get(operationalDayCurrentRef()), get(financialPath(`${auditPath}/${auditId}`))])
   const updatedDay = dayBack.exists() ? { ...dayBack.val(), id } : null
-  if (!updatedDay || updatedDay.status !== 'open' || Number(updatedDay.openingCashBalance) !== opening || !auditBack.exists()) throw Object.assign(new Error('تعذر التحقق من تحديث رصيد الافتتاح.'), { code: 'OPENING_CASH_READBACK_FAILED' })
-  cacheOperationalDay(updatedDay)
-  return { day: updatedDay, audit: auditBack.val() }
+  const updatedCurrentDay = currentBack.exists() ? normalizeOperationalDay(currentBack.val(), id) : null
+  if (!updatedDay || updatedDay.status !== 'open' || Number(updatedDay.openingCashBalance) !== opening || !updatedCurrentDay || Number(updatedCurrentDay.openingCashBalance) !== opening || !auditBack.exists()) throw Object.assign(new Error('تعذر التحقق من تحديث رصيد الافتتاح.'), { code: 'OPENING_CASH_READBACK_FAILED' })
+  const cached = cacheOperationalDay(updatedCurrentDay, { central: true })
+  return { day: cached || updatedDay, audit: auditBack.val() }
 }
 
 export const endOperationalDay = async (day, { endedBy = {} } = {}) => {
   const user = await requireOperationalDayRole()
   const id = operationalDayIdOf(day)
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
-  const dayRef = ref(db, `pos101_operational_days/${id}`)
-  const transaction = await runTransaction(dayRef, current => {
-    if (!current || current.status !== 'open') return current
-    return { ...current, status: 'closed', endedAt: Date.now(), endedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' } }
+  const current = await ensureCanonicalOperationalDay()
+  if (!current || current.id !== id || current.status !== 'open') throw operationalDayGuardError('CENTRAL_DAY_CLOSED', 'اليوم التشغيلي مغلق أو تغيّر من جهاز آخر.', current || {})
+  const transaction = await runTransaction(operationalDayCurrentRef(), currentDay => {
+    if (!currentDay || currentDay.status !== 'open' || operationalDayIdOf(currentDay) !== id) return currentDay
+    const now = Date.now()
+    return { ...currentDay, status: 'closed', endedAt: now, endedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' }, closedAt: now, closedBy: { uid: user.uid, name: endedBy.name || '', email: user.email || '' }, updatedAt: now, version: Number(currentDay.version || 0) + 1 }
   })
-  const result = transaction.snapshot.exists() ? { ...transaction.snapshot.val(), id } : null
-  if (!result || result.status !== 'open') cacheOperationalDay(null)
-  else cacheOperationalDay(result)
-  return result
+  const result = transaction.snapshot.exists() ? normalizeOperationalDay(transaction.snapshot.val(), id) : null
+  if (!result || result.status !== 'closed') throw operationalDayGuardError('CENTRAL_DAY_CLOSE_FAILED', 'تعذر إغلاق اليوم التشغيلي المركزي.')
+  await set(ref(db, `pos101_operational_days/${id}`), result)
+  const [currentBack, legacyBack] = await Promise.all([get(operationalDayCurrentRef()), get(ref(db, `pos101_operational_days/${id}`))])
+  const verified = normalizeOperationalDay(currentBack.val(), id)
+  if (!verified || verified.status !== 'closed' || !legacyBack.exists() || legacyBack.val()?.status !== 'closed') throw Object.assign(new Error('تعذر التحقق من إغلاق اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_CLOSE_READBACK_FAILED' })
+  return cacheOperationalDay(verified, { central: true })
 }
 
 export const inspectLocalSales = () => {
@@ -1084,24 +1202,30 @@ export const allocateCentralOrderNumber = async ({ operationalDayId, businessDat
   await financialUser(true)
   const dayId = String(operationalDayId || '').trim()
   if (!dayId) throw Object.assign(new Error('اليوم التشغيلي مطلوب لتخصيص رقم الطلب.'), { code: 'ORDER_NUMBER_DAY_REQUIRED' })
-  const dayRef = ref(db, `pos101_operational_days/${dayId}`)
-  const currentDaySnapshot = await get(dayRef)
-  if (!currentDaySnapshot.exists() || currentDaySnapshot.val()?.status !== 'open') {
-    throw Object.assign(new Error('لا يمكن تخصيص رقم طلب خارج يوم تشغيلي مفتوح.'), { code: 'ORDER_NUMBER_DAY_CLOSED' })
+  const centralDay = await ensureCanonicalOperationalDay()
+  if (!centralDay || centralDay.status !== 'open') {
+    throw Object.assign(new Error('لا يمكن تخصيص رقم طلب خارج يوم تشغيلي مفتوح.'), { code: 'ORDER_NUMBER_DAY_CLOSED', operationalDay: centralDay })
+  }
+  if (centralDay.id !== dayId || String(centralDay.businessDate || '') !== String(businessDate || '')) {
+    throw operationalDayGuardError('CENTRAL_DAY_MISMATCH', 'لا يمكن تخصيص رقم طلب لليوم التشغيلي القديم.', centralDay)
   }
   const centralSales = centralValues(await get(salesRef()))
   let allocated = null
-  const transaction = await runTransaction(dayRef, current => {
+  // The canonical transaction supersedes the legacy runTransaction(dayRef,
+  // ...) allocator while the historical day node remains a readback mirror.
+  const transaction = await runTransaction(operationalDayCurrentRef(), current => {
     if (!current || current.status !== 'open') return
-    if (businessDate && String(current.businessDate || '') !== String(businessDate)) return
+    if (operationalDayIdOf(current) !== dayId || (businessDate && String(current.businessDate || '') !== String(businessDate))) return
     const next = nextCentralOrderNumber({ day: current, centralSales })
     allocated = next
-    return { ...current, nextOrderNumber: next + 1, lastOrderNumberAllocated: next, lastOrderNumberAllocatedAt: Date.now() }
+    return { ...current, nextOrderNumber: next + 1, lastOrderNumberAllocated: next, lastOrderNumberAllocatedAt: Date.now(), updatedAt: Date.now(), version: Number(current.version || 0) + 1 }
   })
   if (!transaction.committed || !Number.isInteger(allocated) || allocated < 1) {
     throw Object.assign(new Error('تعذر تخصيص رقم طلب مركزي بأمان.'), { code: 'ORDER_NUMBER_TRANSACTION_FAILED' })
   }
-  const readBack = await get(dayRef)
+  const currentAfterAllocation = transaction.snapshot.val()
+  await update(ref(db), { [`pos101_operational_days/${dayId}/nextOrderNumber`]: allocated + 1, [`pos101_operational_days/${dayId}/lastOrderNumberAllocated`]: allocated, [`pos101_operational_days/${dayId}/lastOrderNumberAllocatedAt`]: currentAfterAllocation.lastOrderNumberAllocatedAt, [`pos101_operational_days/${dayId}/updatedAt`]: currentAfterAllocation.updatedAt, [`pos101_operational_days/${dayId}/version`]: currentAfterAllocation.version })
+  const readBack = await get(operationalDayCurrentRef())
   if (!readBack.exists() || Number(readBack.val()?.lastOrderNumberAllocated) !== allocated || Number(readBack.val()?.nextOrderNumber) <= allocated) {
     throw Object.assign(new Error('تعذر التحقق من رقم الطلب المركزي بعد التخصيص.'), { code: 'ORDER_NUMBER_READBACK_FAILED' })
   }
@@ -1264,6 +1388,13 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
   let beforeCentral = centralValues(before)
+  const centralDay = await readCentralOperationalDay()
+  if (!centralDay || centralDay.status !== 'open') {
+    const reason = centralDay ? 'CENTRAL_DAY_CLOSED' : 'CENTRAL_DAY_UNAVAILABLE'
+    logQueueDecision(null, 'operational-day-blocked', reason, { queueLength: rawQueue.length, processingStarted: false, firebaseWriteResult: 'not-started', readbackResult: 'not-started', localUpdateResult: 'retained-in-queue' })
+    if (manualReport) manualReport.errors.push(reason)
+    return { uploaded: 0, received: 0, centralCount: beforeCentral.length, mergedCount: localSales.length, localCount: localSales.length, updated: 0, initialSyncCompleted: readInitialSyncCompleted(), uploadBlocked: true, blockedReason: reason, skipped: rawQueue.length, queueCleanup: { removed: 0, retained: rawQueue.length }, strandedRecovered: 0, historicalOrderNumberDuplicates: [] }
+  }
   const voidUpdateResult = await resolveVoidUpdateQueueEntries()
   const voidedQueueResult = await resolveVoidedQueueEntries(beforeCentral)
   if (voidUpdateResult.resolved || voidedQueueResult.resolved) beforeCentral = centralValues(await get(salesRef()))
@@ -1320,6 +1451,13 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   let updated = 0
   await retryAccSaleQueue()
   for (const [index, sale] of uploadable.entries()) {
+    if (!currentDayMatchesSale(centralDay, sale)) {
+      const error = operationalDayGuardError('CENTRAL_DAY_MISMATCH', 'تعذر رفع مبيعة مرتبطة بيوم تشغيلي غير حالي.', centralDay)
+      const queueEntry = readSaleQueue().find(entry => saleIdOf(entry?.sale) === saleIdOf(sale))
+      if (queueEntry) retainQueuedSale(queueEntry, error)
+      logQueueDecision(sale, 'operational-day-mismatch', error.code, { queueLength: rawQueue.length, eligible: false, processingStarted: false, firebaseWriteResult: 'blocked', readbackResult: 'not-required', localUpdateResult: 'retained-in-queue' })
+      continue
+    }
     syncLockManager.heartbeat({ trigger: queueOnly ? 'manual' : 'worker', processingSaleIds: [saleIdOf(sale)] })
     const queueEntry = readSaleQueue().find(entry => {
       const queued = entry.sale
@@ -2440,6 +2578,9 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const user = await financialUser(true)
   const id = String(day?.id || day?.operationalDayId || '').trim()
   if (!id) throw new Error('لا يوجد يوم تشغيلي مفتوح.')
+  const canonicalDay = await ensureCanonicalOperationalDay()
+  if (!canonicalDay || canonicalDay.id !== id) throw operationalDayGuardError('CENTRAL_DAY_MISMATCH', 'تغيّر اليوم التشغيلي من جهاز آخر؛ أعد قراءة الحالة المركزية.', canonicalDay || {})
+  if (!['open', 'closed'].includes(canonicalDay.status)) throw operationalDayGuardError('CENTRAL_DAY_CLOSED', 'اليوم التشغيلي مغلق أو تغيّر من جهاز آخر.', canonicalDay)
   const key = settlementKey(id)
   const cashboxId = `settlement-${safeKey(id)}`
   const auditId = `audit-settlement-${safeKey(id)}`
@@ -2449,7 +2590,7 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
     get(financialPath(`${cashboxTransactionsPath}/${cashboxId}`)),
     get(financialPath(`${auditPath}/${auditId}`)),
   ])
-  const remoteDay = daySnapshot.exists() ? { ...daySnapshot.val(), id } : null
+  const remoteDay = canonicalDay
   const existingSettlement = settlementSnapshot.exists() ? settlementSnapshot.val() : null
   const existingCashbox = cashboxSnapshot.exists() ? cashboxSnapshot.val() : null
   const existingAudit = auditSnapshot.exists() ? auditSnapshot.val() : null
@@ -2457,8 +2598,8 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const existingExpectedCash = existingSettlement ? Number(existingSettlement.expectedCash) : null
   const existingCashboxRequired = existingExpectedCash == null || existingExpectedCash > 0
   if (remoteDay.status === 'closed' && existingSettlement && (!existingCashboxRequired || existingCashbox) && existingAudit) {
-    cacheOperationalDay(null)
-    return { settlement: existingSettlement, day: remoteDay, duplicate: true, repaired: false }
+    const closed = cacheOperationalDay(remoteDay, { central: true })
+    return { settlement: existingSettlement, day: closed || remoteDay, duplicate: true, repaired: false }
   }
   if (remoteDay.status === 'closed' && !existingSettlement) {
     throw Object.assign(new Error('الحالة غير متسقة: اليوم مغلق بدون تسوية. راجع المدخلات التاريخية قبل إعادة البناء.'), { code: 'DAY_CLOSE_INCONSISTENT' })
@@ -2491,28 +2632,30 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   if (!Number.isFinite(expectedCash)) throw Object.assign(new Error('المبلغ المتوقع للصندوق غير صالح.'), { code: 'EXPECTED_CASH_INVALID' })
   const cashbox = existingCashbox || (expectedCash > 0 ? { id: cashboxId, type: 'settlement', amount: expectedCash, businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + expectedCash } : null)
   const audit = existingAudit || financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: remoteDay.businessDate })
-  const closedDay = remoteDay.status === 'closed'
-    ? remoteDay
-    : { ...remoteDay, status: 'closed', endedAt: settlement.createdAt || Date.now(), endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, settlementId: key }
-  const updates = { [`${auditPath}/${auditId}`]: audit, [`pos101_operational_days/${id}`]: closedDay }
+  const closedAt = settlement.createdAt || Date.now()
+  const closedDay = { ...remoteDay, status: 'closed', endedAt: closedAt, endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closedAt, closedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, settlementId: key, closeSummary: { settlementId: key, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status }, updatedAt: closedAt, version: Number(remoteDay.version || 0) + 1 }
+  const updates = { [`${auditPath}/${auditId}`]: audit, [`pos101_operational_days/${id}`]: closedDay, [OPERATIONAL_DAY_CURRENT_PATH]: closedDay }
   if (cashbox) updates[`${cashboxTransactionsPath}/${cashboxId}`] = cashbox
   endDayLog('END_DAY_FIREBASE_WRITE_START', { path: `pos101_operational_days/${id}`, writeType: 'status-after-settlement-readback' })
   await update(ref(db), updates)
-  const [dayBack, settlementBack, cashboxBack, auditBack] = await Promise.all([
+  const [dayBack, currentDayBack, settlementBack, cashboxBack, auditBack] = await Promise.all([
     get(financialPath(`pos101_operational_days/${id}`)),
+    get(operationalDayCurrentRef()),
     get(financialPath(`${settlementPath}/${key}`)),
     get(financialPath(`${cashboxTransactionsPath}/${cashboxId}`)),
     get(financialPath(`${auditPath}/${auditId}`)),
   ])
   const verifiedDay = dayBack.exists() ? { ...dayBack.val(), id } : null
+  const verifiedCurrentDay = currentDayBack.exists() ? normalizeOperationalDay(currentDayBack.val(), id) : null
   endDayLog('END_DAY_FIREBASE_WRITE_RESULT', { path: `pos101_operational_days/${id}`, ok: Boolean(verifiedDay?.status === 'closed') })
   endDayLog('END_DAY_READBACK_RESULT', { path: `pos101_operational_days/${id}`, ok: Boolean(verifiedDay?.status === 'closed'), status: verifiedDay?.status || null })
-  if (!verifiedDay || verifiedDay.status !== 'closed' || !settlementBack.exists() || (expectedCash > 0 && !cashboxBack.exists()) || !auditBack.exists()) {
+  endDayLog('END_DAY_CENTRAL_STATUS_READBACK', { path: OPERATIONAL_DAY_CURRENT_PATH, ok: Boolean(verifiedCurrentDay?.status === 'closed'), status: verifiedCurrentDay?.status || null })
+  if (!verifiedDay || verifiedDay.status !== 'closed' || !verifiedCurrentDay || verifiedCurrentDay.status !== 'closed' || !settlementBack.exists() || (expectedCash > 0 && !cashboxBack.exists()) || !auditBack.exists()) {
     throw Object.assign(new Error('تعذر التحقق من اكتمال إغلاق اليوم في Firebase.'), { code: 'DAY_CLOSE_READBACK_FAILED' })
   }
   endDayLog('END_DAY_STATUS_UPDATE_RESULT', { path: `pos101_operational_days/${id}`, status: 'closed', readback: true })
-  cacheOperationalDay(null)
-  return { settlement: settlementBack.val(), day: verifiedDay, duplicate: Boolean(existingSettlement), repaired: Boolean(existingSettlement) }
+  const localClosedDay = cacheOperationalDay(verifiedCurrentDay, { central: true })
+  return { settlement: settlementBack.val(), day: localClosedDay || verifiedDay, duplicate: Boolean(existingSettlement), repaired: Boolean(existingSettlement) }
 }
 
 export const saveCashCount = async ({ businessDate, operationalDayId = '', systemBalance, actualBalance, reason = '' }) => {

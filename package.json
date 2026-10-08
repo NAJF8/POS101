@@ -57,6 +57,7 @@
     ,"test:immediate-sale-void": "node scripts/immediate-sale-void-regression.mjs"
     ,"test:permanent-sync-fix": "node scripts/permanent-sync-fix-regression.mjs"
     ,"test:report-final-net-reorder": "node scripts/report-final-net-reorder-regression.mjs"
+    ,"test:operational-day-central-realtime": "node scripts/operational-day-central-realtime-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

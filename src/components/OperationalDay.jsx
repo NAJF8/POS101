@@ -149,6 +149,15 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
       'END_DAY_DIAGNOSTIC',
       `LIVE_COMMIT=${report.LIVE_COMMIT || ''}`,
       `LIVE_BUNDLE=${report.LIVE_BUNDLE || ''}`,
+      `LOCAL_OPERATIONAL_DAY_ID=${report.LOCAL_OPERATIONAL_DAY_ID || ''}`,
+      `LOCAL_BUSINESS_DATE=${report.LOCAL_BUSINESS_DATE || ''}`,
+      `LOCAL_DAY_STATUS=${report.LOCAL_DAY_STATUS || ''}`,
+      `CENTRAL_OPERATIONAL_DAY_ID=${report.CENTRAL_OPERATIONAL_DAY_ID || ''}`,
+      `CENTRAL_BUSINESS_DATE=${report.CENTRAL_BUSINESS_DATE || ''}`,
+      `CENTRAL_DAY_STATUS=${report.CENTRAL_DAY_STATUS || ''}`,
+      `LOCAL_CENTRAL_DAY_MATCH=${report.LOCAL_CENTRAL_DAY_MATCH || 'FAIL'}`,
+      `SALE_ALLOWED=${report.SALE_ALLOWED || 'NO'}`,
+      `BLOCK_REASON=${report.BLOCK_REASON || ''}`,
       `businessDate=${report.businessDate || ''}`,
       `operationalDayId=${report.operationalDayId || ''}`,
       `localActiveCount=${report.localActiveCount ?? 0}`,
@@ -162,6 +171,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
       `blockingItems=${report.blockingItems ?? 0}`,
       `END_DAY_READY=${report.END_DAY_READY || 'NO'}`,
       `pendingQueue=${report.pendingQueue}`,
+      `OPEN_SALES_QUEUE_COUNT=${report.OPEN_SALES_QUEUE_COUNT ?? 0}`,
       `openOrderFlag=${report.openOrderFlag}`,
       `reconciliationState=${report.reconciliationState}`,
       `status=${report.status}`,
@@ -241,6 +251,15 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           <span>preCloseGuard.message <b>{diagnosticReport.message || '—'}</b></span>
           <span>LIVE_COMMIT <b>{diagnosticReport.LIVE_COMMIT || '—'}</b></span>
           <span>LIVE_BUNDLE <b>{diagnosticReport.LIVE_BUNDLE || '—'}</b></span>
+          <span>LOCAL_OPERATIONAL_DAY_ID <b>{diagnosticReport.LOCAL_OPERATIONAL_DAY_ID || '—'}</b></span>
+          <span>LOCAL_BUSINESS_DATE <b>{diagnosticReport.LOCAL_BUSINESS_DATE || '—'}</b></span>
+          <span>LOCAL_DAY_STATUS <b>{diagnosticReport.LOCAL_DAY_STATUS || '—'}</b></span>
+          <span>CENTRAL_OPERATIONAL_DAY_ID <b>{diagnosticReport.CENTRAL_OPERATIONAL_DAY_ID || '—'}</b></span>
+          <span>CENTRAL_BUSINESS_DATE <b>{diagnosticReport.CENTRAL_BUSINESS_DATE || '—'}</b></span>
+          <span>CENTRAL_DAY_STATUS <b>{diagnosticReport.CENTRAL_DAY_STATUS || '—'}</b></span>
+          <span>LOCAL_CENTRAL_DAY_MATCH <b>{diagnosticReport.LOCAL_CENTRAL_DAY_MATCH || 'FAIL'}</b></span>
+          <span>SALE_ALLOWED <b>{diagnosticReport.SALE_ALLOWED || 'NO'}</b></span>
+          <span>BLOCK_REASON <b>{diagnosticReport.BLOCK_REASON || '—'}</b></span>
           <span>businessDate <b>{diagnosticReport.businessDate || '—'}</b></span>
           <span>operationalDayId <b>{diagnosticReport.operationalDayId || '—'}</b></span>
           <span>localActiveCount <b>{diagnosticReport.localActiveCount}</b></span>
@@ -253,6 +272,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           <span>queueItems <b>{diagnosticReport.queueItems}</b></span>
           <span>blockingItems <b>{diagnosticReport.blockingItems}</b></span>
           <span>pendingQueue <b>{diagnosticReport.pendingQueue}</b></span>
+          <span>OPEN_SALES_QUEUE_COUNT <b>{diagnosticReport.OPEN_SALES_QUEUE_COUNT ?? 0}</b></span>
           <span>openOrderFlag <b>{String(diagnosticReport.openOrderFlag)}</b></span>
           <span>END_DAY_READY <b>{diagnosticReport.END_DAY_READY || 'NO'}</b></span>
           <span>reconciliation <b>{diagnosticReport.reconciliationState}</b></span>
