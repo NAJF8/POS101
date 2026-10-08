@@ -24,7 +24,7 @@ import {
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { areExpenseDuplicates, expenseFingerprint, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { normalizeStaffCanSell } from './staffEligibility.js'
-import { calculateCashboxBalance, calculateSettlement, calculateSettlementCorrection, getEffectiveSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
+import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettlement, calculateSettlementCorrection, getEffectiveSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
@@ -2236,7 +2236,8 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
     const summary = calculateSettlement({ ...inputs, openingCashBalance: remoteDay.openingCashBalance })
     const difference = actual - summary.expectedCash
     const status = difference === 0 ? 'matched' : difference > 0 ? 'over' : 'short'
-    settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: remoteDay.businessDate, openingCashBalance: summary.openingCashBalance, cashSales: summary.cashSales, electronicSales: summary.electronicSales, expenses: summary.expenses, cashboxWithdrawals: summary.cashboxWithdrawals, managementWithdrawals: summary.managementWithdrawals, deposits: summary.deposits, dailyCashMovement: summary.dailyCashMovement, expectedCash: summary.expectedClosingCash, expectedClosingCash: summary.expectedClosingCash, ...summary, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
+    const cashAnalysis = calculateEndDayCashAnalysis({ openingCashBalance: summary.openingCashBalance, cashSales: summary.cashSales, expenses: summary.expenses, withdrawals: summary.withdrawals, expectedCash: summary.expectedCash, actualCash: actual })
+    settlement = { id: key, idempotencyKey: makeSettlementIdempotencyKey(id), operationalDayId: id, businessDate: remoteDay.businessDate, openingCashBalance: summary.openingCashBalance, cashSales: summary.cashSales, electronicSales: summary.electronicSales, expenses: summary.expenses, cashboxWithdrawals: summary.cashboxWithdrawals, managementWithdrawals: summary.managementWithdrawals, deposits: summary.deposits, dailyCashMovement: summary.dailyCashMovement, expectedCash: summary.expectedClosingCash, expectedClosingCash: summary.expectedClosingCash, ...summary, ...cashAnalysis, actualCash: actual, difference, status, createdAt: Date.now(), createdByUid: user.uid, createdByName: endedBy.name || user.displayName || user.email || '' }
     assertJsonNumbers(settlement, 'settlement')
     endDayLog('END_DAY_SETTLEMENT_PAYLOAD', { id: settlement.id, operationalDayId: settlement.operationalDayId, businessDate: settlement.businessDate, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status })
     endDayLog('END_DAY_FIREBASE_WRITE_START', { path: `${settlementPath}/${key}`, writeType: 'settlement-once' })

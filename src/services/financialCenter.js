@@ -32,6 +32,24 @@ export const isCashboxWithdrawal = row => row?.type === 'withdrawal' && normaliz
 export const isManagementWithdrawal = row => row?.type === 'withdrawal' && normalizeFundingSource(row?.fundingSource) === 'management'
 export const isSettlementBookkeeping = row => row?.type === 'settlement' || row?.source === 'settlement'
 
+export const cashAnalysisStatus = difference => difference === null || difference === undefined
+  ? 'unknown'
+  : difference === 0 ? 'matched' : difference < 0 ? 'short' : 'over'
+
+// These are report-only derived values. They do not participate in the
+// expected-cash calculation, which remains opening + dailyCashMovement.
+export const calculateEndDayCashAnalysis = ({ openingCashBalance, cashSales = 0, expenses = 0, withdrawals = 0, expectedCash = null, actualCash = null } = {}) => {
+  const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
+  const actualKnown = actualCash !== null && actualCash !== undefined && actualCash !== '' && Number.isFinite(Number(actualCash))
+  const opening = openingKnown ? Number(openingCashBalance) : 0
+  const actual = actualKnown ? Number(actualCash) : null
+  const difference = actualKnown && Number.isFinite(Number(expectedCash)) ? actual - Number(expectedCash) : null
+  const netDrawerMovement = actualKnown && openingKnown ? actual - opening : null
+  const netCashSalesFromDrawer = netDrawerMovement === null ? null : netDrawerMovement + amount(expenses) + amount(withdrawals)
+  const cashSalesDifference = netCashSalesFromDrawer === null ? null : netCashSalesFromDrawer - amount(cashSales)
+  return { netDrawerMovement, netCashSalesFromDrawer, cashSalesDifference, cashSalesDifferenceStatus: cashAnalysisStatus(cashSalesDifference), actualCash: actual, difference }
+}
+
 export const calculateCashboxBalance = transactions => (Array.isArray(transactions) ? transactions : []).reduce((balance, transaction) => {
   if (isVoided(transaction)) return balance
   const value = amount(transaction?.amount)
@@ -61,7 +79,7 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
   const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
   const openingValue = openingKnown ? Number(openingCashBalance) : 0
   const expectedClosingCash = openingValue + dailyCashMovement
-  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingKnown ? openingValue : null, openingCashBalanceOrZero: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0 }
+  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingKnown ? openingValue : null, openingCashBalanceOrZero: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0, ...calculateEndDayCashAnalysis({ openingCashBalance: openingKnown ? openingValue : null, cashSales, expenses: expenseTotal, withdrawals, expectedCash: expectedClosingCash }) }
 }
 
 export const calculateCashboxDay = ({ openingCashBalance, actualCash, sales = [], expenses = [], transactions = [] } = {}) => {
@@ -69,7 +87,7 @@ export const calculateCashboxDay = ({ openingCashBalance, actualCash, sales = []
   const actual = Number(actualCash)
   const actualKnown = Number.isFinite(actual)
   const difference = actualKnown && summary.openingCashKnown ? actual - summary.expectedClosingCash : null
-  return { ...summary, actualCash: actualKnown ? actual : null, difference, status: difference === null ? 'unknown' : settlementStatusForDifference(difference) }
+  return { ...summary, ...calculateEndDayCashAnalysis({ openingCashBalance, cashSales: summary.cashSales, expenses: summary.expenses, withdrawals: summary.withdrawals, expectedCash: summary.openingCashKnown ? summary.expectedCash : null, actualCash }), status: difference === null ? 'unknown' : settlementStatusForDifference(difference) }
 }
 
 export const buildCashboxReportRows = ({ operationalDays = [], settlements = [], settlementCorrections = [], sales = [], expenses = [], transactions = [] } = {}) => {

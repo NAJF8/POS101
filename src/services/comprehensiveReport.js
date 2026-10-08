@@ -9,7 +9,7 @@ const amount = value => {
 // The comprehensive report receives already-filtered rows. Keeping this pure
 // makes the screen, browser print, direct print payload, and fixture tests use
 // the same financial contract without reading localStorage again.
-export const calculateComprehensiveSummary = (sales = [], expenses = [], transactions = []) => {
+export const calculateComprehensiveSummary = (sales = [], expenses = [], transactions = [], endDay = null) => {
   const grossSales = sales.reduce((sum, sale) => sum + amount(sale.subtotal ?? sale.total), 0)
   const discounts = sales.reduce((sum, sale) => sum + amount(sale.discount), 0)
   const electronicSales = sales.reduce((sum, sale) => {
@@ -43,5 +43,13 @@ export const calculateComprehensiveSummary = (sales = [], expenses = [], transac
     deposits: financial.deposits,
     finalAfterAllSettlements: financial.finalAfterAllSettlements,
     orderCount: financial.orderCount,
+    openingCashBalance: endDay?.openingCashBalance ?? null,
+    expectedClosingCash: endDay?.expectedClosingCash ?? null,
+    actualCash: endDay?.actualCash ?? null,
+    endDayDifference: endDay?.difference ?? null,
+    netDrawerMovement: endDay?.netDrawerMovement ?? null,
+    netCashSalesFromDrawer: endDay?.netCashSalesFromDrawer ?? null,
+    cashSalesDifference: endDay?.cashSalesDifference ?? null,
+    cashSalesDifferenceStatus: endDay?.cashSalesDifferenceStatus ?? 'unknown',
   }
 }

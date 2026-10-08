@@ -6,7 +6,7 @@ import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.
 import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { isCashboxExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
-import { calculateCashboxBalance } from '../services/financialCenter.js'
+import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
@@ -279,6 +279,20 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     periodTo,
   ), [expenses, periodFrom, periodTo, expenseOperationalDayDates])
   const filteredTransactions = useMemo(() => filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo), [cashboxTransactions, periodFrom, periodTo])
+  const endDayReport = useMemo(() => {
+    if (periodFrom !== periodTo) return null
+    const day = selectedClosedDay || (operationalDay?.businessDate === periodFrom ? operationalDay : null)
+    if (!day) return null
+    const settlement = storedSettlement
+    const effective = settlement ? getEffectiveSettlement(settlement, (Array.isArray(settlementCorrections) ? settlementCorrections : []).filter(row => row.settlementId === settlement.id)) : null
+    return calculateCashboxDay({
+      openingCashBalance: settlement?.openingCashBalance ?? day.openingCashBalance,
+      actualCash: effective?.effectiveActualCash,
+      sales: filteredSales,
+      expenses: filteredExpenses,
+      transactions: filteredTransactions,
+    })
+  }, [periodFrom, periodTo, selectedClosedDay, operationalDay, storedSettlement, settlementCorrections, filteredSales, filteredExpenses, filteredTransactions])
   const normalizedCashOutflows = useMemo(() => normalizeCashOutflowReport({ expenses, transactions: cashboxTransactions, staff, operationalDayDates: expenseOperationalDayDates }), [expenses, cashboxTransactions, staff, expenseOperationalDayDates])
   const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
   const managementReport = useMemo(() => buildManagementPaymentsReport({ expenses, transactions: cashboxTransactions, staff, from: periodFrom, to: periodTo, type: managementTypeFilter }), [expenses, cashboxTransactions, staff, periodFrom, periodTo, managementTypeFilter])
@@ -389,7 +403,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     if (!directThermalReady || !onDirectThermalPrint) return
     const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات بلي وتوترز', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
-      ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions)
+      ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)
       : undefined
     onDirectThermalPrint({ reportType, title: titleByType[reportType] || 'تقرير المبيعات', reportDate: periodFrom, dateFrom: periodFrom, dateTo: periodTo, period: `${periodFrom} إلى ${periodTo}`, sales: filteredSales, expenses: reportType === 'expenses' ? filteredCashOutflows : filteredExpenses, cashOutflows: filteredCashOutflows, ...(reportType === 'materials' ? { products, categories, materials: buildMaterialsReport({ sales: filteredSales, products, categories }) } : {}), ...(summary ? { summary } : {}) })
   }
@@ -643,7 +657,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     } else if (reportType === 'comprehensive') {
       title = 'تقرير شامل'
       const stats = aggregateSales(filteredSales)
-      const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions)
+      const summary = calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)
       const { grossSales, discounts, expenses: expensesTotal, cashboxExpenses, managementExpenses, netAfterDiscount, netAfterExpenses, netAfterExpensesAndDiscount, netCashAfterAll, cashSales, cashboxWithdrawals, managementWithdrawals, withdrawals, deposits, finalAfterAllSettlements } = summary
       const totalServiceCharge = filteredSales.reduce((sum, s) => sum + Number(s.service || 0), 0)
       const cashTotal = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + numberValue(s.total), 0)
@@ -681,6 +695,16 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
             <tr><td>النقدي</td><td className="number-cell">{format(cashTotal)}</td></tr>
             <tr><td>الإلكتروني</td><td className="number-cell">{format(electronicTotal)}</td></tr>
+            <tr><td>الرصيد الافتتاحي</td><td className="number-cell">{summary.openingCashBalance == null ? 'غير متوفر' : format(summary.openingCashBalance)}</td></tr>
+            <tr><td>مبيعات الكاش</td><td className="number-cell">{format(summary.cashSales)}</td></tr>
+            <tr><td>المصاريف</td><td className="number-cell">{format(expensesTotal)}</td></tr>
+            <tr><td>السحوبات</td><td className="number-cell">{format(withdrawals)}</td></tr>
+            <tr className="summary-highlight"><td>الرصيد المتوقع بالصندوق</td><td className="number-cell">{summary.expectedClosingCash == null ? 'غير متوفر' : format(summary.expectedClosingCash)}</td></tr>
+            <tr><td>الكاش الفعلي</td><td className="number-cell">{summary.actualCash == null ? 'غير متوفر' : format(summary.actualCash)}</td></tr>
+            <tr><td>الفرق</td><td className="number-cell">{summary.endDayDifference == null ? 'غير متوفر' : `${format(summary.endDayDifference)} ${summary.endDayDifference === 0 ? 'مطابق' : summary.endDayDifference < 0 ? 'نقص' : 'زيادة'}`}</td></tr>
+            <tr><td>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي</td><td className="number-cell">{summary.netDrawerMovement == null ? 'غير متوفر' : format(summary.netDrawerMovement)}</td></tr>
+            <tr><td>صافي مبيعات اليوم النقدية</td><td className="number-cell">{summary.netCashSalesFromDrawer == null ? 'غير متوفر' : format(summary.netCashSalesFromDrawer)}</td></tr>
+            <tr><td>فرق المبيعات النقدية</td><td className="number-cell">{summary.cashSalesDifference == null ? 'غير متوفر' : `${format(summary.cashSalesDifference)} ${summary.cashSalesDifferenceStatus === 'matched' ? 'مطابق' : summary.cashSalesDifferenceStatus === 'short' ? 'نقص' : 'زيادة'}`}</td></tr>
             <tr><td>سحوبات من الصندوق</td><td className="number-cell">{format(cashboxWithdrawals)}</td></tr>
             <tr><td>سحوبات من الإدارة</td><td className="number-cell">{format(managementWithdrawals)}</td></tr>
             <tr><td>إجمالي السحوبات</td><td className="number-cell">{format(withdrawals)}</td></tr>

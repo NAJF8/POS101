@@ -3,8 +3,11 @@ import { Icon } from './Icons'
 import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.js'
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/recoverySnapshot.js'
+import { calculateEndDayCashAnalysis } from '../services/financialCenter.js'
 
 const money = value => formatMoney(Number(value || 0))
+const displayMoney = value => value === null || value === undefined ? '—' : money(value)
+const differenceLabel = value => value === null || value === undefined ? '' : value === 0 ? 'مطابق' : value < 0 ? 'نقص' : 'زيادة'
 
 export default function OperationalDay({ day, summary, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
   const [endOpen, setEndOpen] = useState(false)
@@ -39,6 +42,14 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])
   const startedTime = useMemo(() => day?.startedAt ? formatTime(day.startedAt, { hour: '2-digit', minute: '2-digit', hour12: true }) : '—', [day?.startedAt])
   const expectedCashOpening = settlementPreview?.openingCashBalanceOrZero ?? (settlementPreview?.openingCashBalance == null ? 0 : settlementPreview.openingCashBalance)
+  const endDayAnalysis = useMemo(() => calculateEndDayCashAnalysis({
+    openingCashBalance: settlementPreview?.openingCashBalance,
+    cashSales: settlementPreview?.cashSales,
+    expenses: settlementPreview?.expenses,
+    withdrawals: settlementPreview?.withdrawals,
+    expectedCash: settlementPreview?.expectedClosingCash,
+    actualCash,
+  }), [settlementPreview, actualCash])
 
   const start = async () => {
     if (busy || startBusy) return
@@ -235,19 +246,18 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
           {preCloseGuard?.allowed === false && <p className="form-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
           <span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span>
           <span>إجمالي المبيعات <b>{money(summary.total)}</b></span>
-          <span>مبيعات نقدية <b>{money(settlementPreview.cashSales)}</b></span>
+          <span>الرصيد الافتتاحي <b>{displayMoney(settlementPreview.openingCashBalance)}</b></span>
+          <span>مبيعات الكاش <b>{money(settlementPreview.cashSales)}</b></span>
           <span>مبيعات إلكترونية <b>{money(settlementPreview.electronicSales)}</b></span>
-          <span>صندوق اليوم السابق <b>{settlementPreview.openingCashBalance == null ? 'غير متوفر' : money(settlementPreview.openingCashBalance)}</b></span>
-          <span>رصيد بداية اليوم <b>{settlementPreview.openingCashBalance == null ? 'غير متوفر' : money(settlementPreview.openingCashBalance)}</b></span>
-          <span>مصاريف نقدية <b>{money(settlementPreview.expenses)}</b></span>
-          <span>سحوبات من الصندوق <b>{money(settlementPreview.cashboxWithdrawals)}</b></span>
-          <span>سحوبات من الإدارة <b>{money(settlementPreview.managementWithdrawals)}</b></span>
-          <span>إيداعات <b>{money(settlementPreview.deposits)}</b></span>
-          <span>صافي حركة اليوم <b>{money(settlementPreview.dailyCashMovement)}</b></span>
-          <span>المبلغ المتوقع بالصندوق نهاية اليوم <b>{money(expectedCashOpening + settlementPreview.dailyCashMovement)}</b></span>
+          <span>المصاريف <b>{money(settlementPreview.expenses)}</b></span>
+          <span>السحوبات <b>{money(settlementPreview.withdrawals)}</b></span>
+          <span>الرصيد المتوقع بالصندوق <b>{money(settlementPreview.expectedClosingCash ?? (expectedCashOpening + settlementPreview.dailyCashMovement))}</b></span>
           {settlementPreview.openingCashBalance == null && <small role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
-          <label className="settlement-actual-cash">المبلغ الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل المبلغ الفعلي" /></label>
-          {actualCash !== '' && settlementPreview.openingCashBalance != null && <span>الفرق <b>{money(Number(actualCash) - settlementPreview.expectedClosingCash)}</b></span>}
+          <label className="settlement-actual-cash">الكاش الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل الكاش الفعلي" /></label>
+          {actualCash !== '' && <span>الفرق <b>{displayMoney(endDayAnalysis.difference)} {differenceLabel(endDayAnalysis.difference)}</b></span>}
+          <span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي <b>{displayMoney(endDayAnalysis.netDrawerMovement)}</b></span>
+          <span>صافي مبيعات اليوم النقدية <b>{displayMoney(endDayAnalysis.netCashSalesFromDrawer)}</b></span>
+          <span>فرق المبيعات النقدية <b>{displayMoney(endDayAnalysis.cashSalesDifference)} {differenceLabel(endDayAnalysis.cashSalesDifference)}</b></span>
         </div>
         <div className="dialog-actions">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>
