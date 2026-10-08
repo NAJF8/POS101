@@ -1180,11 +1180,6 @@ export default function App() {
     return saved
   }, [])
 
-  const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
-  if (isCentralConfigured() && !centralAuthReady) return null
-  if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
-
-  const sellingBlocked = !session || !operationalDayCentralReady || operationalDay?.status !== 'open'
   const cashierSyncState = useMemo(() => {
     if (cashierSyncPhase === 'saving') return { state: 'saving', label: 'جاري الحفظ...' }
     if (!isOnline || !centralAuthReady || !centralAuthUser) return { state: 'offline', label: 'بانتظار الاتصال' }
@@ -1192,6 +1187,12 @@ export default function App() {
     if (cashierSyncPhase === 'saved') return { state: 'saved', label: 'محفوظ' }
     return { state: 'connected', label: 'متصل' }
   }, [cashierSyncPhase, isOnline, centralAuthReady, centralAuthUser, saleSyncStatus])
+
+  const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
+  if (isCentralConfigured() && !centralAuthReady) return null
+  if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
+
+  const sellingBlocked = !session || !operationalDayCentralReady || operationalDay?.status !== 'open'
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
