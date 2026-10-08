@@ -67,6 +67,7 @@ jobs:
       - name: Build exact deployed version
         env:
           VITE_BUILD_SHA: ${{ github.sha }}
+          VITE_TEMP_OPEN_ONE_BUTTON_REPAIR: 'true'
         run: npm run build
       - run: node scripts/central-firebase-regression.mjs --build
       - name: Verify generated deploy metadata

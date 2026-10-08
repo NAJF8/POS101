@@ -122,7 +122,8 @@ export const classifyBackupSale = ({ sale, centralSales = [], openDay = null, qu
     && text(remote?.businessDate) === row.businessDate
     && text(remote?.operationalDayId || remote?.operational_day_id) === row.operationalDayId)
   const exact = sameId.find(remote => salePayloadMatches(row, remote))
-  const invalid = !isSaleSyncEligible(row) || row.status === 'voided' || row.status === 'cancelled'
+  const missingRecoveryIdentity = !id || row.orderNumber == null || !row.businessDate || !row.operationalDayId
+  const invalid = missingRecoveryIdentity || !isSaleSyncEligible(row) || row.status === 'voided' || row.status === 'cancelled' || row.status === 'canceled'
   const alreadySynced = row.syncStatus === 'synced' || row.status === 'synced' || row.centralVerified === true
   const quarantined = id === KNOWN_MANUAL_REVIEW_SALE_1056 || quarantinedSaleIds.includes(id)
   const closedRecoveryDay = row.businessDate === KNOWN_CLOSED_BUSINESS_DATE
@@ -131,7 +132,7 @@ export const classifyBackupSale = ({ sale, centralSales = [], openDay = null, qu
   if (quarantined) { classification = 'SKIP'; reason = 'المبيعة محجوزة للمراجعة اليدوية.' }
   else if (closedRecoveryDay && !exact) { classification = 'CONFLICT'; reason = 'يوم 2026-10-07 مغلق؛ لا كتابة أو تنظيف تلقائي.' }
   else if (exact) { classification = 'EXISTS_EXACT_MATCH'; reason = 'المبيعة المركزية تطابق saleId والبصمة المالية.' }
-  else if (invalid) { classification = 'SKIP'; reason = 'payload غير صالح أو المبيعة مبطلة.' }
+  else if (invalid) { classification = 'SKIP'; reason = missingRecoveryIdentity ? 'هوية الاسترداد ناقصة؛ مراجعة يدوية مطلوبة.' : 'payload غير صالح أو المبيعة مبطلة.' }
   else if (alreadySynced) { classification = 'SKIP'; reason = 'المبيعة معلّمة محلياً كمزامنة؛ لا يجوز رفعها دون مراجعة.' }
   else if (sameId.length) { classification = 'CONFLICT'; reason = 'saleId موجود مركزياً لكن payload مختلف.' }
   else if (sameOperation.length || sameOrder.length) { classification = 'CONFLICT'; reason = sameOperation.length ? 'operationKey متعارض.' : 'رقم الطلب متعارض في نفس اليوم التشغيلي.' }
