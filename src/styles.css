@@ -1050,13 +1050,22 @@ input, textarea, select { cursor: text; }
 .history-details-actions > button, .void-confirm button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--coffee); font-weight: 600; }
 .history-details-actions > button:disabled { color: #9b958e; background: #f6f4f0; }
 .history-details-actions .history-void, .void-confirm button:first-of-type { border-color: #e7c2be; background: #fff7f6; color: var(--danger); }
-.history-edit-overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(24, 20, 16, .48); }
-.history-edit-modal { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; display: grid; gap: 12px; padding: 22px; border-radius: 14px; background: var(--paper); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
-.history-edit-modal h3, .history-edit-modal p { margin: 0; }
-.history-edit-modal label { display: grid; gap: 5px; font-weight: 700; }
-.history-edit-modal input, .history-edit-modal select, .history-edit-modal textarea { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); font: inherit; }
-.history-edit-modal textarea { min-height: 74px; resize: vertical; }
-.history-edit-actions { display: flex; justify-content: flex-start; gap: 8px; }
+.history-edit-overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 24px; background: rgba(24, 20, 16, .72); }
+.history-edit-modal { width: min(620px, calc(100vw - 48px)); max-height: 85vh; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0; padding: 0; border: 1px solid rgba(76, 54, 37, .2); border-radius: 16px; background: var(--paper); box-shadow: 0 22px 70px rgba(0,0,0,.34); }
+.history-edit-header { padding: 20px 24px 15px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.history-edit-header h3, .history-edit-header p { margin: 0; }
+.history-edit-header h3 { color: var(--coffee); font-size: 1.16rem; }
+.history-edit-header p { margin-top: 5px; color: var(--muted); font-size: .86rem; }
+.history-edit-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 13px; align-content: start; padding: 18px 24px 20px; }
+.history-edit-body label { display: grid; gap: 6px; min-width: 0; color: var(--coffee); font-size: .9rem; font-weight: 700; line-height: 1.35; }
+.history-edit-modal input, .history-edit-modal select, .history-edit-modal textarea { width: 100%; min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; line-height: 1.3; }
+.history-edit-modal input:focus, .history-edit-modal select:focus, .history-edit-modal textarea:focus { outline: 2px solid rgba(117, 78, 48, .2); outline-offset: 1px; border-color: var(--coffee); }
+.history-edit-modal textarea { min-height: 58px; max-height: 78px; resize: vertical; }
+.history-edit-modal .history-edit-textarea-short { min-height: 54px; max-height: 68px; }
+.history-edit-modal .history-edit-discount input { font-size: 1.08rem; font-weight: 800; direction: ltr; text-align: right; }
+.history-edit-actions { display: flex; justify-content: flex-start; gap: 10px; padding: 14px 24px 18px; border-top: 1px solid var(--line); background: var(--paper); }
+.history-edit-actions button { min-width: 120px; min-height: 42px; }
+@media (max-width: 640px) { .history-edit-overlay { padding: 12px; } .history-edit-modal { width: min(100%, 620px); max-height: 88vh; } .history-edit-header, .history-edit-body, .history-edit-actions { padding-left: 16px; padding-right: 16px; } }
 .void-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 3px 0; color: var(--danger); font-size: 12px; }
 
 @media (max-width: 1280px) {
