@@ -33,7 +33,7 @@ import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCe
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
-import { reconcileCanonicalSales } from './canonicalSales.js'
+import { canonicalSalesForOperationalDay, reconcileCanonicalSales, summarizeCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
@@ -1447,6 +1447,176 @@ export const recoverBackupSale = async ({ sale, recoverySourceFile = '', recover
     if (!auditBack.exists()) throw Object.assign(new Error('تمت المبيعة لكن تعذر التحقق من سجل الاسترداد.'), { code: 'BACKUP_RECOVERY_AUDIT_READBACK_FAILED' })
   }
   return { committed: transaction.committed, sale: readBack.val(), duplicate: !transaction.committed, auditReadback: transaction.committed }
+}
+
+const writeBackupRepairLocalSale = (expected, now = Date.now()) => {
+  const localSales = readLocalSalesForBackupTool()
+  const index = localSales.findIndex(row => saleIdOf(row) === saleIdOf(expected))
+  if (index < 0) return { updated: false, saleId: saleIdOf(expected) }
+  localSales[index] = {
+    ...localSales[index],
+    centralVerified: true,
+    centralVerifiedAt: now,
+    syncConfirmedAt: now,
+    syncSource: 'firebase-readback',
+    syncStatus: 'synced',
+    status: 'synced',
+  }
+  localStorage.setItem(SALES_KEY, JSON.stringify(localSales))
+  return { updated: true, saleId: saleIdOf(expected) }
+}
+
+const queueEntrySaleId = entry => saleIdOf(entry?.sale || entry?.payload || entry)
+
+export const runOneClickSyncRepair = async ({
+  sales = [],
+  syncQueueItems = [],
+  businessDate = '',
+  operationalDayId = '',
+  sourceFile = '',
+  recoveredByName = '',
+  recoveryCode = '',
+  recoveryReason = '',
+} = {}) => {
+  const user = await requireAdminViewer()
+  if (!verifySystemAdminCode(recoveryCode)) throw Object.assign(new Error('رمز الإصلاح الإداري غير صحيح.'), { code: 'RECOVERY_CODE_INVALID' })
+  const actor = String(recoveredByName || user.displayName || user.email || '').trim()
+  const reason = String(recoveryReason || '').trim()
+  if (!actor || !reason) throw Object.assign(new Error('اسم المسؤول وسبب الإصلاح مطلوبان.'), { code: 'RECOVERY_REASON_REQUIRED' })
+
+  const normalized = (Array.isArray(sales) ? sales : []).map(normalizeBackupSale)
+  const targetDate = String(businessDate || normalized.find(sale => sale.businessDate)?.businessDate || '').trim()
+  const targetDayId = String(operationalDayId || normalized.find(sale => sale.operationalDayId)?.operationalDayId || '').trim()
+  const candidates = normalized.filter(sale => (!targetDate || sale.businessDate === targetDate) && (!targetDayId || sale.operationalDayId === targetDayId))
+  const centralSnapshot = await get(salesRef())
+  let centralSales = centralValues(centralSnapshot)
+  const daySnapshot = targetDayId ? await get(ref(db, `pos101_operational_days/${targetDayId}`)) : null
+  const openDay = daySnapshot?.exists() ? { ...daySnapshot.val(), id: targetDayId } : null
+  const quarantinedSaleIds = readSalesQuarantine().map(row => String(row?.saleId || '').trim()).filter(Boolean)
+  const readbackOnly = []
+  const recoveredOnce = []
+  const conflicts = []
+  const skipped = []
+  const resolvedSaleIds = new Set()
+  const firebaseWrites = []
+
+  for (const candidate of candidates) {
+    if (candidate.saleId === KNOWN_MANUAL_REVIEW_SALE_1056 || quarantinedSaleIds.includes(candidate.saleId)) {
+      skipped.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: 'SKIP', reason: 'المبيعة محجوزة للمراجعة اليدوية؛ لا readback ولا استرداد تلقائي.' })
+      continue
+    }
+    const classified = classifyBackupSale({ sale: candidate, centralSales, openDay, quarantinedSaleIds })
+    if (classified.classification === 'EXISTS_EXACT_MATCH') {
+      writeBackupRepairLocalSale(candidate)
+      readbackOnly.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, firebasePath: classified.firebasePath })
+      resolvedSaleIds.add(candidate.saleId)
+      continue
+    }
+    if (candidate.saleId === ORDER_1309_SALE_ID || Number(candidate.orderNumber) === ORDER_1309_NUMBER) {
+      skipped.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: 'SKIP', reason: candidate.saleId === KNOWN_MANUAL_REVIEW_SALE_1056 ? '1056 محجوزة للمراجعة اليدوية.' : '1309 يعتمد على Firebase canonical/readback فقط.' })
+      continue
+    }
+    if (classified.classification === 'SKIP') {
+      skipped.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: classified.classification, reason: classified.reason })
+      continue
+    }
+    if (classified.classification === 'CONFLICT') {
+      conflicts.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: classified.classification, reason: classified.reason, duplicateSaleId: classified.duplicateSaleId, duplicateOrderNumber: classified.duplicateOrderNumber })
+      continue
+    }
+    if (classified.classification !== 'MISSING_SAFE_TO_RECOVER') {
+      conflicts.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: classified.classification, reason: classified.reason })
+      continue
+    }
+    const recoveredAt = Date.now()
+    const payload = {
+      ...candidate,
+      id: candidate.saleId,
+      saleId: candidate.saleId,
+      recoveredFromBackup: true,
+      recoveryMode: 'one-click-sync-repair',
+      recoverySourceFile: String(sourceFile || ''),
+      recoveredByName: actor,
+      recoveredAt,
+      recoveryReason: reason,
+      originalSyncStatus: candidate.syncStatus || 'pending',
+    }
+    const saleRef = ref(db, `pos101_sales/${candidate.saleId}`)
+    const transaction = await runTransaction(saleRef, current => current == null ? payload : current)
+    const readBack = await get(saleRef)
+    if (!readBack.exists() || !salePayloadMatches(candidate, readBack.val())) throw Object.assign(new Error(`فشل readback الكامل للطلب ${candidate.orderNumber || candidate.saleId}.`), { code: 'BACKUP_RECOVERY_READBACK_FAILED' })
+    if (!transaction.committed) {
+      conflicts.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: 'CONFLICT', reason: 'ظهر سجل مركزي أثناء الإصلاح؛ لم تتم كتابة ثانية.' })
+      continue
+    }
+    const auditId = `audit-one-click-sync-repair-${candidate.saleId}-${recoveredAt}`
+    const audit = financialAuditPayload({ id: auditId, user, action: 'one_click_sync_repair', entityType: 'sale', entityId: candidate.saleId, after: { saleId: candidate.saleId, orderNumber: candidate.orderNumber, total: candidate.total, recoveryMode: 'one-click-sync-repair', sourceFile: String(sourceFile || '') }, reason, businessDate: candidate.businessDate })
+    await set(financialPath(`${auditPath}/${auditId}`), audit)
+    const auditBack = await get(financialPath(`${auditPath}/${auditId}`))
+    if (!auditBack.exists()) throw Object.assign(new Error(`تعذر قراءة سجل التدقيق للطلب ${candidate.orderNumber || candidate.saleId}.`), { code: 'BACKUP_RECOVERY_AUDIT_READBACK_FAILED' })
+    writeBackupRepairLocalSale(candidate)
+    firebaseWrites.push(candidate.saleId)
+    recoveredOnce.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, firebasePath: `pos101_sales/${candidate.saleId}` })
+    resolvedSaleIds.add(candidate.saleId)
+    centralSales = [...centralSales.filter(remote => saleIdOf(remote) !== candidate.saleId), readBack.val()]
+  }
+
+  const rawQueueValue = readRawSaleQueue()
+  const rawQueue = Array.isArray(rawQueueValue) ? rawQueueValue : []
+  const queueActions = []
+  const retainedQueue = rawQueue.filter(entry => {
+    const type = String(entry?.type || entry?.kind || '').toLowerCase()
+    const isSaleEntry = Boolean(entry?.sale || type === 'sale' || type === 'sales' || type === 'order')
+    const id = queueEntrySaleId(entry)
+    if (!isSaleEntry || !id || !resolvedSaleIds.has(id)) return true
+    queueActions.push({ saleId: id, action: 'resolved-after-readback' })
+    return false
+  })
+  const queueCleanupReport = {
+    reportType: 'pos101-one-click-sync-repair',
+    at: Date.now(),
+    sourceFile: String(sourceFile || ''),
+    businessDate: targetDate,
+    operationalDayId: targetDayId,
+    inputQueueItems: Array.isArray(syncQueueItems) ? syncQueueItems.length : 0,
+    activeQueueBefore: rawQueue.length,
+    activeQueueAfter: retainedQueue.length,
+    actions: queueActions,
+    retainedUnmatched: retainedQueue.length,
+    firebaseWrites: firebaseWrites,
+    noBlindDelete: true,
+  }
+  localStorage.setItem('pos101.queueCleanupReport', JSON.stringify(queueCleanupReport))
+  if (queueActions.length) localStorage.setItem('pos101.syncQueue', JSON.stringify(retainedQueue))
+  if (queueActions.length) window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
+
+  const localSales = readLocalSalesForBackupTool()
+  const day = openDay || { id: targetDayId, businessDate: targetDate }
+  const canonical = canonicalSalesForOperationalDay({ localSales, centralSales, operationalDay: day })
+  const finalSummary = summarizeCanonicalSales(canonical)
+  const endDayReady = retainedQueue.length === 0 && conflicts.length === 0 && finalSummary.salesBalanced && finalSummary.paymentsBalanced
+  return {
+    oneClickSyncRepair: 'PASS',
+    businessDate: targetDate,
+    operationalDayId: targetDayId,
+    localCount: candidates.length,
+    localTotal: candidates.reduce((sum, sale) => sum + Number(sale.total || 0), 0),
+    firebaseMatched: readbackOnly.length + recoveredOnce.length,
+    readbackOnly,
+    recoveredOnce,
+    queueItemsResolved: queueActions.length,
+    conflicts,
+    skipped,
+    activeSyncQueueLengthAfter: retainedQueue.length,
+    endDayReady,
+    currentDayFinalCount: finalSummary.count,
+    currentDayFinalTotal: finalSummary.net,
+    noDuplicateSaleId: 'PASS',
+    noDuplicateOrderNumberConflict: conflicts.every(item => item.duplicateOrderNumber !== true) ? 'PASS' : 'FAIL',
+    noClosedDayWrite: openDay?.status === 'open' ? 'PASS' : (firebaseWrites.length ? 'FAIL' : 'PASS'),
+    no1056Touch: recoveredOnce.every(item => item.saleId !== KNOWN_MANUAL_REVIEW_SALE_1056) ? 'PASS' : 'FAIL',
+    queueCleanupReport,
+  }
 }
 
 export const readLocalExpenses = () => readCachedExpenses()

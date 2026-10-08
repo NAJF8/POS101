@@ -43,6 +43,21 @@ export const parseBackupSales = input => {
   })
 }
 
+const firstArray = (...values) => values.find(value => Array.isArray(value)) || []
+
+export const parseBackupRecoveryInput = input => {
+  const parsed = parseMaybeJson(input)
+  if (!parsed || typeof parsed !== 'object') throw new Error('ملف التشخيص/النسخة الاحتياطية ليس JSON صالحاً.')
+  const localStorage = parsed?.localStorage || parsed?.storage || {}
+  const localSalesRaw = parseMaybeJson(localStorage?.['pos101.sales'])
+  const queueRaw = parseMaybeJson(localStorage?.['pos101.syncQueue'])
+  const sales = parseBackupSales(parsed)
+  const syncQueueItems = firstArray(parsed?.syncQueueItems, parsed?.syncQueue, parsed?.['pos101.syncQueue'], parsed?.data?.syncQueue, localSalesRaw?.syncQueue, queueRaw)
+  const businessDate = String(parsed?.businessDate || parsed?.operationalDay?.businessDate || sales.find(sale => sale.businessDate)?.businessDate || '').trim()
+  const operationalDayId = String(parsed?.operationalDayId || parsed?.operationalDay?.id || sales.find(sale => sale.operationalDayId)?.operationalDayId || '').trim()
+  return { sales, syncQueueItems, businessDate, operationalDayId, source: parsed }
+}
+
 export const summarizeBackupSales = sales => {
   const rows = Array.isArray(sales) ? sales : []
   const byDay = new Map()

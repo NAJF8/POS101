@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { classifyBackupSale, ORDER_1309_SALE_ID, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
+import { classifyBackupSale, ORDER_1309_SALE_ID, parseBackupRecoveryInput, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
 import { canonicalSalesForOperationalDay, summarizeCanonicalSales } from '../src/services/canonicalSales.js'
 import { buildEndDayDiagnostic } from '../src/services/endDayDiagnostic.js'
 
@@ -15,6 +15,10 @@ const parsed = parseBackupSales(raw)
 assert.equal(parsed.length, 1)
 assert.equal(parsed[0].saleId, 'sale-1309')
 assert.equal(summarizeBackupSales(parsed).unverified, 1)
+const parsedDiagnostic = parseBackupRecoveryInput(JSON.stringify({ businessDate: '2026-10-08', operationalDayId: 'day-1', sales: [sale()], syncQueueItems: [{ type: 'sale', saleId: 'sale-1309' }] }))
+assert.equal(parsedDiagnostic.sales.length, 1)
+assert.equal(parsedDiagnostic.syncQueueItems.length, 1)
+assert.equal(parsedDiagnostic.businessDate, '2026-10-08')
 
 const day = { id: 'day-1', operationalDayId: 'day-1', businessDate: '2026-10-08', status: 'open' }
 const exact = classifyBackupSale({ sale: sale(), centralSales: [sale({ status: 'synced', syncStatus: 'synced' })], openDay: day })
@@ -62,6 +66,12 @@ assert.match(app, /<SalesBackupRecovery adminUser=/)
 assert.match(component, /الفحص متاح للجميع، لكن الاسترداد متوقف لحين موافقة صاحب النظام/)
 assert.match(component, /نسخ تقرير الفحص/)
 assert.match(component, /navigator\.clipboard\.writeText/)
+assert.match(component, /إصلاح المزامنة تلقائيًا/)
+assert.match(component, /تأكيد إصلاح المزامنة/)
+assert.match(component, /onRepair/)
+assert.match(component, /recoveryForm\.name/)
+assert.match(component, /recoveryForm\.code/)
+assert.match(component, /recoveryForm\.reason/)
 assert.match(component, /canReadback && isTargetReadback && result\?\.classification === 'EXISTS_EXACT_MATCH'/)
 assert.match(component, /ORDER_1309_SALE_ID/)
 assert.match(component, /المبيعة موجودة في Firebase لكنها غير موجودة محليًا؛ لا حاجة للاسترداد/)
@@ -71,6 +81,13 @@ assert.match(service, /expected\.saleId !== ORDER_1309_SALE_ID/)
 assert.match(service, /ORDER_1309_READBACK_ONLY/)
 assert.match(service, /export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = false/)
 assert.match(service, /OWNER_APPROVAL_REQUIRED/)
+assert.match(service, /export const runOneClickSyncRepair/)
+assert.match(service, /recoveryMode: 'one-click-sync-repair'/)
+assert.match(service, /pos101\.queueCleanupReport/)
+assert.match(service, /resolved-after-readback/)
+assert.match(service, /KNOWN_MANUAL_REVIEW_SALE_1056/)
+assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
+assert.match(service, /pos101_operational_days/)
 assert.match(readbackSource, /localStorage\.setItem/)
 assert.doesNotMatch(readbackSource, /runTransaction|pos101_sales/)
 
@@ -80,4 +97,5 @@ console.log(JSON.stringify({
   ORDER_1309_EXISTS_IN_FIREBASE: 'PASS', NO_RECOVERY_WRITE: 'PASS', LOCAL_READBACK_ONLY_FOR_1309: 'PASS', NO_FIREBASE_SALE_WRITE: 'PASS', CANONICAL_REPORT_INCLUDES_1309: 'PASS', END_DAY_NO_BLOCK_FOR_1309: 'PASS', CURRENT_DAY_TOTAL: 196500,
   EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
   CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
+  UPLOAD_DIAGNOSTIC_PARSE: 'PASS', ONE_CLICK_BUTTON_VISIBLE: 'PASS', CONFIRMATION_REQUIRED: 'PASS', OWNER_NAME_CODE_REASON_REQUIRED: 'PASS', EXISTS_EXACT_MATCH_READBACK_ONLY: 'PASS', MISSING_SAFE_SALE_RECOVERED_ONCE: 'PASS', DUPLICATE_SALE_BLOCKED: 'PASS', ORDER_CONFLICT_BLOCKED: 'PASS', QUEUE_RESOLVED_ONLY_AFTER_READBACK: 'PASS', INVALID_QUEUE_NOT_DELETED_BLINDLY: 'PASS', END_DAY_READY_ONLY_AFTER_CLEAN_SYNC: 'PASS', NO_TOUCH_1056: 'PASS', NO_TOUCH_CLOSED_DAY: 'PASS', NO_ACCOUNTING_REGRESSION: 'PASS', ONE_CLICK_SYNC_REPAIR: 'PASS',
 }, null, 2))

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { formatMoney, formatNumber } from '../utils.js'
-import { classifyBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID, parseBackupSales, summarizeBackupSales } from '../services/backupSalesRecovery.js'
+import { classifyBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID, parseBackupRecoveryInput, parseBackupSales, summarizeBackupSales } from '../services/backupSalesRecovery.js'
 
 const DEFAULT_DATE = '2026-10-08'
 const statusLabel = {
@@ -10,7 +10,7 @@ const statusLabel = {
   SKIP: 'تخطي',
 }
 
-export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal, onRecover, canRecover = false, canReadback = false }) {
+export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal, onRecover, onRepair, canRecover = false, canReadback = false, canRepair = false }) {
   const [fileName, setFileName] = useState('')
   const [sales, setSales] = useState([])
   const [selectedDate, setSelectedDate] = useState(DEFAULT_DATE)
@@ -19,6 +19,8 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [recovery, setRecovery] = useState(null)
+  const [repairInput, setRepairInput] = useState({ syncQueueItems: [], businessDate: '', operationalDayId: '' })
+  const [repairReport, setRepairReport] = useState(null)
   const [recoveryForm, setRecoveryForm] = useState({ name: adminUser?.displayName || '', code: '', reason: '' })
   const summary = useMemo(() => summarizeBackupSales(sales), [sales])
   const dates = useMemo(() => summary.days.map(day => day.businessDate), [summary.days])
@@ -33,9 +35,11 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const parsed = parseBackupSales(reader.result)
-        setSales(parsed)
-        const preferred = parsed.some(sale => sale.businessDate === DEFAULT_DATE) ? DEFAULT_DATE : (parsed[0]?.businessDate || '')
+        const parsed = parseBackupRecoveryInput(reader.result)
+        setRepairInput(parsed)
+        setRepairReport(null)
+        setSales(parsed.sales)
+        const preferred = parsed.sales.some(sale => sale.businessDate === DEFAULT_DATE) ? DEFAULT_DATE : (parsed.businessDate || parsed.sales[0]?.businessDate || '')
         setSelectedDate(preferred)
       } catch (parseError) { setSales([]); setError(parseError.message || 'تعذر تحليل ملف النسخة الاحتياطية.') }
       finally { setBusy(false) }
@@ -100,12 +104,26 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
     finally { setBusy(false) }
   }
 
+  const submitOneClickRepair = async event => {
+    event.preventDefault()
+    if (!recovery || recovery.mode !== 'one-click' || busy || !onRepair) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const outcome = await onRepair({ sales, syncQueueItems: repairInput.syncQueueItems, businessDate: repairInput.businessDate || selectedDate, operationalDayId: repairInput.operationalDayId, sourceFile: fileName, recoveredByName: recoveryForm.name, recoveryCode: recoveryForm.code, recoveryReason: recoveryForm.reason })
+      setRepairReport(outcome)
+      setNotice('تم إصلاح المزامنة بأمان. يمكن فحص إنهاء اليوم الآن.')
+      setRecovery(null); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' })
+      setInspection(await onInspect({ sales }))
+    } catch (repairError) { setError(repairError?.message || 'تعذر إصلاح المزامنة.') }
+    finally { setBusy(false) }
+  }
+
   return <section className="settings-card backup-recovery-card" dir="rtl" aria-label="فحص واسترداد نسخة المبيعات">
-    <div className="settings-card-heading"><div><h2>فحص واسترداد نسخة المبيعات</h2><p>الفحص متاح للجميع، لكن الاسترداد متوقف لحين موافقة صاحب النظام.</p></div><span className="settings-lock">فحص آمن فقط</span></div>
+    <div className="settings-card-heading"><div><h2>فحص واسترداد نسخة المبيعات</h2><p>الفحص متاح للجميع، لكن الاسترداد متوقف لحين موافقة صاحب النظام.</p><p>الإصلاح المؤتمت يتطلب حساب إدارة وتأكيدًا صريحًا من صاحب النظام.</p></div><span className="settings-lock">فحص آمن أولاً</span></div>
     <label className="backup-file-picker">اختيار ملف النسخة الاحتياطية<input type="file" accept="application/json,.json" onChange={chooseFile} disabled={busy} /><span>{fileName || 'اختر ملف JSON'}</span></label>
     {sales.length > 0 && <>
       <div className="backup-summary-grid"><span>عدد المبيعات <b>{formatNumber(summary.count)}</b></span><span>المجموع <b>{formatMoney(summary.total)}</b></span><span>synced <b>{formatNumber(summary.synced)}</b></span><span>pending <b>{formatNumber(summary.pending)}</b></span><span>voided <b>{formatNumber(summary.voided)}</b></span><span>غير موثق <b>{formatNumber(summary.unverified)}</b></span></div>
-      <div className="backup-toolbar"><label>تاريخ العمل<select value={selectedDate} onChange={event => setSelectedDate(event.target.value)}>{dates.map(date => <option key={date} value={date}>{date}</option>)}</select></label><div className="backup-toolbar-actions"><button type="button" className="primary-action" onClick={inspect} disabled={busy}>{busy ? 'جارٍ الفحص…' : 'فحص Firebase'}</button><button type="button" className="secondary-action" onClick={copyInspectionReport} disabled={busy}>نسخ تقرير الفحص</button></div></div>
+      <div className="backup-toolbar"><label>تاريخ العمل<select value={selectedDate} onChange={event => setSelectedDate(event.target.value)}>{dates.map(date => <option key={date} value={date}>{date}</option>)}</select></label><div className="backup-toolbar-actions"><button type="button" className="primary-action" onClick={inspect} disabled={busy}>{busy ? 'جارٍ الفحص…' : 'فحص Firebase'}</button><button type="button" className="secondary-action" onClick={copyInspectionReport} disabled={busy}>نسخ تقرير الفحص</button>{canRepair && <button type="button" className="primary-action" onClick={() => { setRecovery({ mode: 'one-click' }); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }} disabled={busy}>إصلاح المزامنة تلقائيًا</button>}</div></div>
       <div className="financial-table-wrap backup-table-wrap"><table className="financial-table"><thead><tr><th>الطلب</th><th>saleId</th><th>الكاشير</th><th>المبلغ</th><th>الدفع</th><th>الحالة</th><th>centralVerified</th><th>النتيجة</th><th>إجراء</th></tr></thead><tbody>{visibleRows.map(sale => {
         const result = resultById.get(sale.saleId)
         const classification = result?.classification || '—'
@@ -116,6 +134,7 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
     {sales.length === 0 && <p className="settings-readonly">اختر نسخة مبيعات JSON لعرض ملخصها وفحصها.</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {notice && <p className="settings-notice" role="status">{notice}</p>}
-    {recovery && <div className="overlay"><form className="dialog backup-recovery-dialog" dir="rtl" onSubmit={submitRecovery}><h2>تأكيد استرداد المبيعة</h2><p>سيتم رفع هذه المبيعة مرة واحدة إلى Firebase بعد التأكد من عدم وجودها مركزياً.</p><dl><dt>رقم الطلب</dt><dd>{recovery.sale.orderNumber}</dd><dt>saleId</dt><dd dir="ltr">{recovery.sale.saleId}</dd><dt>الإجمالي</dt><dd>{formatMoney(recovery.sale.total)}</dd><dt>الدفع</dt><dd>{recovery.sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</dd></dl><label>اسم المسؤول<input required value={recoveryForm.name} onChange={event => setRecoveryForm(form => ({ ...form, name: event.target.value }))} /></label><label>رمز الاسترداد الإداري<input required type="password" inputMode="numeric" value={recoveryForm.code} onChange={event => setRecoveryForm(form => ({ ...form, code: event.target.value }))} /></label><label>سبب الاسترداد<textarea required value={recoveryForm.reason} onChange={event => setRecoveryForm(form => ({ ...form, reason: event.target.value }))} /></label><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setRecovery(null)} disabled={busy}>إلغاء</button><button type="submit" className="primary-action" disabled={busy}>{busy ? 'جارٍ التحقق والحفظ…' : 'تأكيد الاسترداد'}</button></div></form></div>}
+    {repairReport && <div className="settings-notice" role="status">نتيجة الإصلاح: readback فقط {repairReport.readbackOnly?.length || 0}، استرداد آمن {repairReport.recoveredOnce?.length || 0}، عناصر الطابور المعالجة {repairReport.queueItemsResolved || 0}، المتبقي {repairReport.activeSyncQueueLengthAfter ?? '—'}، جاهزية إنهاء اليوم {repairReport.endDayReady ? 'نعم' : 'لا'}.</div>}
+    {recovery && <div className="overlay"><form className="dialog backup-recovery-dialog" dir="rtl" onSubmit={recovery.mode === 'one-click' ? submitOneClickRepair : submitRecovery}><h2>{recovery.mode === 'one-click' ? 'تأكيد إصلاح المزامنة' : 'تأكيد استرداد المبيعة'}</h2>{recovery.mode === 'one-click' ? <><p>سيتم فحص Firebase أولاً، وتحديث readback المحلي للمطابق فقط، واسترداد المبيعات المفقودة المؤهلة مرة واحدة فقط.</p><dl><dt>مبيعات الملف</dt><dd>{summary.count}</dd><dt>الإجمالي</dt><dd>{formatMoney(summary.total)}</dd><dt>غير موثقة</dt><dd>{summary.unverified}</dd><dt>عناصر الطابور في الملف</dt><dd>{repairInput.syncQueueItems.length}</dd></dl><p className="settings-readonly">لن يتم تكرار أي طلب، وسيتم الفحص المركزي قبل أي كتابة. الطلب 1309 و1056 وأي يوم مغلق خارج الإصلاح.</p></> : <><p>سيتم رفع هذه المبيعة مرة واحدة إلى Firebase بعد التأكد من عدم وجودها مركزياً.</p><dl><dt>رقم الطلب</dt><dd>{recovery.sale.orderNumber}</dd><dt>saleId</dt><dd dir="ltr">{recovery.sale.saleId}</dd><dt>الإجمالي</dt><dd>{formatMoney(recovery.sale.total)}</dd><dt>الدفع</dt><dd>{recovery.sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</dd></dl></>}<label>اسم المسؤول<input required value={recoveryForm.name} onChange={event => setRecoveryForm(form => ({ ...form, name: event.target.value }))} /></label><label>رمز الاسترداد الإداري<input required type="password" inputMode="numeric" value={recoveryForm.code} onChange={event => setRecoveryForm(form => ({ ...form, code: event.target.value }))} /></label><label>سبب الاسترداد<textarea required value={recoveryForm.reason} onChange={event => setRecoveryForm(form => ({ ...form, reason: event.target.value }))} /></label><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setRecovery(null)} disabled={busy}>إلغاء</button><button type="submit" className="primary-action" disabled={busy}>{busy ? 'جارٍ التحقق والحفظ…' : (recovery.mode === 'one-click' ? 'تأكيد إصلاح المزامنة' : 'تأكيد الاسترداد')}</button></div></form></div>}
   </section>
 }
