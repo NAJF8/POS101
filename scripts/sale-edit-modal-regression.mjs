@@ -6,6 +6,8 @@ const jsx = fs.readFileSync(new URL('../src/components/OrderHistoryMenu.jsx', im
 const modal = css.match(/\.history-edit-modal\s*\{([^}]*)\}/)?.[1] || ''
 const body = css.match(/\.history-edit-body\s*\{([^}]*)\}/)?.[1] || ''
 const actions = css.match(/\.history-edit-actions\s*\{([^}]*)\}/)?.[1] || ''
+const products = css.match(/\.history-edit-products\s*\{([^}]*)\}/)?.[1] || ''
+const itemsTable = css.match(/\.history-edit-items-table\s*\{([^}]*)\}/)?.[1] || ''
 assert.match(modal, /width:\s*min\(620px,\s*calc\(100vw\s*-\s*32px\)\)/)
 assert.match(modal, /max-height:\s*min\(86vh,\s*680px\)/)
 assert.match(modal, /grid-template-rows:\s*auto minmax\(0, 1fr\) auto/)
@@ -17,6 +19,17 @@ assert.match(jsx, /body\.style\.overflow\s*=\s*'hidden'/)
 assert.match(jsx, /تعديل الطلب رقم/)
 assert.match(jsx, /placeholder="0"/)
 assert.match(jsx, /history-edit-close/)
+assert.match(jsx, /SoldProductsSnapshot/)
+assert.match(jsx, /المنتجات المباعة/)
+assert.match(jsx, /لا توجد تفاصيل منتجات محفوظة لهذا الطلب/)
+assert.match(jsx, /sale\?\.items, sale\?\.cart, sale\?\.products, sale\?\.orderItems, sale\?\.lines/)
+assert.match(jsx, /item\?\.price \?\? item\?\.unitPrice/)
+assert.match(jsx, /المجموع قبل الخصم/)
+assert.match(jsx, /الإجمالي بعد الخصم/)
+assert.match(products, /border-bottom:/)
+assert.match(itemsTable, /table-layout:\s*fixed/)
+assert.match(jsx, /<input|<select|<textarea/)
+assert.match(jsx, /SoldProductsSnapshot sale=\{editingSale\}/)
 assert.match(body, /overflow-y:\s*auto/)
 assert.match(body, /overscroll-behavior:\s*contain/)
 assert.match(actions, /border-top:/)
