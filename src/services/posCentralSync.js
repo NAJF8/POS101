@@ -1490,6 +1490,7 @@ export const runOneClickSyncRepair = async ({
   recoveredByName = '',
   recoveryCode = '',
   recoveryReason = '',
+  invalidQueueItems = [],
 } = {}) => {
   const user = TEMP_OPEN_ONE_BUTTON_REPAIR ? await ensurePosFirebaseSession('تسجيل الدخول إلى Firebase مطلوب لإصلاح المزامنة.') : await requireAdminViewer()
   if (!TEMP_OPEN_ONE_BUTTON_REPAIR && !verifySystemAdminCode(recoveryCode)) throw Object.assign(new Error('رمز الإصلاح الإداري غير صحيح.'), { code: 'RECOVERY_CODE_INVALID' })
@@ -1542,7 +1543,7 @@ export const runOneClickSyncRepair = async ({
       continue
     }
     if (classified.classification === 'SKIP') {
-      skipped.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: classified.classification, reason: classified.reason })
+      skipped.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: classified.classification, reason: classified.reason, voided: ['voided', 'cancelled', 'canceled'].includes(String(candidate.status || '').toLowerCase()) })
       continue
     }
     if (classified.classification === 'CONFLICT') {
@@ -1654,12 +1655,15 @@ export const runOneClickSyncRepair = async ({
     staleSyncLockCleared: Boolean(staleLock?.recovered),
     conflictsList: conflicts,
     invalidQueueItemsList: invalidQueue,
-    voidedSkipped: skipped.filter(row => ['voided', 'cancelled', 'canceled'].some(status => String(row.reason || '').toLowerCase().includes(status))).length,
     noBlindUpload: 'PASS',
     noRealSaleDelete: 'PASS',
     noOrderNumberChange: 'PASS',
     noTouch1056: recoveredOnce.every(item => item.saleId !== KNOWN_MANUAL_REVIEW_SALE_1056) ? 'PASS' : 'FAIL',
     noTouchClosedDay: openDay?.status === 'open' ? 'PASS' : (firebaseWrites.length ? 'FAIL' : 'PASS'),
+    duplicateQueueResolved: queueCleanupReport.duplicateResolutions || [],
+    voidedSkipped: skipped.filter(row => row.voided === true),
+    errors: [],
+    warnings: [],
   }
 }
 
