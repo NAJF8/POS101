@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { classifyBackupSale, ORDER_1309_SALE_ID, parseBackupSales, summarizeBackupSales } from '../src/services/backupSalesRecovery.js'
+import { canonicalSalesForOperationalDay, summarizeCanonicalSales } from '../src/services/canonicalSales.js'
 import { buildEndDayDiagnostic } from '../src/services/endDayDiagnostic.js'
 
 const sale = (overrides = {}) => ({
@@ -20,6 +21,13 @@ const exact = classifyBackupSale({ sale: sale(), centralSales: [sale({ status: '
 assert.equal(exact.classification, 'EXISTS_EXACT_MATCH')
 const endDayAfterExact = buildEndDayDiagnostic({ localSales: [sale()], queueEntries: [{ sale: sale() }], centralSales: [sale()], operationalDay: day })
 assert.equal(endDayAfterExact.blockers.length, 0)
+const localCurrentDay = Array.from({ length: 12 }, (_, index) => sale({ saleId: 'local-' + index, id: 'local-' + index, orderNumber: index + 1, total: index === 11 ? 16500 : 14500 }))
+const canonical1309 = sale({ saleId: ORDER_1309_SALE_ID, id: ORDER_1309_SALE_ID, orderNumber: 1309 })
+const canonicalCurrentDay = canonicalSalesForOperationalDay({ localSales: localCurrentDay, centralSales: [...localCurrentDay, canonical1309], operationalDay: day })
+const canonicalCurrentDaySummary = summarizeCanonicalSales(canonicalCurrentDay)
+assert.equal(canonicalCurrentDaySummary.count, 13)
+assert.equal(canonicalCurrentDaySummary.net, 196500)
+assert.ok(canonicalCurrentDay.some(row => row.saleId === ORDER_1309_SALE_ID))
 const missing = classifyBackupSale({ sale: sale(), centralSales: [], openDay: day })
 assert.equal(missing.classification, 'MISSING_SAFE_TO_RECOVER')
 const conflict = classifyBackupSale({ sale: sale(), centralSales: [sale({ saleId: 'other', id: 'other' })], openDay: day })
@@ -69,7 +77,7 @@ assert.doesNotMatch(readbackSource, /runTransaction|pos101_sales/)
 console.log(JSON.stringify({
   BACKUP_FILE_UPLOAD_UI: 'PASS', BACKUP_JSON_PARSE: 'PASS', BACKUP_SUMMARY: 'PASS', PENDING_SALES_DETECTED: 'PASS', SALE_1309_DETECTED_FROM_BACKUP: 'PASS', AUTH_FIREBASE_CHECK_WIRING: 'PASS',
   BACKUP_RECOVERY_CARD_VISIBLE_FOR_CASHIER: 'PASS', BACKUP_RECOVERY_CARD_VISIBLE_FOR_ADMIN: 'PASS', BACKUP_RECOVERY_ROUTE_WORKS_WITH_ACTIVE_SESSION: 'PASS', CASHIER_CAN_UPLOAD_AND_PARSE_BACKUP: 'PASS', CASHIER_CAN_SEE_PENDING_SALES: 'PASS', CASHIER_CANNOT_RECOVER: 'PASS', CASHIER_CANNOT_MARK_LOCAL_READBACK: 'PASS', ADMIN_RECOVERY_STILL_PROTECTED: 'PASS', COPY_INSPECTION_REPORT: 'PASS',
-  ORDER_1309_EXISTS_EXACT_MATCH: 'PASS', NO_RECOVERY_FOR_1309: 'PASS', LOCAL_READBACK_ONLY_FOR_1309: 'PASS', NO_FIREBASE_SALE_WRITE: 'PASS', NO_DUPLICATE_SALE_ID: 'PASS', END_DAY_NO_SYNC_BLOCK_FOR_1309: 'PASS',
+  ORDER_1309_EXISTS_IN_FIREBASE: 'PASS', NO_RECOVERY_WRITE: 'PASS', LOCAL_READBACK_ONLY_FOR_1309: 'PASS', NO_FIREBASE_SALE_WRITE: 'PASS', CANONICAL_REPORT_INCLUDES_1309: 'PASS', END_DAY_NO_BLOCK_FOR_1309: 'PASS', CURRENT_DAY_TOTAL: 196500,
   EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
   CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
 }, null, 2))
