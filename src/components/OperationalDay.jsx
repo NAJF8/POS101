@@ -34,6 +34,7 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
   const forgotten = open && day.startedAt && new Date(day.startedAt).toDateString() !== new Date().toDateString()
   const startedLabel = useMemo(() => day?.startedAt ? formatDateTime(day.startedAt) : '—', [day?.startedAt])
   const startedTime = useMemo(() => day?.startedAt ? formatTime(day.startedAt, { hour: '2-digit', minute: '2-digit', hour12: true }) : '—', [day?.startedAt])
+  const expectedCashOpening = settlementPreview?.openingCashBalanceOrZero ?? (settlementPreview?.openingCashBalance == null ? 0 : settlementPreview.openingCashBalance)
 
   const start = async () => {
     if (busy || startBusy) return
@@ -215,7 +216,8 @@ export default function OperationalDay({ day, summary, settlementPreview = summa
           <span>سحوبات من الإدارة <b>{money(settlementPreview.managementWithdrawals)}</b></span>
           <span>إيداعات <b>{money(settlementPreview.deposits)}</b></span>
           <span>صافي حركة اليوم <b>{money(settlementPreview.dailyCashMovement)}</b></span>
-          <span>المبلغ المتوقع بالصندوق نهاية اليوم <b>{settlementPreview.openingCashBalance == null ? 'غير متوفر' : money(settlementPreview.expectedClosingCash)}</b></span>
+          <span>المبلغ المتوقع بالصندوق نهاية اليوم <b>{money(expectedCashOpening + settlementPreview.dailyCashMovement)}</b></span>
+          {settlementPreview.openingCashBalance == null && <small role="note">تم احتساب المتوقع بافتراض رصيد بداية اليوم = 0</small>}
           <label className="settlement-actual-cash">المبلغ الفعلي<input type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} placeholder="أدخل المبلغ الفعلي" /></label>
           {actualCash !== '' && settlementPreview.openingCashBalance != null && <span>الفرق <b>{money(Number(actualCash) - settlementPreview.expectedClosingCash)}</b></span>}
         </div>

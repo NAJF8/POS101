@@ -59,9 +59,9 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
   const adjustments = movementTransactions.filter(row => row?.type === 'adjustment' && !isVoided(row)).reduce((sum, row) => sum + amount(row.signedAmount ?? row.amount), 0)
   const dailyCashMovement = cashSales + deposits - cashboxExpenses - cashboxWithdrawals + adjustments
   const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
-  const openingValue = openingKnown ? Number(openingCashBalance) : null
-  const expectedClosingCash = openingKnown ? openingValue + dailyCashMovement : dailyCashMovement
-  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0 }
+  const openingValue = openingKnown ? Number(openingCashBalance) : 0
+  const expectedClosingCash = openingValue + dailyCashMovement
+  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingKnown ? openingValue : null, openingCashBalanceOrZero: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0 }
 }
 
 export const calculateCashboxDay = ({ openingCashBalance, actualCash, sales = [], expenses = [], transactions = [] } = {}) => {
