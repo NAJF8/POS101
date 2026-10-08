@@ -7,7 +7,7 @@ const identityKeys = sale => [idOf(sale) && `id:${idOf(sale)}`, operationKeyOf(s
 const belongsToCurrentDay = (sale, day) => Boolean(day?.id && day?.businessDate && dayIdOf(sale) === String(day.id || day.operationalDayId || '').trim() && String(sale?.businessDate || '') === String(day.businessDate))
 const pendingMessage = ({ openOrderCount, pendingQueue }) => openOrderCount > 0
   ? 'يوجد طلب مفتوح، أكمله أو ألغِه قبل إنهاء اليوم.'
-  : pendingQueue > 0 ? 'توجد مبيعات مكتملة غير متزامنة. انتظر اكتمال المزامنة قبل إنهاء اليوم.' : ''
+  : pendingQueue > 0 ? 'توجد عملية غير مكتملة، سيتم المحاولة تلقائيًا.' : ''
 
 export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0 } = {}) => {
   const centralRows = Array.isArray(centralSales) ? centralSales : []

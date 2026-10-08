@@ -13,7 +13,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, onLogout, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, onSync, syncBusy = false, syncLabel = 'المزامنة جاهزة', syncStatus = {} }) {
+export default function Header({ onOpenOrders, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {} }) {
   const now = useLiveClock()
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
@@ -53,16 +53,9 @@ export default function Header({ onOpenOrders, session, onLogout, openOrdersCoun
           </button>
         )}
 
-        {session && <div className="sync-card" role="status" aria-live="polite">
-          <span>المزامنة تلقائية</span>
-          <span>{syncStatus.pendingCount > 0 || syncStatus.pendingVoidCount > 0
-            ? `${syncStatus.pendingCount > 0 ? `مبيعات بانتظار الرفع: ${formatNumber(syncStatus.pendingCount)}` : 'المبيعات مكتملة'}${syncStatus.pendingVoidCount > 0 ? ` · إبطالات بانتظار التثبيت: ${formatNumber(syncStatus.pendingVoidCount)}` : ''}`
-            : syncStatus.lastError ? 'تعذر الرفع تلقائيًا، سيعاد المحاولة. يمكنك الضغط على مزامنة الآن للطوارئ.' : 'المزامنة مكتملة'}</span>
-          {syncStatus.lastAttemptAt && <small>آخر محاولة: {new Date(syncStatus.lastAttemptAt).toLocaleTimeString('ar-IQ')}</small>}
-          {syncStatus.lastError && <small>آخر خطأ: {syncStatus.lastError}</small>}
-          <button className="header-btn outline-btn" type="button" onClick={onSync} disabled={syncBusy} title={syncLabel || 'مزامنة طوارئ'}>
-            <span>{syncBusy ? 'جارٍ المزامنة…' : 'مزامنة الآن'}</span>
-          </button>
+        {session && <div className={`sync-status-chip sync-status-${syncStatus.state || 'connected'}`} role="status" aria-live="polite">
+          <i aria-hidden="true" />
+          <span>{syncStatus.label || 'متصل'}</span>
         </div>}
 
         {session && currentView === 'pos' && (

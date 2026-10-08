@@ -111,6 +111,9 @@ export default function App() {
   const [saleSyncWarning, setSaleSyncWarning] = useState('')
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
   const [saleSyncStatus, setSaleSyncStatus] = useState(() => readSaleSyncStatus())
+  const [cashierSyncPhase, setCashierSyncPhase] = useState('idle')
+  const [cashierToast, setCashierToast] = useState('')
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false)
   const [adminAuthUser, setAdminAuthUser] = useState(null)
   const [adminAuthBusy, setAdminAuthBusy] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState('')
@@ -151,6 +154,23 @@ export default function App() {
   const saleInFlight = useRef(false)
   const staffMigrationAttempted = useRef(false)
   const staffAuthInFlight = useRef(null)
+
+  useEffect(() => {
+    const online = () => setIsOnline(true)
+    const offline = () => setIsOnline(false)
+    window.addEventListener('online', online)
+    window.addEventListener('offline', offline)
+    return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline) }
+  }, [])
+
+  useEffect(() => {
+    const showToast = event => {
+      setCashierToast(String(event.detail || ''))
+      window.setTimeout(() => setCashierToast(''), 2200)
+    }
+    window.addEventListener('pos101-cashier-toast', showToast)
+    return () => window.removeEventListener('pos101-cashier-toast', showToast)
+  }, [])
 
   const downloadSalesBackup = useCallback(() => {
     const backup = buildSalesBackup()
@@ -679,7 +699,14 @@ export default function App() {
     document.addEventListener('visibilitychange', onVisibility)
     const reconnectStop = subscribeCentralReconnect(() => { window.dispatchEvent(new Event('firebase-reconnect')) })
     const onSaleCreated = () => { void runNewSaleSyncDiagnostic().catch(error => console.info('POS101_NEW_SALE_SYNC_DIAGNOSTIC_ERROR', error?.code || error?.message || String(error))) }
-    const onWorkerDiagnostic = () => setSaleSyncStatus(readSaleSyncStatus())
+    const onWorkerDiagnostic = () => {
+      const status = readSaleSyncStatus()
+      setSaleSyncStatus(status)
+      if (!status.pendingCount && !status.pendingVoidCount) {
+        setSaleSyncWarning('')
+        setCashierSyncPhase('idle')
+      }
+    }
     window.addEventListener('pos101-sale-created', onSaleCreated)
     window.addEventListener('pos101-sync-worker-diagnostic', onWorkerDiagnostic)
     return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('pos101-sale-created', onSaleCreated); window.removeEventListener('pos101-sync-worker-diagnostic', onWorkerDiagnostic) }
@@ -831,6 +858,7 @@ export default function App() {
     }
 
     saleInFlight.current = true
+    setCashierSyncPhase('saving')
     const payment = pendingPayment
     const originalItems = activeOrder.items.map(i => ({ ...i }))
     // The order owns the id before any network request.  A lost response must
@@ -882,6 +910,9 @@ export default function App() {
       if (autoPrint) await requestSalePrint(sale)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
       setPendingPayment(null)
+      setCashierSyncPhase('saved')
+      window.setTimeout(() => setCashierSyncPhase(current => current === 'saved' ? 'idle' : current), 1800)
+      window.dispatchEvent(new CustomEvent('pos101-cashier-toast', { detail: 'تم حفظ الطلب' }))
       window.setTimeout(() => setModal(null), 350)
       saleInFlight.current = false
       return true
@@ -900,7 +931,8 @@ export default function App() {
         // The emergency fallback remains the canonical enqueueSale(sale) path.
         enqueueSale(sale, { error })
         const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
-        setSaleSyncWarning(`تعذر رفع الطلب مركزيًا؛ تم حفظه للطوارئ. السبب: ${reason}. اضغط زر المزامنة.`)
+        setCashierSyncPhase('pending')
+        setSaleSyncWarning('تعذر تثبيت الطلب مركزيًا. تحقق من الإنترنت أو أبلغ المدير.\nيوجد طلب محفوظ مؤقتًا وسيُعاد رفعه تلقائيًا.')
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
         void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       } catch (queueError) {
@@ -938,11 +970,14 @@ export default function App() {
         markSaleVoidedCentral(pending, { voidConfirmedAt: Date.now(), queueResolution: 'void_status_synced', audit: result.audit })
         setSaleSyncWarning('')
       }
+      setCashierSyncPhase('saved')
+      window.setTimeout(() => setCashierSyncPhase(current => current === 'saved' ? 'idle' : current), 1800)
+      window.dispatchEvent(new CustomEvent('pos101-cashier-toast', { detail: 'تم تثبيت الإبطال' }))
       return result.sale || pending
     } catch (error) {
       enqueueVoidUpdate(pending, voidPayload, { error })
-      const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
-      setSaleSyncWarning(`الإبطال غير مثبت مركزيًا؛ حُفظ للطوارئ. السبب: ${reason}. اضغط زر المزامنة.`)
+      setCashierSyncPhase('pending')
+      setSaleSyncWarning('تعذر تثبيت الإبطال مركزيًا. تحقق من الإنترنت أو أبلغ المدير.\nيوجد طلب محفوظ مؤقتًا وسيُعاد رفعه تلقائيًا.')
       console.warn('POS101_IMMEDIATE_VOID_SYNC_PENDING', error?.code || error?.message || String(error))
       void processSaleSyncQueue({ reason: 'void-update-failure' }).catch(retryError => console.warn('POS101_VOID_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       return pending
@@ -1150,12 +1185,20 @@ export default function App() {
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 
   const sellingBlocked = !session || !operationalDayCentralReady || operationalDay?.status !== 'open'
+  const cashierSyncState = useMemo(() => {
+    if (cashierSyncPhase === 'saving') return { state: 'saving', label: 'جاري الحفظ...' }
+    if (!isOnline || !centralAuthReady || !centralAuthUser) return { state: 'offline', label: 'بانتظار الاتصال' }
+    if (saleSyncStatus.pendingCount > 0 || saleSyncStatus.pendingVoidCount > 0) return { state: 'pending', label: 'يوجد طلب غير مثبت' }
+    if (cashierSyncPhase === 'saved') return { state: 'saved', label: 'محفوظ' }
+    return { state: 'connected', label: 'متصل' }
+  }, [cashierSyncPhase, isOnline, centralAuthReady, centralAuthUser, saleSyncStatus])
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
       {versionStatus === 'updating' && <div className="pos101-update-status" role="status" aria-live="polite">جاري تحديث النظام...</div>}
       {(versionStatus === 'deferred' || versionStatus === 'pending') && versionBlocked && <div className="pos101-update-notice" role="status" aria-live="polite">يتوفر تحديث للنظام وسيتم تطبيقه بعد إكمال الطلب الحالي.</div>}
       {saleSyncWarning && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">{saleSyncWarning}</div>}
+      {cashierToast && <div className="cashier-success-toast" role="status" aria-live="polite">{cashierToast}</div>}
       {session && operationalDay?.status === 'closed' && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">اليوم التشغيلي مغلق. افتح يومًا جديدًا قبل البيع.</div>}
       {session && (
         <Header
@@ -1165,17 +1208,14 @@ export default function App() {
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
-          onSync={handleCentralSyncClick}
-          syncBusy={syncBusy}
-          syncLabel={syncLabel}
-          syncStatus={saleSyncStatus}
+          syncStatus={cashierSyncState}
           currentView={currentView}
           onNavigate={requestView}
         />
       )}
 
       {currentView === 'dashboard' && (session || adminReady || staffManagerReady) && (
-        <Dashboard onNavigate={requestView} onLogout={logout} canAccessBackupRecovery={backupRecoveryVisible} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTables.filter(row => row.status === 'open').length} onPrepareEnd={prepareEndOperationalDay} onPrepareStart={prepareStartOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onSetOpeningCashBalance={handleSetOpeningCashBalance} onEndOperationalDay={handleEndOperationalDay} onReadDiagnostic={readDiagnostic} />
+        <Dashboard onNavigate={requestView} onLogout={logout} canAccessBackupRecovery={backupRecoveryVisible} operationalDayEnabled={Boolean(session || adminReady)} operationalDay={operationalDay} operationalDaySummary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTables.filter(row => row.status === 'open').length} onPrepareEnd={prepareEndOperationalDay} onPrepareStart={prepareStartOperationalDay} operationalDayLoading={operationalDayLoading} operationalDayError={operationalDayError} onStartOperationalDay={handleStartOperationalDay} onSetOpeningCashBalance={handleSetOpeningCashBalance} onEndOperationalDay={handleEndOperationalDay} onReadDiagnostic={readDiagnostic} canViewDiagnostics={adminReady} />
       )}
 
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (

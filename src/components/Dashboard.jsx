@@ -2,7 +2,7 @@
 import { Icon } from './Icons'
 import OperationalDay from './OperationalDay'
 
-export default function Dashboard({ onNavigate, onLogout, canAccessBackupRecovery = false, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, preCloseGuard, pendingTableCount = 0, onPrepareEnd, onPrepareStart, operationalDayLoading, operationalDayError, onStartOperationalDay, onSetOpeningCashBalance, onEndOperationalDay, onReadDiagnostic }) {
+export default function Dashboard({ onNavigate, onLogout, canAccessBackupRecovery = false, operationalDayEnabled = true, operationalDay, operationalDaySummary, settlementPreview, preCloseGuard, pendingTableCount = 0, onPrepareEnd, onPrepareStart, operationalDayLoading, operationalDayError, onStartOperationalDay, onSetOpeningCashBalance, onEndOperationalDay, onReadDiagnostic, canViewDiagnostics = false }) {
   const cards = [
     { id: 'pos', title: 'الكاشير', icon: 'monitor', action: () => onNavigate('pos') },
     { id: 'orders', title: 'الطلبات', icon: 'receipt', action: () => onNavigate('orders') },
@@ -26,7 +26,7 @@ export default function Dashboard({ onNavigate, onLogout, canAccessBackupRecover
 
   return (
     <div className="dashboard-container" dir="rtl">
-      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTableCount} loading={operationalDayLoading} error={operationalDayError} onPrepareEnd={onPrepareEnd} onPrepareStart={onPrepareStart} onStart={onStartOperationalDay} onSetOpeningCashBalance={onSetOpeningCashBalance} onEnd={onEndOperationalDay} onReadDiagnostic={onReadDiagnostic} />}
+      {operationalDayEnabled && <OperationalDay day={operationalDay} summary={operationalDaySummary} settlementPreview={settlementPreview} preCloseGuard={preCloseGuard} pendingTableCount={pendingTableCount} loading={operationalDayLoading} error={operationalDayError} onPrepareEnd={onPrepareEnd} onPrepareStart={onPrepareStart} onStart={onStartOperationalDay} onSetOpeningCashBalance={onSetOpeningCashBalance} onEnd={onEndOperationalDay} onReadDiagnostic={onReadDiagnostic} canViewDiagnostics={canViewDiagnostics} />}
       <div className="dashboard-grid">
         {cards.map(card => (
           <button 

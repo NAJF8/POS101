@@ -15,7 +15,7 @@ const normalizeCashInput = value => String(value || '')
   .replace(/[^0-9]/g, '')
 const formatCashInput = value => value === '' ? '' : Number(value).toLocaleString('en-US', { numberingSystem: 'latn' })
 
-export default function OperationalDay({ day = {}, summary = {}, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic }) {
+export default function OperationalDay({ day = {}, summary = {}, settlementPreview = summary, preCloseGuard = null, pendingTableCount = 0, loading, error, onPrepareEnd, onPrepareStart, onStart, onSetOpeningCashBalance, onEnd, onReadDiagnostic, canViewDiagnostics = false }) {
   const [endOpen, setEndOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actualCash, setActualCash] = useState('')
@@ -222,9 +222,9 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
             <span>اليوم السابق ما زال مفتوحاً</span>
             <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
             <button type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button>
-            <button type="button" onClick={openDiagnostic}>فحص المزامنة</button>
+            {canViewDiagnostics && <button type="button" onClick={openDiagnostic}>فحص المزامنة</button>}
           </div>
-        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>فحص المزامنة</button></div>}
+        : <div className="operational-day-actions"><button className="primary-action operational-day-action" type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button><button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button>{canViewDiagnostics && <button className="secondary-action operational-day-diagnostic-action" type="button" onClick={openDiagnostic}>فحص المزامنة</button>}</div>}
     </div> : <div className="operational-day-body">
       <div className="operational-day-empty">
         <strong>لا يوجد يوم تشغيلي مفتوح</strong>
@@ -334,7 +334,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           </header>
 
           {pendingTableCount > 0 && <p className="pending-day-warning" role="note">توجد طاولات معلقة غير مدفوعة، سيتم إبقاؤها في قسم الطاولات المعلقة ولا تُحسب ضمن المبيعات</p>}
-          {preCloseGuard?.allowed === false && <p className="form-error end-day-guard-error" role="alert">{preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'}</p>}
+          {preCloseGuard?.allowed === false && <p className="form-error end-day-guard-error" role="alert">{preCloseGuard.pendingQueue > 0 || preCloseGuard.validCurrentDayPendingSyncCount > 0 ? 'توجد عملية غير مكتملة، سيتم المحاولة تلقائيًا.' : (preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.')}</p>}
 
           <section className="end-day-section" aria-labelledby="end-day-sales-title">
             <div className="end-day-section-heading"><div><span className="end-day-section-kicker">الأداء</span><h3 id="end-day-sales-title">ملخص المبيعات</h3></div><span className="end-day-section-icon">↗</span></div>

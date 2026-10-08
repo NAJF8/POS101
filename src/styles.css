@@ -253,6 +253,12 @@ input, textarea, select { cursor: text; }
   position: relative;
 }
 .header-btn:hover { background: rgba(255,255,255,0.15); }
+.sync-status-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: rgba(255,255,255,.9); font-size: 12px; white-space: nowrap; }
+.sync-status-chip i { width: 7px; height: 7px; border-radius: 50%; background: #69d18b; }
+.sync-status-saving i { background: #f5c45b; animation: pos101-sync-pulse 1s ease-in-out infinite; }
+.sync-status-saved i { background: #9de6b2; }
+.sync-status-offline i, .sync-status-pending i { background: #f2a65a; }
+@keyframes pos101-sync-pulse { 50% { opacity: .35; } }
 .header-btn.logout-btn {
   border: 1px solid rgba(255,255,255,0.2);
 }
@@ -1948,3 +1954,5 @@ input, textarea, select { cursor: text; }
   text-align: center;
   font-weight: 700;
 }
+.pos101-sync-blocking-warning { white-space: pre-line; }
+.cashier-success-toast { position: fixed; right: 18px; bottom: 18px; z-index: 1000; padding: 10px 14px; border: 1px solid #c9e5d0; border-radius: 999px; background: #eef8f0; color: #27633d; box-shadow: 0 8px 24px rgba(0,0,0,.12); direction: rtl; font-size: 13px; font-weight: 700; }
