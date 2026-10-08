@@ -249,11 +249,14 @@ export default function App() {
     const employeesRoute = currentView === 'employees'
     document.documentElement.classList.toggle('employees-route', employeesRoute)
     const reportsRoute = currentView === 'reports' || currentView === 'reports-captain'
+    const backupRecoveryRoute = currentView === 'backup-recovery'
     document.documentElement.classList.toggle('reports-route', reportsRoute)
+    document.documentElement.classList.toggle('backup-recovery-open', backupRecoveryRoute)
     document.body.classList.toggle('settings-route', settingsRoute)
     document.body.classList.toggle('cashbox-route', cashboxRoute)
     document.body.classList.toggle('employees-route', employeesRoute)
     document.body.classList.toggle('reports-route', reportsRoute)
+    document.body.classList.toggle('backup-recovery-open', backupRecoveryRoute)
     return () => {
       document.documentElement.classList.remove('settings-route')
       document.body.classList.remove('settings-route')
@@ -263,6 +266,8 @@ export default function App() {
       document.body.classList.remove('employees-route')
       document.documentElement.classList.remove('reports-route')
       document.body.classList.remove('reports-route')
+      document.documentElement.classList.remove('backup-recovery-open')
+      document.body.classList.remove('backup-recovery-open')
     }
   }, [currentView])
 
@@ -1038,7 +1043,7 @@ export default function App() {
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 
   return (
-    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''}`}>
+    <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
       {versionStatus === 'updating' && <div className="pos101-update-status" role="status" aria-live="polite">جاري تحديث النظام...</div>}
       {(versionStatus === 'deferred' || versionStatus === 'pending') && versionBlocked && <div className="pos101-update-notice" role="status" aria-live="polite">يتوفر تحديث للنظام وسيتم تطبيقه بعد إكمال الطلب الحالي.</div>}
       {session && (

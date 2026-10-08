@@ -156,6 +156,7 @@ html.settings-route, body.settings-route { height: auto; min-height: 100%; overf
 html.cashbox-route, body.cashbox-route { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 html.employees-route, body.employees-route, body.employees-route #root { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 html.reports-route, body.reports-route, body.reports-route #root { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
+html.backup-recovery-open, body.backup-recovery-open, body.backup-recovery-open #root { height: auto; min-height: 100%; overflow-y: auto; overflow-x: hidden; }
 body {
   background: var(--bg-dark);
   color: var(--coffee);
@@ -178,6 +179,7 @@ input, textarea, select { cursor: text; }
 .app-shell.cashbox-app-shell { height: auto; min-height: 100vh; overflow: visible; }
 .app-shell.employees-app-shell { height: auto; min-height: 100vh; overflow: visible; }
 .app-shell.reports-app-shell { height: auto; min-height: 100vh; overflow: visible; }
+.app-shell.backup-recovery-app-shell { height: auto; min-height: 100dvh; overflow: visible; }
 
 /* ============================================================
    HEADER
@@ -1814,7 +1816,8 @@ input, textarea, select { cursor: text; }
   body .receipt-contact { display: none !important; }
   .print-status { display: none !important; }
 }
-.backup-recovery-card { margin-top: 24px; }
+.backup-recovery-route { min-height: 100dvh; padding-bottom: clamp(48px, 8vh, 88px); overscroll-behavior: contain; overflow: visible; }
+.backup-recovery-card { margin-top: 24px; overflow: visible; }
 .backup-file-picker { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px; border: 1px dashed var(--border, #d7dbe5); border-radius: 12px; cursor: pointer; }
 .backup-file-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .backup-file-picker span { color: var(--muted, #6b7280); }
@@ -1824,7 +1827,7 @@ input, textarea, select { cursor: text; }
 .backup-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .backup-toolbar label { display: grid; gap: 6px; min-width: 220px; }
 .backup-toolbar select { min-height: 42px; }
-.backup-table-wrap { overflow-x: auto; }
+.backup-table-wrap { max-height: none; overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; }
 .backup-table-wrap table { min-width: 1050px; }
 .backup-status { display: inline-block; max-width: 220px; line-height: 1.4; }
 .backup-status-exists_exact_match { color: #087443; }
