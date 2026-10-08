@@ -1039,8 +1039,8 @@ export default function App() {
         <OrderHistoryMenu
           session={session}
           salesOverride={adminReady ? adminCentralSales : null}
-          readOnly={!adminReady}
-          onEditSale={adminReady ? saveSaleEdit : null}
+          readOnly={false}
+          onEditSale={saveSaleEdit}
           canCorrectSaleItems
           staff={staff}
           correctionActor={centralAuthUser || adminAuthUser}
