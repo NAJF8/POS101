@@ -35,7 +35,7 @@ import { reconcilePreCloseSales } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
 import { canonicalSalesForOperationalDay, reconcileCanonicalSales, summarizeCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
-import { defaultSyncLockManager } from './syncLockManager.js'
+import { defaultSyncLockManager, EMERGENCY_REPAIR_KEY } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
 import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
 import { buildRecoveryCandidates, classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
@@ -1482,7 +1482,7 @@ const writeBackupRepairLocalSale = (expected, now = Date.now()) => {
 
 const queueEntrySaleId = entry => saleIdOf(entry?.sale || entry?.payload || entry)
 
-export const runOneClickSyncRepair = async ({
+const runOneClickSyncRepairInternal = async ({
   sales = [],
   syncQueueItems = [],
   businessDate = '',
@@ -1515,6 +1515,7 @@ export const runOneClickSyncRepair = async ({
   const openDay = daySnapshot?.exists() ? { ...daySnapshot.val(), id: targetDayId } : null
   const quarantinedSaleIds = readSalesQuarantine().map(row => String(row?.saleId || '').trim()).filter(Boolean)
   const readbackOnly = []
+  let localPendingVerifiedFixed = 0
   const recoveredOnce = []
   const conflicts = []
   const skipped = []
@@ -1522,11 +1523,6 @@ export const runOneClickSyncRepair = async ({
   const resolvedSaleIds = new Set()
   const firebaseWrites = []
   const staleLock = recoverStaleSyncLock()
-  if (defaultSyncLockManager.describe()) {
-    await new Promise(resolve => setTimeout(resolve, 250))
-    if (defaultSyncLockManager.describe()) throw Object.assign(new Error('المزامنة مشغولة حاليًا؛ تعذر تنفيذ الإصلاح تلقائيًا.'), { code: 'SYNC_LOCK_ACTIVE' })
-  }
-
   for (const candidate of candidates) {
     if (candidate.saleId === KNOWN_MANUAL_REVIEW_SALE_1056 || quarantinedSaleIds.includes(candidate.saleId)) {
       skipped.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, classification: 'SKIP', reason: 'المبيعة محجوزة للمراجعة اليدوية؛ لا readback ولا استرداد تلقائي.' })
@@ -1534,7 +1530,10 @@ export const runOneClickSyncRepair = async ({
     }
     const classified = classifyBackupSale({ sale: candidate, centralSales, openDay, quarantinedSaleIds })
     if (classified.classification === 'EXISTS_EXACT_MATCH') {
-      writeBackupRepairLocalSale(candidate)
+      const localBefore = localSales.find(row => saleIdOf(row) === candidate.saleId)
+      const pendingVerified = localBefore?.centralVerified === true && ['pending', 'queued'].some(status => [localBefore?.syncStatus, localBefore?.status].map(value => String(value || '').toLowerCase()).includes(status))
+      const localUpdate = writeBackupRepairLocalSale(candidate)
+      if (pendingVerified && localUpdate.updated) localPendingVerifiedFixed += 1
       readbackOnly.push({ saleId: candidate.saleId, orderNumber: candidate.orderNumber, firebasePath: classified.firebasePath })
       resolvedSaleIds.add(candidate.saleId)
       continue
@@ -1642,6 +1641,7 @@ export const runOneClickSyncRepair = async ({
     localActiveCount: finalLocalSales.filter(sale => (!targetDate || sale.businessDate === targetDate) && !['voided', 'cancelled', 'canceled'].includes(String(sale?.status || '').toLowerCase())).length,
     localActiveTotal: finalLocalSales.filter(sale => (!targetDate || sale.businessDate === targetDate) && !['voided', 'cancelled', 'canceled'].includes(String(sale?.status || '').toLowerCase())).reduce((sum, sale) => sum + Number(sale.total || 0), 0),
     firebaseMatched: readbackOnly.length + recoveredOnce.length,
+    localPendingVerifiedFixed,
     readbackOnly,
     recoveredOnce,
     queueItemsResolved: queueActions,
@@ -1669,6 +1669,28 @@ export const runOneClickSyncRepair = async ({
     voidedSkipped: skipped.filter(row => row.voided === true),
     errors: [],
     warnings: [],
+  }
+}
+
+export const ensureRepairCanProceed = options => defaultSyncLockManager.ensureRepairCanProceed(options)
+
+export const runOneClickSyncRepair = async options => {
+  const queueLength = readRawSaleQueue().length
+  let emergencyActiveSet = false
+  let repairLockAcquired = false
+  try {
+    localStorage.setItem(EMERGENCY_REPAIR_KEY, 'true')
+    emergencyActiveSet = true
+    const lockSafety = await defaultSyncLockManager.ensureRepairCanProceed({ queueLength, retries: 3, waitMs: 250 })
+    if (!lockSafety.ok) throw Object.assign(new Error('تعذر إيقاف عامل المزامنة النشط بعد 3 محاولات'), { code: 'SYNC_LOCK_ACTIVE_AFTER_RETRIES', lockSafety })
+    const repairLock = defaultSyncLockManager.acquireRepairLock()
+    if (!repairLock.acquired) throw Object.assign(new Error('تعذر الحصول على قفل الإصلاح الطارئ.'), { code: 'REPAIR_LOCK_ACTIVE', lock: repairLock.lock, lockSafety })
+    repairLockAcquired = true
+    const result = await runOneClickSyncRepairInternal(options)
+    return { ...result, syncLockBefore: lockSafety.lockBefore, syncLockCleared: lockSafety.clearedStaleLock, syncLockAfter: lockSafety.lockAfter, emergencyRepairActiveUsed: 'YES' }
+  } finally {
+    if (repairLockAcquired) defaultSyncLockManager.releaseRepairLock()
+    if (emergencyActiveSet) localStorage.removeItem(EMERGENCY_REPAIR_KEY)
   }
 }
 

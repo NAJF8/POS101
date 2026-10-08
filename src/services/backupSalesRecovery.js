@@ -18,6 +18,11 @@ export const DEFAULT_REPAIR_RESULT = Object.freeze({
   localActiveCount: 0,
   localActiveTotal: 0,
   firebaseMatched: 0,
+  syncLockBefore: null,
+  syncLockCleared: false,
+  syncLockAfter: null,
+  emergencyRepairActiveUsed: 'YES',
+  localPendingVerifiedFixed: 0,
   readbackOnly: [],
   recoveredOnce: [],
   duplicateQueueResolved: [],
@@ -41,7 +46,7 @@ export const DEFAULT_REPAIR_RESULT = Object.freeze({
 })
 
 const REPAIR_ARRAY_FIELDS = ['readbackOnly', 'recoveredOnce', 'duplicateQueueResolved', 'queueItemsResolved', 'conflicts', 'invalidQueueItems', 'voidedSkipped', 'skipped', 'errors', 'warnings']
-const REPAIR_NUMBER_FIELDS = ['backupSalesCount', 'localActiveCount', 'localActiveTotal', 'firebaseMatched', 'activeSyncQueueLengthAfter', 'currentDayFinalCount', 'currentDayFinalTotal']
+const REPAIR_NUMBER_FIELDS = ['backupSalesCount', 'localActiveCount', 'localActiveTotal', 'firebaseMatched', 'localPendingVerifiedFixed', 'activeSyncQueueLengthAfter', 'currentDayFinalCount', 'currentDayFinalTotal']
 const REPAIR_STATUS_FIELDS = ['trueOneButtonRepair', 'tempOpenOneButtonRepair', 'endDayReady', 'noBlindUpload', 'noRealSaleDelete', 'noOrderNumberChange', 'noDuplicateSaleId', 'noTouch1056', 'noTouchClosedDay']
 
 export const normalizeRepairResult = (result, errorMessage = '') => {

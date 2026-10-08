@@ -11,6 +11,13 @@ const statusLabel = {
   SKIP: 'تخطي',
   LOCAL_ONLY: 'تحليل محلي فقط',
 }
+const openRepairStatus = classification => ({
+  EXISTS_EXACT_MATCH: 'تمت المطابقة',
+  MISSING_SAFE_TO_RECOVER: 'استرداد آمن مرة واحدة',
+  CONFLICT: 'تعارض للمراجعة',
+  SKIP: 'جاهز للإصلاح',
+  LOCAL_ONLY: 'جاهز للإصلاح',
+}[classification] || 'جاهز للإصلاح')
 
 const logRepairDiagnostic = result => {
   const safe = normalizeRepairResult(result)
@@ -19,6 +26,7 @@ const logRepairDiagnostic = result => {
     businessDate: safe.businessDate,
     readbackOnlyCount: safe.readbackOnly.length,
     recoveredOnceCount: safe.recoveredOnce.length,
+    localPendingVerifiedFixed: safe.localPendingVerifiedFixed,
     duplicateQueueResolvedCount: safe.duplicateQueueResolved.length,
     conflictsCount: safe.conflicts.length,
     invalidQueueItemsCount: safe.invalidQueueItems.length,
@@ -144,8 +152,9 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
       const message = repairError?.message || String(repairError || 'تعذر إصلاح المزامنة.')
       let activeQueueLength = null
       try { activeQueueLength = JSON.parse(localStorage.getItem('pos101.syncQueue') || '[]').length } catch {}
-      setRepairReport(normalizeRepairResult({ ...DEFAULT_REPAIR_RESULT, trueOneButtonRepair: 'FAIL', activeSyncQueueLengthAfter: activeQueueLength }, message))
-      logRepairDiagnostic({ ...DEFAULT_REPAIR_RESULT, trueOneButtonRepair: 'FAIL', activeSyncQueueLengthAfter: activeQueueLength, error: message })
+      const failureResult = { ...DEFAULT_REPAIR_RESULT, trueOneButtonRepair: 'FAIL', activeSyncQueueLengthAfter: activeQueueLength, syncLockBefore: repairError?.lockSafety?.lockBefore || repairError?.lock || null, syncLockAfter: repairError?.lockSafety?.lockAfter || repairError?.lock || null, syncLockCleared: Boolean(repairError?.lockSafety?.clearedStaleLock), error: message }
+      setRepairReport(normalizeRepairResult(failureResult, message))
+      logRepairDiagnostic(failureResult)
       setError(message)
       setNotice('تعذر إكمال الإصلاح التلقائي. انسخ التقرير وأرسله للمراجعة.')
     }
@@ -164,13 +173,13 @@ export default function SalesBackupRecovery({ adminUser, onInspect, onMarkLocal,
         const result = resultById.get(sale.saleId)
         const classification = result?.classification || '—'
         const isTargetReadback = Number(sale.orderNumber) === ORDER_1309_NUMBER && sale.saleId === ORDER_1309_SALE_ID
-        return <tr key={`${sale.saleId}|${sale.orderNumber}`}><td>{sale.orderNumber || '—'}</td><td dir="ltr"><small>{sale.saleId || '—'}</small></td><td>{sale.cashierNameSnapshot || sale.cashierName || sale.seller || '—'}</td><td>{formatMoney(sale.total)}</td><td>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</td><td>{sale.syncStatus || sale.status || '—'}</td><td>{String(sale.centralVerified === true)}</td><td><span className={`backup-status backup-status-${classification.toLowerCase()}`}>{statusLabel[classification] || (inspection ? 'غير مفحوصة' : 'بانتظار الفحص')}</span></td><td>{canReadback && isTargetReadback && result?.classification === 'EXISTS_EXACT_MATCH' ? <button type="button" className="secondary-action" disabled={busy} onClick={() => markLocal(result)}>تحديث محلي فقط</button> : canRecover && result?.classification === 'MISSING_SAFE_TO_RECOVER' ? <button type="button" className="primary-action" disabled={busy} onClick={() => { setRecovery(result); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }}>استرداد هذه المبيعة</button> : 'موقوف حتى موافقة المالك'}</td></tr>
+        return <tr key={`${sale.saleId}|${sale.orderNumber}`}><td>{sale.orderNumber || '—'}</td><td dir="ltr"><small>{sale.saleId || '—'}</small></td><td>{sale.cashierNameSnapshot || sale.cashierName || sale.seller || '—'}</td><td>{formatMoney(sale.total)}</td><td>{sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</td><td>{sale.syncStatus || sale.status || '—'}</td><td>{String(sale.centralVerified === true)}</td><td><span className={`backup-status backup-status-${classification.toLowerCase()}`}>{TEMP_OPEN_ONE_BUTTON_REPAIR ? openRepairStatus(classification) : (statusLabel[classification] || (inspection ? 'غير مفحوصة' : 'بانتظار الفحص'))}</span></td><td>{TEMP_OPEN_ONE_BUTTON_REPAIR ? (classification === 'CONFLICT' ? 'تعارض للمراجعة' : 'جاهز للإصلاح') : canReadback && isTargetReadback && result?.classification === 'EXISTS_EXACT_MATCH' ? <button type="button" className="secondary-action" disabled={busy} onClick={() => markLocal(result)}>تحديث محلي فقط</button> : canRecover && result?.classification === 'MISSING_SAFE_TO_RECOVER' ? <button type="button" className="primary-action" disabled={busy} onClick={() => { setRecovery(result); setRecoveryForm({ name: adminUser?.displayName || '', code: '', reason: '' }) }}>استرداد هذه المبيعة</button> : 'موقوف حتى موافقة المالك'}</td></tr>
       })}</tbody></table></div>
     </>}
     {!hasInspectionContent && <p className="settings-readonly">اختر ملف JSON لعرض تحليله المحلي وفحصه.</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {notice && <p className="settings-notice" role="status">{notice}</p>}
-    {repairReport && <div className="settings-notice backup-repair-report" role="status">TRUE_ONE_BUTTON_REPAIR={safeResult.trueOneButtonRepair}{safeResult.error ? ` · ERROR=${safeResult.error}` : ''} · readback فقط {safeResult.readbackOnly.length}، استرداد مرة واحدة {safeResult.recoveredOnce.length}، التكرارات المعالجة {safeResult.queueItemsResolved.length}، التعارضات {safeResult.conflicts.length}، العناصر غير الصالحة {safeResult.invalidQueueItems.length}، المتبقي {safeResult.activeSyncQueueLengthAfter ?? '—'}، جاهزية إنهاء اليوم {safeResult.endDayReady === 'YES' || safeResult.endDayReady === true ? 'نعم' : 'لا'}.</div>}
+    {repairReport && <div className="settings-notice backup-repair-report" role="status">TRUE_ONE_BUTTON_REPAIR={safeResult.trueOneButtonRepair} · SYNC_LOCK_BEFORE={safeResult.syncLockBefore ? 'PRESENT' : 'NONE'} · SYNC_LOCK_CLEARED={safeResult.syncLockCleared ? 'YES' : 'NO'} · SYNC_LOCK_AFTER={safeResult.syncLockAfter ? 'PRESENT' : 'NONE'} · EMERGENCY_REPAIR_ACTIVE_USED={safeResult.emergencyRepairActiveUsed} · READBACK_ONLY={safeResult.readbackOnly.length} · LOCAL_PENDING_VERIFIED_FIXED={safeResult.localPendingVerifiedFixed} · RECOVERED_ONCE={safeResult.recoveredOnce.length} · QUEUE_ITEMS_RESOLVED={safeResult.queueItemsResolved.length} · DUPLICATE_QUEUE_RESOLVED={safeResult.duplicateQueueResolved.length} · CONFLICTS={safeResult.conflicts.length} · ACTIVE_SYNC_QUEUE_LENGTH_AFTER={safeResult.activeSyncQueueLengthAfter ?? '—'} · END_DAY_READY={safeResult.endDayReady === 'YES' || safeResult.endDayReady === true ? 'YES' : 'NO'}{safeResult.error ? ` · ERROR=${safeResult.error}` : ''}</div>}
     {!TEMP_OPEN_ONE_BUTTON_REPAIR && recovery && <div className="overlay"><form className="dialog backup-recovery-dialog" dir="rtl" onSubmit={recovery.mode === 'one-click' ? submitOneClickRepair : submitRecovery}><h2>{recovery.mode === 'one-click' ? 'تأكيد إصلاح المزامنة' : 'تأكيد استرداد المبيعة'}</h2>{recovery.mode === 'one-click' ? <><p>سيتم فحص Firebase أولاً، وتحديث readback المحلي للمطابق فقط، واسترداد المبيعات المفقودة المؤهلة مرة واحدة فقط.</p><dl><dt>مبيعات الملف</dt><dd>{summary.count}</dd><dt>الإجمالي</dt><dd>{formatMoney(summary.total)}</dd><dt>غير موثقة</dt><dd>{summary.unverified}</dd><dt>عناصر الطابور في الملف</dt><dd>{repairInput.syncQueueItems.length}</dd></dl><p className="settings-readonly">لن يتم تكرار أي طلب، وسيتم الفحص المركزي قبل أي كتابة. الطلب 1309 و1056 وأي يوم مغلق خارج الإصلاح.</p></> : <><p>سيتم رفع هذه المبيعة مرة واحدة إلى Firebase بعد التأكد من عدم وجودها مركزياً.</p><dl><dt>رقم الطلب</dt><dd>{recovery.sale.orderNumber}</dd><dt>saleId</dt><dd dir="ltr">{recovery.sale.saleId}</dd><dt>الإجمالي</dt><dd>{formatMoney(recovery.sale.total)}</dd><dt>الدفع</dt><dd>{recovery.sale.paymentMethod === 'electronic' ? 'إلكتروني' : 'نقدي'}</dd></dl></>}<label>اسم المسؤول<input required value={recoveryForm.name} onChange={event => setRecoveryForm(form => ({ ...form, name: event.target.value }))} /></label><label>رمز الاسترداد الإداري<input required type="password" inputMode="numeric" value={recoveryForm.code} onChange={event => setRecoveryForm(form => ({ ...form, code: event.target.value }))} /></label><label>سبب الاسترداد<textarea required value={recoveryForm.reason} onChange={event => setRecoveryForm(form => ({ ...form, reason: event.target.value }))} /></label><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setRecovery(null)} disabled={busy}>إلغاء</button><button type="submit" className="primary-action" disabled={busy}>{busy ? 'جارٍ التحقق والحفظ…' : (recovery.mode === 'one-click' ? 'تأكيد إصلاح المزامنة' : 'تأكيد الاسترداد')}</button></div></form></div>}
   </section>
 }

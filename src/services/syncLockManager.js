@@ -5,6 +5,8 @@ export const SYNC_LOCK_KEY = 'pos101.syncLock'
 export const SYNC_LOCK_VERSION = 1
 export const SYNC_LOCK_STALE_MS = 60 * 1000
 export const SYNC_LOCK_HEARTBEAT_STALE_MS = 30 * 1000
+export const REPAIR_LOCK_KEY = 'pos101.repairLock'
+export const EMERGENCY_REPAIR_KEY = 'pos101.emergencyRepairActive'
 
 const randomId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 const read = storage => {
@@ -15,10 +17,17 @@ const read = storage => {
 }
 const write = (storage, value) => storage?.setItem?.(SYNC_LOCK_KEY, JSON.stringify(value))
 const remove = storage => storage?.removeItem?.(SYNC_LOCK_KEY)
+const readRepair = storage => {
+  try {
+    const value = JSON.parse(storage?.getItem?.(REPAIR_LOCK_KEY) || 'null')
+    return value && typeof value === 'object' ? value : null
+  } catch { return null }
+}
 const ageOf = (now, value) => Math.max(0, now - Number(value || 0))
 
 export const createSyncLockManager = ({ storage = globalThis.localStorage, sessionStorage = globalThis.sessionStorage, now = () => Date.now() } = {}) => {
   let ownerId = randomId('sync-owner')
+  const repairOwnerId = randomId('repair-owner')
   let tabId = ''
   try {
     tabId = sessionStorage?.getItem?.('pos101.syncTabId') || randomId('tab')
@@ -95,7 +104,45 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
     return true
   }
 
-  return { acquire, heartbeat, release, recoverStale, describe, ownerId, tabId, deviceId }
+  const ensureRepairCanProceed = async ({ queueLength = 0, retries = 3, waitMs = 250 } = {}) => {
+    const lockBefore = describe()
+    if (!lockBefore) return { ok: true, clearedStaleLock: false, lockBefore: null, lockAfter: null, reason: 'NO_LOCK' }
+    if (Number(queueLength) === 0 || isStale(lockBefore)) {
+      const recovered = recoverStale()
+      if (Number(queueLength) === 0 && describe()) remove(storage)
+      const lockAfter = describe()
+      return { ok: !lockAfter, clearedStaleLock: Boolean(recovered.recovered || !lockAfter), lockBefore, lockAfter, reason: lockAfter ? 'LOCK_CHANGED_DURING_CLEAR' : (Number(queueLength) === 0 ? 'EMPTY_QUEUE_LOCK_CLEARED' : 'STALE_LOCK_CLEARED') }
+    }
+    for (let attempt = 0; attempt < Math.max(1, retries); attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, waitMs))
+      const current = describe()
+      if (!current) return { ok: true, clearedStaleLock: false, lockBefore, lockAfter: null, reason: 'LOCK_FINISHED' }
+      if (isStale(current)) {
+        const recovered = recoverStale()
+        const lockAfter = describe()
+        return { ok: !lockAfter, clearedStaleLock: Boolean(recovered.recovered), lockBefore, lockAfter, reason: lockAfter ? 'LOCK_CHANGED_DURING_CLEAR' : 'STALE_LOCK_CLEARED_AFTER_RETRY' }
+      }
+    }
+    return { ok: false, clearedStaleLock: false, lockBefore, lockAfter: describe(), reason: `ACTIVE_LOCK_AFTER_${Math.max(1, retries)}_RETRIES` }
+  }
+
+  const acquireRepairLock = () => {
+    const existing = readRepair(storage)
+    if (existing && existing.ownerId !== repairOwnerId && ageOf(now(), existing.startedAt) <= SYNC_LOCK_STALE_MS) return { acquired: false, lock: existing }
+    const lock = { ownerId: repairOwnerId, startedAt: now(), heartbeatAt: now(), version: SYNC_LOCK_VERSION, trigger: 'one-button-repair' }
+    storage?.setItem?.(REPAIR_LOCK_KEY, JSON.stringify(lock))
+    const confirmed = readRepair(storage)
+    return { acquired: confirmed?.ownerId === repairOwnerId, lock: confirmed }
+  }
+
+  const releaseRepairLock = () => {
+    const current = readRepair(storage)
+    if (current?.ownerId !== repairOwnerId) return false
+    storage?.removeItem?.(REPAIR_LOCK_KEY)
+    return true
+  }
+
+  return { acquire, heartbeat, release, recoverStale, describe, ensureRepairCanProceed, acquireRepairLock, releaseRepairLock, ownerId, tabId, deviceId }
 }
 
 export const defaultSyncLockManager = createSyncLockManager()

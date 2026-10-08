@@ -13,6 +13,10 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
 
   const run = (trigger = 'manual') => {
     if (stopped) { diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'stopped' }); return Promise.resolve(null) }
+    if (globalThis.localStorage?.getItem?.('pos101.emergencyRepairActive') === 'true') {
+      diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'emergency-repair-active' })
+      return Promise.resolve(null)
+    }
     // The shared POS sync lock owns cross-trigger coordination. Keep returning
     // the in-flight promise for duplicate events, but do not create a second
     // competing lock or emit a misleading repeated "locked" loop.

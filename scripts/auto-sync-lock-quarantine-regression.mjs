@@ -24,6 +24,11 @@ now += 1
 assert.equal(manager.heartbeat({ trigger: 'worker' }), true)
 assert.equal(manager.describe().heartbeatAt, now)
 manager.release()
+assert.equal(manager.acquire({ trigger: 'worker' }).acquired, true)
+const repairSafety = await manager.ensureRepairCanProceed({ queueLength: 0, retries: 3, waitMs: 1 })
+assert.equal(repairSafety.ok, true)
+assert.equal(repairSafety.clearedStaleLock, true)
+assert.equal(manager.describe(), null)
 
 const q = await import(`../src/services/salesSyncQueue.js?auto-sync=${Date.now()}`)
 values.set('pos101.salesQuarantine', '[]')
@@ -51,6 +56,14 @@ assert.equal(processCalls, 1)
 assert.equal(worker.isRunning(), false)
 stop()
 
+localStorage.setItem('pos101.emergencyRepairActive', 'true')
+let pausedCalls = 0
+const pausedWorker = createCashierQueueWorker({ processQueue: async () => { pausedCalls += 1 }, intervalMs: 0 })
+pausedWorker.start({ events: ['auth-ready'], target })
+await new Promise(resolve => setImmediate(resolve))
+assert.equal(pausedCalls, 0)
+localStorage.removeItem('pos101.emergencyRepairActive')
+
 console.log(JSON.stringify({
   STALE_SHARED_LOCK_DETECTED: 'PASS',
   STALE_SHARED_LOCK_RECOVERED: 'PASS',
@@ -65,4 +78,6 @@ console.log(JSON.stringify({
   SALE_1056_QUARANTINE_MARKER_RESTORED: 'PASS',
   SALE_1056_NOT_RESENT: 'PASS',
   SALE_1056_NOT_DELETED: 'PASS',
+  SYNC_QUEUE_ZERO_LOCK_AUTO_CLEARED: 'PASS',
+  BACKGROUND_WORKER_PAUSED_DURING_REPAIR: 'PASS',
 }, null, 2))
