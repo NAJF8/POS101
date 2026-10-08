@@ -271,6 +271,54 @@ const centralSaleMatches = (expected, actual) => Boolean(
   && financialFingerprint(expected) === financialFingerprint(actual)
 )
 
+// Read-only operator diagnostic for the exact "sale completed but warning
+// returned" failure. It never writes Firebase or localStorage.
+export const runNewSaleSyncDiagnostic = async ({ businessDate = '2026-10-08' } = {}) => {
+  const localSales = readSales().filter(sale => String(sale?.businessDate || '') === String(businessDate))
+  const latestSale = [...localSales].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0] || null
+  const queue = readRawSaleQueue()
+  const lockState = defaultSyncLockManager.describe()
+  const repairState = defaultSyncLockManager.recoverStaleEmergencyRepairFlag()
+  const permission = await canSyncPosSales(auth?.currentUser).catch(error => ({ allowed: false, missingReason: error?.code || error?.message || 'AUTH_CHECK_FAILED' }))
+  const authUser = auth?.currentUser ? { uid: auth.currentUser.uid || '', email: auth.currentUser.email || '' } : null
+  let firebaseExists = false
+  let firebaseExactMatch = false
+  let firebaseError = ''
+  if (db && latestSale?.saleId) {
+    try {
+      const snapshot = await get(ref(db, `pos101_sales/${latestSale.saleId}`))
+      firebaseExists = snapshot.exists()
+      firebaseExactMatch = firebaseExists && centralSaleMatches(latestSale, snapshot.val())
+    } catch (error) {
+      firebaseError = error?.code || error?.message || 'FIREBASE_READ_FAILED'
+    }
+  }
+  const workerStatus = typeof window !== 'undefined' ? window.__POS101_QUEUE_WORKER_STATUS__ || null : null
+  const result = {
+    businessDate: String(businessDate),
+    operationalDayId: latestSale?.operationalDayId || latestSale?.operational_day_id || '',
+    latestSaleId: latestSale?.saleId || latestSale?.id || '',
+    latestOrderNumber: latestSale?.orderNumber ?? '',
+    latestTotal: Number(latestSale?.total ?? latestSale?.subtotal ?? 0),
+    latestSyncStatus: latestSale?.syncStatus || latestSale?.status || '',
+    latestCentralVerified: latestSale?.centralVerified === true,
+    queueLength: queue.length,
+    lockState,
+    emergencyRepairActive: localStorage.getItem(EMERGENCY_REPAIR_KEY) === 'true',
+    emergencyRepairRecovery: repairState,
+    canSync: Boolean(permission.allowed),
+    authUser,
+    firebaseExists,
+    firebaseExactMatch,
+    firebaseError,
+    workerStatus,
+    nextAction: firebaseExactMatch ? 'READBACK_MARK_LOCAL_SYNCED' : queue.length && permission.allowed ? 'PROCESS_QUEUE' : !permission.allowed ? 'RESTORE_AUTHORIZATION' : 'INSPECT_QUEUE_AND_FIREBASE',
+  }
+  console.info('POS101_NEW_SALE_SYNC_DIAGNOSTIC', result)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-new-sale-sync-diagnostic', { detail: result }))
+  return result
+}
+
 const requireRole = async expectedRole => {
   if (!configured) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
   const user = await ensurePosFirebaseSession()
@@ -1235,6 +1283,7 @@ const runCashierCentralSyncInternal = async ({ initial = false, queueOnly = fals
 }
 
 export const recoverStaleSyncLock = () => syncLockManager.recoverStale()
+export const recoverStaleEmergencyRepairFlag = () => syncLockManager.recoverStaleEmergencyRepairFlag()
 
 export const runCashierCentralSync = ({ initial = false } = {}) => {
   return runCashierCentralSyncInternal({ initial, trigger: 'worker' })

@@ -1,3 +1,5 @@
+import { defaultSyncLockManager } from './syncLockManager.js'
+
 export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () => true, intervalMs = 30000, onDiagnostic = null } = {}) => {
   if (typeof processQueue !== 'function') throw new TypeError('processQueue is required')
   let running = null
@@ -13,7 +15,8 @@ export const createCashierQueueWorker = ({ processQueue, hasEligibleQueue = () =
 
   const run = (trigger = 'manual') => {
     if (stopped) { diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'stopped' }); return Promise.resolve(null) }
-    if (globalThis.localStorage?.getItem?.('pos101.emergencyRepairActive') === 'true') {
+    const repairState = defaultSyncLockManager.recoverStaleEmergencyRepairFlag()
+    if (repairState.active) {
       diagnostic('WORKER_RUN_SKIPPED', { trigger, reason: 'emergency-repair-active' })
       return Promise.resolve(null)
     }

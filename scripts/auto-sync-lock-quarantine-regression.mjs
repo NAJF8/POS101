@@ -57,11 +57,11 @@ assert.equal(worker.isRunning(), false)
 stop()
 
 localStorage.setItem('pos101.emergencyRepairActive', 'true')
-let pausedCalls = 0
-const pausedWorker = createCashierQueueWorker({ processQueue: async () => { pausedCalls += 1 }, intervalMs: 0 })
-pausedWorker.start({ events: ['auth-ready'], target })
+let resumedCalls = 0
+const resumedWorker = createCashierQueueWorker({ processQueue: async () => { resumedCalls += 1 }, intervalMs: 0 })
+resumedWorker.start({ events: ['auth-ready'], target })
 await new Promise(resolve => setImmediate(resolve))
-assert.equal(pausedCalls, 0)
+assert.equal(resumedCalls, 1)
 localStorage.removeItem('pos101.emergencyRepairActive')
 
 console.log(JSON.stringify({
@@ -79,5 +79,5 @@ console.log(JSON.stringify({
   SALE_1056_NOT_RESENT: 'PASS',
   SALE_1056_NOT_DELETED: 'PASS',
   SYNC_QUEUE_ZERO_LOCK_AUTO_CLEARED: 'PASS',
-  BACKGROUND_WORKER_PAUSED_DURING_REPAIR: 'PASS',
+  STALE_EMERGENCY_REPAIR_FLAG_NOT_BLOCKING: 'PASS',
 }, null, 2))

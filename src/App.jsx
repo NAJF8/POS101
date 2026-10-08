@@ -17,7 +17,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup } from './services/salesSyncQueue'
-import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readPreCloseReconciliation, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
@@ -630,6 +630,7 @@ export default function App() {
   }), [onCentralSyncStart, onCentralSyncSuccess, onCentralSyncError])
 
   useEffect(() => {
+    recoverStaleEmergencyRepairFlag()
     const retry = async () => {
       recoverStaleSyncLock()
       if (!(await canSyncPosSales(centralAuth()?.currentUser)).allowed) return null
@@ -642,13 +643,18 @@ export default function App() {
     const worker = createCashierQueueWorker({
       processQueue: retry,
       hasEligibleQueue: () => canSyncPosSales(centralAuth()?.currentUser).then(permission => permission.allowed),
-      onDiagnostic: payload => window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload })),
+      onDiagnostic: payload => {
+        window.__POS101_QUEUE_WORKER_STATUS__ = payload
+        window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
+      },
     })
     const stopWorker = worker.start({ events: ['pos101-sale-created', 'pos101-sale-updated', 'online', 'focus', 'auth-ready', 'firebase-reconnect'], target: window })
     const onVisibility = () => { if (!document.hidden) void worker.run() }
     document.addEventListener('visibilitychange', onVisibility)
     const reconnectStop = subscribeCentralReconnect(() => { window.dispatchEvent(new Event('firebase-reconnect')) })
-    return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility) }
+    const onSaleCreated = () => { void runNewSaleSyncDiagnostic().catch(error => console.info('POS101_NEW_SALE_SYNC_DIAGNOSTIC_ERROR', error?.code || error?.message || String(error))) }
+    window.addEventListener('pos101-sale-created', onSaleCreated)
+    return () => { reconnectStop?.(); stopWorker(); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('pos101-sale-created', onSaleCreated) }
   }, [])
 
   // The auth callback and this worker effect are independent React effects.
@@ -656,7 +662,10 @@ export default function App() {
   // cold tab cannot miss the one-shot auth-ready event during startup.
   useEffect(() => {
     if (centralAuthUser) void canSyncPosSales(centralAuthUser).then(permission => {
-      if (permission.allowed) window.dispatchEvent(new Event('auth-ready'))
+      if (permission.allowed) {
+        window.dispatchEvent(new Event('auth-ready'))
+        void runNewSaleSyncDiagnostic().catch(() => {})
+      }
     })
   }, [centralAuthUser?.uid])
 

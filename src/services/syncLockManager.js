@@ -142,7 +142,22 @@ export const createSyncLockManager = ({ storage = globalThis.localStorage, sessi
     return true
   }
 
-  return { acquire, heartbeat, release, recoverStale, describe, ensureRepairCanProceed, acquireRepairLock, releaseRepairLock, ownerId, tabId, deviceId }
+  // The emergency flag is a pause signal, not durable repair state. A crash,
+  // tab kill, or interrupted deployment must not leave normal sale sync disabled.
+  const recoverStaleEmergencyRepairFlag = () => {
+    const flag = storage?.getItem?.(EMERGENCY_REPAIR_KEY)
+    if (flag !== 'true') return { cleared: false, active: false, reason: 'NO_FLAG' }
+    const repair = readRepair(storage)
+    if (repair && ageOf(now(), repair.heartbeatAt || repair.startedAt) <= SYNC_LOCK_HEARTBEAT_STALE_MS) {
+      return { cleared: false, active: true, reason: 'REPAIR_ACTIVE', repair }
+    }
+    if (repair) storage?.removeItem?.(REPAIR_LOCK_KEY)
+    storage?.removeItem?.(EMERGENCY_REPAIR_KEY)
+    if (typeof console !== 'undefined') console.info('STALE_EMERGENCY_REPAIR_FLAG_CLEARED=YES')
+    return { cleared: true, active: false, reason: repair ? 'STALE_REPAIR_LOCK' : 'FLAG_WITHOUT_REPAIR_LOCK' }
+  }
+
+  return { acquire, heartbeat, release, recoverStale, describe, ensureRepairCanProceed, acquireRepairLock, releaseRepairLock, recoverStaleEmergencyRepairFlag, ownerId, tabId, deviceId }
 }
 
 export const defaultSyncLockManager = createSyncLockManager()
