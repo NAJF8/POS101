@@ -15,7 +15,16 @@ export const normalizeBusinessDate = (value, fallback = '') => {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : fallback
 }
 export const resolveFinancialBusinessDate = (record, operationalDayDates = {}) => {
-  const explicit = normalizeBusinessDate(record?.businessDate || record?.business_date || record?.shiftBusinessDate)
+  const explicitCandidates = [
+    record?.businessDate,
+    record?.business_date,
+    record?.shiftBusinessDate,
+    record?.day?.businessDate,
+    record?.operationalDay?.businessDate,
+    record?.operational_day?.businessDate,
+    record?.date,
+  ]
+  const explicit = explicitCandidates.map(value => normalizeBusinessDate(value)).find(Boolean)
   if (explicit) return explicit
   const operationalDayId = String(record?.operationalDayId || record?.operational_day_id || record?.shiftId || '').trim()
   const mapped = normalizeBusinessDate(operationalDayDates[operationalDayId])
@@ -106,9 +115,10 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
   const days = operationalDays.filter(day => day?.id).slice().sort((left, right) => Number(right.endedAt || right.startedAt || 0) - Number(left.endedAt || left.startedAt || 0))
   const byDate = new Map()
   days.forEach(day => { const list = byDate.get(day.businessDate) || []; list.push(day); byDate.set(day.businessDate, list) })
+  const dayDates = Object.fromEntries(days.map(day => [String(day.id), day.businessDate]))
   const rowDayId = row => String(row?.operationalDayId || row?.operational_day_id || row?.dayId || '').trim()
   const rowsForDay = (rows, day) => rows.filter(row => {
-    const dateMatches = resolveFinancialBusinessDate(row) === day.businessDate
+    const dateMatches = resolveFinancialBusinessDate(row, dayDates) === day.businessDate
     const sourceDayId = rowDayId(row)
     if (sourceDayId === String(day.id)) return true
     // A recovered legacy row may have a correct businessDate but no or stale
@@ -116,7 +126,7 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
     return dateMatches && byDate.get(day.businessDate)?.length === 1
   })
   return days.map(day => {
-    const settlement = settlements.find(row => String(row.operationalDayId || row.operational_day_id || '') === String(day.id)) || settlements.find(row => !row.operationalDayId && !row.operational_day_id && row.businessDate === day.businessDate && byDate.get(day.businessDate)?.length === 1) || null
+    const settlement = settlements.find(row => String(row.operationalDayId || row.operational_day_id || '') === String(day.id)) || settlements.find(row => resolveFinancialBusinessDate(row, dayDates) === day.businessDate && (!row.operationalDayId && !row.operational_day_id || day.fallbackFromBusinessDate)) || null
     const effective = settlement ? getEffectiveSettlement(settlement, settlementCorrections.filter(row => String(row.settlementId || '') === String(settlement.id))) : null
     const isKnownMoney = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
     const dayOpening = day.openingCashBalance ?? day.openingBalance
@@ -137,14 +147,40 @@ export const buildCashboxReportData = ({ from = '', to = '', operationalDays = [
   const dates = new Set([...sales, ...expenses, ...transactions].filter(inRange).map(resolveFinancialBusinessDate))
   const sourceDays = (Array.isArray(operationalDays) ? operationalDays : []).filter(day => day?.businessDate >= from && day?.businessDate <= to)
   const knownDates = new Set(sourceDays.map(day => day.businessDate))
+  const daysById = new Map((Array.isArray(operationalDays) ? operationalDays : []).filter(day => day?.id).map(day => [String(day.id), day]))
+  const settlementDate = settlement => resolveFinancialBusinessDate(settlement, Object.fromEntries([...daysById.entries()].map(([id, day]) => [id, day.businessDate])))
+  settlements.filter(row => {
+    const date = settlementDate(row)
+    return date && date >= from && date <= to
+  }).forEach(row => dates.add(settlementDate(row)))
   const fallbackDays = [...dates].filter(date => !knownDates.has(date)).map(date => {
-    const settlement = settlements.find(row => row?.businessDate === date)
-    return { id: `business-date:${date}`, businessDate: date, status: 'fallback', fallbackFromBusinessDate: true, openingCashBalance: settlement?.openingCashBalance }
+    const settlement = settlements.find(row => settlementDate(row) === date && row?.openingCashBalance !== undefined && row?.openingCashBalance !== null) || null
+    const sourceDay = (Array.isArray(operationalDays) ? operationalDays : []).find(day => day?.businessDate === date) || null
+    const opening = sourceDay?.openingCashBalance ?? sourceDay?.openingBalance ?? settlement?.openingCashBalance
+    return { id: `business-date:${date}`, businessDate: date, status: 'fallback', fallbackFromBusinessDate: true, openingCashBalance: opening, openingSource: sourceDay?.openingCashBalance !== undefined ? 'operationalDay' : settlement ? 'settlement' : null }
   })
   const rows = buildCashboxReportRows({ operationalDays: [...sourceDays, ...fallbackDays], settlements, settlementCorrections, sales, expenses, transactions })
-  const dailyRows = rows.map(row => ({ businessDate: row.day.businessDate, sales: row.sales, cash: row.cashSales, electronic: row.electronicSales, expenses: row.cashboxExpenses, withdrawals: row.cashboxWithdrawals, deposits: row.deposits, net: row.openingCashKnown ? row.expectedClosingCash : row.cashSales - row.cashboxExpenses - row.cashboxWithdrawals + row.deposits, expectedCash: row.openingCashKnown ? row.expectedClosingCash : null, openingCashBalance: row.openingCashBalance, orders: row.orderCount, fallbackFromBusinessDate: Boolean(row.day.fallbackFromBusinessDate) }))
+  const dailyRows = rows.map(row => ({ businessDate: row.day.businessDate, sales: row.sales, cash: row.cashSales, electronic: row.electronicSales, expenses: row.cashboxExpenses, withdrawals: row.cashboxWithdrawals, deposits: row.deposits, net: row.openingCashKnown ? row.expectedClosingCash : row.cashSales - row.cashboxExpenses - row.cashboxWithdrawals + row.deposits, expectedCash: row.openingCashKnown ? row.expectedClosingCash : null, openingCashBalance: row.openingCashBalance, orders: row.orderCount, fallbackFromBusinessDate: Boolean(row.day.fallbackFromBusinessDate), openingSource: row.day.openingSource || (row.day.fallbackFromBusinessDate ? 'businessDateFallback' : 'operationalDay') }))
   const selected = from === to ? rows.find(row => row.day.businessDate === from) || null : null
-  return { rows, dailyRows, selected, operationalDays: rows.map(row => row.day), summary: selected }
+  const chronological = rows.slice().sort((left, right) => String(left.day.businessDate).localeCompare(String(right.day.businessDate)))
+  const firstKnownOpening = chronological.find(row => row.openingCashKnown)
+  const aggregate = chronological.length ? chronological.reduce((summary, row) => ({
+    ...summary,
+    sales: summary.sales + row.sales,
+    cashSales: summary.cashSales + row.cashSales,
+    electronicSales: summary.electronicSales + row.electronicSales,
+    expenses: summary.expenses + row.expenses,
+    cashboxExpenses: summary.cashboxExpenses + row.cashboxExpenses,
+    managementExpenses: summary.managementExpenses + row.managementExpenses,
+    withdrawals: summary.withdrawals + row.withdrawals,
+    cashboxWithdrawals: summary.cashboxWithdrawals + row.cashboxWithdrawals,
+    managementWithdrawals: summary.managementWithdrawals + row.managementWithdrawals,
+    deposits: summary.deposits + row.deposits,
+    orderCount: summary.orderCount + row.orderCount,
+    dailyCashMovement: summary.dailyCashMovement + row.dailyCashMovement,
+  }), { sales: 0, cashSales: 0, electronicSales: 0, expenses: 0, cashboxExpenses: 0, managementExpenses: 0, withdrawals: 0, cashboxWithdrawals: 0, managementWithdrawals: 0, deposits: 0, orderCount: 0, dailyCashMovement: 0 }) : null
+  const summary = aggregate ? { ...aggregate, openingCashBalance: firstKnownOpening?.openingCashBalance ?? null, openingCashKnown: Boolean(firstKnownOpening?.openingCashKnown), expectedCash: firstKnownOpening?.openingCashKnown ? firstKnownOpening.openingCashBalance + aggregate.dailyCashMovement : null, expectedClosingCash: firstKnownOpening?.openingCashKnown ? firstKnownOpening.openingCashBalance + aggregate.dailyCashMovement : null } : selected
+  return { rows, dailyRows, selected, operationalDays: rows.map(row => row.day), summary: selected || summary }
 }
 export const calculateFinancialReport = ({ sales = [], expenses = [], transactions = [], from, to } = {}) => {
   const inRange = row => { const date = resolveFinancialBusinessDate(row); return (!from || date >= from) && (!to || date <= to) }

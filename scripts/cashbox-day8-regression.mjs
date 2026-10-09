@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildCashboxReportRows, calculateFinancialReport } from '../src/services/financialCenter.js'
+import { buildCashboxReportData, buildCashboxReportRows, calculateFinancialReport } from '../src/services/financialCenter.js'
 import { getReportSalesForPeriod } from '../src/services/reportSales.js'
 
 const day = { id: 'operational-day-2026-10-08', businessDate: '2026-10-08', openingCashBalance: 7000, status: 'closed', startedAt: 1, endedAt: 2 }
@@ -26,6 +26,29 @@ assert.equal(report.excludedVoidedSalesCount, 1)
 assert.equal(report.excludedCancelledSalesCount, 1)
 assert.equal(report.withdrawals, 115500)
 
+const fallbackData = buildCashboxReportData({
+  from: day.businessDate,
+  to: day.businessDate,
+  operationalDays: [],
+  settlements: [{ id: 'settlement-day8-fallback', operationalDayId: day.id, businessDate: day.businessDate, openingCashBalance: 7000 }],
+  sales: sales.map(({ businessDate, ...sale }) => ({ ...sale, business_date: businessDate })),
+  expenses,
+  transactions,
+})
+const fallback = fallbackData.selected
+assert.ok(fallback?.day.fallbackFromBusinessDate)
+assert.equal(fallback.openingCashBalance, 7000)
+assert.equal(fallback.sales, 347000)
+assert.equal(fallback.cashSales, 342000)
+assert.equal(fallback.electronicSales, 5000)
+assert.equal(fallback.expectedClosingCash, 106500)
+assert.equal(fallbackData.dailyRows[0].sales, 347000)
+assert.equal(fallbackData.dailyRows[0].expectedCash, 106500)
+assert.equal(fallback.day.id, 'business-date:2026-10-08')
+const rangeData = buildCashboxReportData({ from: '2026-10-08', to: '2026-10-09', operationalDays: [], settlements: [{ id: 'settlement-day8-range', businessDate: day.businessDate, openingCashBalance: 7000 }], sales: sales.map(({ businessDate, ...sale }) => ({ ...sale, business_date: businessDate })), expenses, transactions })
+assert.equal(rangeData.summary.sales, 347000)
+assert.equal(rangeData.summary.expectedCash, 106500)
+
 const period = calculateFinancialReport({ sales, expenses, transactions, from: '2026-10-08', to: '2026-10-08' })
 assert.equal(period.sales, 347000)
 assert.equal(period.cashSales, 342000)
@@ -38,13 +61,15 @@ assert.deepEqual(centralReportSales.map(row => row.id), ['cash-1', 'electronic-1
 const financialSource = fs.readFileSync(new URL('../src/services/financialCenter.js', import.meta.url), 'utf8')
 const centerSource = fs.readFileSync(new URL('../src/components/FinancialCenter.jsx', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
-assert.match(financialSource, /resolveFinancialBusinessDate\(row\) === day\.businessDate/)
+assert.match(financialSource, /resolveFinancialBusinessDate\(row, dayDates\) === day\.businessDate/)
 assert.match(financialSource, /dayOpening = day\.openingCashBalance \?\? day\.openingBalance/)
-assert.match(centerSource, /CASHBOX_REPORT_DIAGNOSTIC/)
+assert.match(centerSource, /CASHBOX_VISIBLE_DIAGNOSTIC/)
 assert.match(centerSource, /displayedReport\.expectedCash \?\? displayedReport\.expectedClosingCash/)
 assert.match(centerSource, /buildCashboxReportData/)
 assert.match(centerSource, /cashboxReportData\.dailyRows/)
 assert.match(centerSource, /LIVE_BUILD_META/)
+assert.match(centerSource, /CASHBOX_VISIBLE_DIAGNOSTIC/)
+assert.doesNotMatch(centerSource, /ID: \{row\.day\.id\}/)
 assert.match(appSource, /centralSales=\{adminReady \? adminCentralSales : centralSales\}/)
 assert.match(appSource, /adminCentralSales\.length/)
 assert.doesNotMatch(financialSource + centerSource + appSource, /set\(ref\(db, `pos101_sales/)
