@@ -129,6 +129,7 @@ const OPERATIONAL_DAY_STALE_KEY = 'pos101.localOperationalDayStale'
 const OPERATIONAL_DAY_CLOSED_BY_CENTRAL_KEY = 'pos101.localClosedByCentral'
 const OPERATIONAL_DAY_STALE_DETECTED_AT_KEY = 'pos101.staleDetectedAt'
 const DEVICE_ID_KEY = 'pos101.deviceId'
+const ALLOWED_DAY_CLOSE_SOURCES = new Set(['manual_end_day', 'admin_reopen_fix', 'system_test'])
 const readSales = () => {
   try {
     const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
@@ -2657,7 +2658,10 @@ const centralSettlementInputs = async operationalDay => {
 export const readFreshSettlementPreview = async operationalDay => calculateSettlement({ ...(await centralSettlementInputs(operationalDay)), openingCashBalance: operationalDay?.openingCashBalance })
  
 
-export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {} } = {}) => {
+export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {}, explicitUserAction = false, closeSource = 'manual_end_day', closeReason = 'user_confirmed_end_day' } = {}) => {
+  if (explicitUserAction !== true || closeSource !== 'manual_end_day' || !ALLOWED_DAY_CLOSE_SOURCES.has(closeSource)) {
+    throw Object.assign(new Error('إغلاق اليوم التشغيلي يتطلب تأكيد المستخدم من شاشة إنهاء اليوم.'), { code: 'EXPLICIT_DAY_CLOSE_REQUIRED' })
+  }
   endDayLog('END_DAY_SUBMIT_START', { operationalDayId: day?.id || day?.operationalDayId || '', businessDate: day?.businessDate || '', actualCash })
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
   if (!preClose.allowed) throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
@@ -2727,7 +2731,12 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const cashbox = existingCashbox || (expectedCash > 0 ? { id: cashboxId, type: 'settlement', amount: expectedCash, businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + expectedCash } : null)
   const audit = existingAudit || financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: remoteDay.businessDate })
   const closedAt = settlement.createdAt || Date.now()
-  const closedDay = { ...remoteDay, status: 'closed', endedAt: closedAt, endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closedAt, closedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, settlementId: key, closeSummary: { settlementId: key, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status }, updatedAt: closedAt, version: Number(remoteDay.version || 0) + 1 }
+  const closedDay = { ...remoteDay, status: 'closed', endedAt: closedAt, endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closedAt, closedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closeSource, closeReason, closeAutoDetected: false, updatedBy: user.uid, deviceId: getDeviceId(), settlementId: key, closeSummary: { settlementId: key, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status }, updatedAt: closedAt, version: Number(remoteDay.version || 0) + 1 }
+  audit.closeSource = closeSource
+  audit.closeReason = closeReason
+  audit.closeAutoDetected = false
+  audit.updatedBy = user.uid
+  audit.deviceId = closedDay.deviceId
   const updates = { [`${auditPath}/${auditId}`]: audit, [`pos101_operational_days/${id}`]: closedDay, [OPERATIONAL_DAY_CURRENT_PATH]: closedDay }
   if (cashbox) updates[`${cashboxTransactionsPath}/${cashboxId}`] = cashbox
   endDayLog('END_DAY_FIREBASE_WRITE_START', { path: `pos101_operational_days/${id}`, writeType: 'status-after-settlement-readback' })

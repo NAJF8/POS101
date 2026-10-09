@@ -73,10 +73,10 @@ async function main() {
   fs.writeFileSync(backupPath, JSON.stringify(before, null, 2) + '\n', 'utf8')
   console.log('PRE_REOPEN_BACKUP=PASS')
   console.log(`BACKUP_PATH=${backupPath}`)
-  const day = { ...latest, status: 'open', reopenedAt: iso, reopenedBy: actor, reopenReason: 'accidental-end-day', closedAtBeforeReopen: latest.closedAt || null, endDayReopened: true, updatedAt: Date.now(), version: Number(latest.version || 0) + 1 }
-  const reopenedSettlement = { ...settlement, status: 'reopened', reopenedAt: iso, reopenedBy: actor, reopenReason: 'accidental-end-day' }
+  const day = { ...latest, status: 'open', reopenedAt: iso, reopenedBy: actor, reopenReason: 'auto-closed-without-user-action', closeAutoDetected: true, closeSource: 'admin_reopen_fix', closedAtBeforeReopen: latest.closedAt || null, endDayReopened: true, updatedAt: Date.now(), updatedBy: actor, version: Number(latest.version || 0) + 1 }
+  const reopenedSettlement = { ...settlement, status: 'reopened', reopenedAt: iso, reopenedBy: actor, reopenReason: 'auto-closed-without-user-action', closeSource: 'admin_reopen_fix' }
   const auditId = `audit-reopen-${dayId}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
-  const audit = { id: auditId, action: 'reopen operational day', entityType: 'operational_day_reopen', entityId: dayId, userUid: actor, userName: actor, businessDate, timestamp: Date.now(), before: { day: latest, settlement }, after: { day, settlement: reopenedSettlement }, reason: 'accidental-end-day' }
+  const audit = { id: auditId, action: 'reopen operational day', entityType: 'operational_day_reopen', entityId: dayId, userUid: actor, userName: actor, businessDate, timestamp: Date.now(), closeSource: 'admin_reopen_fix', closeAutoDetected: true, before: { day: latest, settlement }, after: { day, settlement: reopenedSettlement }, reason: 'auto-closed-without-user-action' }
   await db.ref().update({ [`pos101_operational_days/${dayId}`]: day, ['pos101_operational_day/current']: day, [`pos101_cashbox_settlements/${settlement.id}`]: reopenedSettlement, [`pos101_financial_audit_log/${auditId}`]: audit })
   const [dayBack, currentBack, settlementBack, daysBack, salesBack, expensesBack, txBack] = await Promise.all([db.ref(`pos101_operational_days/${dayId}`).once('value'), db.ref('pos101_operational_day/current').once('value'), db.ref(`pos101_cashbox_settlements/${settlement.id}`).once('value'), db.ref('pos101_operational_days').once('value'), db.ref('pos101_sales').once('value'), db.ref('pos101_expenses').once('value'), db.ref('pos101_cashbox_transactions').once('value')])
   const verifiedDay = dayBack.val(); const verifiedCurrent = currentBack.val(); const verifiedSettlement = settlementBack.val()
