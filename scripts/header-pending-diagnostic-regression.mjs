@@ -30,6 +30,7 @@ assert.equal(staleVoided.pendingVoidUpdateCount, 0)
 assert.equal(staleVoided.activePendingQueueCount, 0)
 assert.equal(staleVoided.voidedBeforeSyncCount, 1)
 assert.equal(staleVoided.lastBlockingSaleId, null)
+assert.equal(queue.getPendingOrderBadgeState(staleVoided).show, false)
 
 localStorage.setItem('pos101.sales', JSON.stringify([{ ...base, status: 'completed', syncStatus: 'pending' }]))
 const activePending = queue.readHeaderPendingDiagnostic({ orders: [{ id: 1, items: [] }], openOrderCount: 0 })
@@ -37,10 +38,16 @@ assert.equal(activePending.activePendingQueueCount, 1)
 assert.equal(activePending.lastBlockingOrderNumber, 1321)
 assert.equal(activePending.lastBlockingSaleId, base.saleId)
 assert.equal(activePending.lastBlockingReason, 'PENDING_VOID_UPDATE')
+assert.equal(queue.getPendingOrderBadgeState(activePending).show, true)
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+const header = fs.readFileSync(new URL('../src/components/Header.jsx', import.meta.url), 'utf8')
 assert.match(app, /HEADER_PENDING_DIAGNOSTIC/)
-assert.match(app, /saleSyncStatus\.activePendingQueueCount > 0/)
+assert.match(app, /getPendingOrderBadgeState/)
+assert.match(app, /headerPendingDiagnostic\.badgeShow/)
+assert.doesNotMatch(app, /saleSyncStatus\.activePendingQueueCount > 0/)
+assert.match(header, /pendingBadgeState/)
+assert.match(header, /PENDING_BADGE_SOURCE/)
 
 localStorage.setItem('pos101.sales', JSON.stringify({ legacy: base }))
 localStorage.setItem('pos101.syncQueue', JSON.stringify({ legacy: base }))
@@ -52,6 +59,8 @@ console.log(JSON.stringify({
   VOIDED_1321_NOT_BLOCKING: 'PASS',
   ACTIVE_VOID_UPDATE_STILL_BLOCKS: 'PASS',
   HEADER_DIAGNOSTIC_LOGGED: 'PASS',
-  HEADER_USES_CANONICAL_ACTIVE_QUEUE: 'PASS',
+  PENDING_BADGE_USES_STRICT_SELECTOR: 'PASS',
+  HEADER_LIVE_SOURCE_DIAGNOSTIC: 'PASS',
+  NO_BADGE_WHEN_COUNTS_ZERO: 'PASS',
   NO_LOCALSTORAGE_WIPE: 'PASS',
 }, null, 2))

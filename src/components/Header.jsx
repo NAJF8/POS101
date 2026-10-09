@@ -15,6 +15,13 @@ function useLiveClock() {
 
 export default function Header({ onOpenOrders, onCashierMenu, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {} }) {
   const now = useLiveClock()
+  const pendingBadge = syncStatus.pendingBadgeState || { show: false, reason: '', badgeBlockers: [], badgeSourceComponent: 'Header.jsx:sync-status-chip' }
+  const safeSyncStatus = pendingBadge.show
+    ? syncStatus
+    : syncStatus.state === 'pending'
+      ? { ...syncStatus, state: 'connected', label: 'متصل' }
+      : syncStatus
+  const cashierDebug = new URLSearchParams(window.location.search).has('cashier-debug')
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
   const dateStr = formatDate(now, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -53,9 +60,10 @@ export default function Header({ onOpenOrders, onCashierMenu, session, openOrder
           </button>
         )}
 
-        {session && <div className={`sync-status-chip sync-status-${syncStatus.state || 'connected'}`} role="status" aria-live="polite">
+        {session && <div className={`sync-status-chip sync-status-${safeSyncStatus.state || 'connected'}`} role="status" aria-live="polite" data-testid="cashier-sync-status-chip">
           <i aria-hidden="true" />
-          <span>{syncStatus.label || 'متصل'}</span>
+          <span>{safeSyncStatus.label || 'متصل'}</span>
+          {cashierDebug && <small data-testid="pending-badge-diagnostic" dir="ltr">PENDING_BADGE_SOURCE={pendingBadge.sourceComponent || pendingBadge.badgeSourceComponent || 'unknown'} · PENDING_BADGE_REASON={pendingBadge.reason || pendingBadge.badgeReason || 'NONE'} · PENDING_BADGE_BLOCKING_IDS={(pendingBadge.blockers || pendingBadge.badgeBlockers || []).map(row => row.saleId || row.orderNumber || 'unknown').join(',') || 'NONE'} · badgeShow={String(pendingBadge.show === true)}</small>}
         </div>}
 
         {session && <button className="header-btn outline-btn" type="button" onClick={onCashierMenu} data-testid="end-shift-button">

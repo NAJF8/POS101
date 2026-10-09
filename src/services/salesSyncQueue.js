@@ -31,6 +31,18 @@ const voidedStatuses = new Set(['cancelled', 'canceled', 'voided', 'باطل', '
 const saleItems = sale => Array.isArray(sale?.items)
   ? sale.items
   : Array.isArray(sale?.order?.items) ? sale.order.items : []
+const pendingStatus = value => String(value || 'pending').trim().toLowerCase() === 'pending'
+const syncedStatus = sale => sale?.centralVerified === true
+  || sale?.syncStatus === 'synced'
+  || sale?.status === 'synced'
+  || Boolean(sale?.syncConfirmedAt)
+const saleDayMatches = (sale, operationalDay) => {
+  if (!operationalDay?.id && !operationalDay?.businessDate) return true
+  const saleDayId = sale?.operationalDayId || sale?.operational_day_id
+  const saleDate = sale?.businessDate || sale?.business_date
+  return (!operationalDay.id || String(saleDayId || '') === String(operationalDay.id))
+    && (!operationalDay.businessDate || String(saleDate || '') === String(operationalDay.businessDate))
+}
 
 export const isSaleSyncEligible = sale => {
   const id = String(saleIdOf(sale) || '').trim()
@@ -422,7 +434,7 @@ const saleIsVoidedBeforeCentral = sale => Boolean(sale && isVoidedSale(sale) && 
 // Canonical header diagnostics. A voided row is still preserved in the local
 // ledger/history, but it is not an active sale blocker after its void state has
 // been verified (or the sale was explicitly voided before central creation).
-export const readHeaderPendingDiagnostic = ({ orders = [], openOrderCount = null } = {}) => {
+export const readHeaderPendingDiagnostic = ({ orders = [], openOrderCount = null, operationalDay = null } = {}) => {
   const rawQueue = readRawSaleQueue()
   const storedSales = readJson(SALES_KEY, [])
   const localSales = Array.isArray(storedSales) ? storedSales : []
@@ -431,29 +443,35 @@ export const readHeaderPendingDiagnostic = ({ orders = [], openOrderCount = null
   const voidUpdateEntries = rawQueue.filter(isVoidUpdateEntry)
   const activeSaleWriteEntries = saleWriteEntries.filter(entry => {
     const sale = entry?.sale || entry
-    return !saleIsVoidedBeforeCentral(sale)
-      && String(entry?.status || 'pending').toLowerCase() === 'pending'
+    return saleDayMatches(sale, operationalDay)
+      && !isVoidedSale(sale)
+      && pendingStatus(entry?.status)
   })
   const pendingVoidEntries = voidUpdateEntries.filter(entry => {
     const sale = localById.get(String(entry.saleId))
-    return !saleIsVoidedBeforeCentral(sale)
-      && String(entry?.status || 'pending').toLowerCase() === 'pending'
+    return saleDayMatches(sale || entry, operationalDay)
+      && !saleIsVoidedBeforeCentral(sale)
+      && pendingStatus(entry?.status)
   })
-  const activeLocalSales = localSales.filter(sale => isSaleSyncEligible(sale) && !isVoidedSale(sale))
+  const activeLocalSales = localSales.filter(sale => saleDayMatches(sale, operationalDay) && isSaleSyncEligible(sale) && !isVoidedSale(sale))
   const unverifiedActiveSales = activeLocalSales.filter(sale => (
-    sale.centralVerified !== true
-    && sale.syncStatus !== 'synced'
-    && sale.status !== 'synced'
-    && !sale.syncConfirmedAt
+    !syncedStatus(sale)
   ))
   const staleVoidedQueueEntries = rawQueue.filter(entry => {
     const sale = entry?.sale || localById.get(String(entry.saleId))
     return saleIsVoidedBeforeCentral(sale)
   })
+  const queuedSaleIds = new Set([...activeSaleWriteEntries, ...pendingVoidEntries].map(row => String(saleIdOf(row?.sale) || row?.saleId || '')))
+  const standaloneUnverifiedActiveSales = unverifiedActiveSales.filter(sale => !queuedSaleIds.has(String(saleIdOf(sale) || '')))
   const blockers = [
-    ...activeSaleWriteEntries.map(entry => ({ entry, sale: entry?.sale || entry, reason: 'PENDING_SALE_WRITE' })),
-    ...pendingVoidEntries.map(entry => ({ entry, sale: localById.get(String(entry.saleId)) || entry, reason: 'PENDING_VOID_UPDATE' })),
-  ].filter(row => row.entry && String(row.entry.status || 'pending').toLowerCase() === 'pending')
+    ...activeSaleWriteEntries.map(entry => ({ entry, sale: entry?.sale || entry, reason: 'PENDING_SALE_WRITE', queueType: 'sale_write' })),
+    ...pendingVoidEntries.map(entry => ({ entry, sale: localById.get(String(entry.saleId)) || entry, reason: 'PENDING_VOID_UPDATE', queueType: 'void_update' })),
+    ...standaloneUnverifiedActiveSales.map(sale => ({ entry: null, sale, reason: 'ACTIVE_SALE_NOT_CENTRALLY_VERIFIED', queueType: null })),
+  ].filter(row => !row.entry || pendingStatus(row.entry.status))
+  const cancelledPendingEntries = rawQueue.filter(entry => {
+    const sale = entry?.sale || localById.get(String(entry?.saleId || ''))
+    return pendingStatus(entry?.status) && (isVoidedSale(sale) || cancelledStatuses.has(String(sale?.status || '').toLowerCase()) || sale?.queueResolution === 'voided_before_central_sync')
+  })
   const last = blockers[blockers.length - 1]
   const currentCartDraftExists = Array.isArray(orders) && orders.some(order => Array.isArray(order?.items) && order.items.length > 0)
   const diagnostic = {
@@ -462,6 +480,7 @@ export const readHeaderPendingDiagnostic = ({ orders = [], openOrderCount = null
     syncQueueCount: rawQueue.length,
     activePendingQueueCount: activeSaleWriteEntries.length + pendingVoidEntries.length,
     voidedBeforeSyncCount: staleVoidedQueueEntries.length,
+    cancelledPendingCount: cancelledPendingEntries.length,
     unsyncedLocalSalesCount: unverifiedActiveSales.length,
     unverifiedActiveSalesCount: unverifiedActiveSales.length,
     openOrderCount,
@@ -470,10 +489,30 @@ export const readHeaderPendingDiagnostic = ({ orders = [], openOrderCount = null
     lastBlockingSaleId: saleIdOf(last?.sale) || last?.entry?.saleId || null,
     lastBlockingStatus: last?.sale?.status || last?.entry?.status || null,
     lastBlockingReason: last?.reason || '',
+    lastBlockingQueueType: last?.queueType || null,
+    localStorageKeysUsed: [SALES_KEY, QUEUE_KEY],
     saleWriteEntries,
     voidUpdateEntries,
+    blockers,
   }
   return diagnostic
+}
+
+export const getPendingOrderBadgeState = (diagnostic = {}, { sourceComponent = 'App.jsx:cashierSyncState' } = {}) => {
+  const blockers = Array.isArray(diagnostic.blockers) ? diagnostic.blockers : []
+  const show = blockers.length > 0
+  return {
+    show,
+    reason: show ? String(blockers[0]?.reason || 'REAL_ACTIVE_SYNC_BLOCKER') : '',
+    blockers: blockers.map(row => ({
+      reason: row.reason,
+      queueType: row.queueType || null,
+      saleId: saleIdOf(row.sale) || row.entry?.saleId || null,
+      orderNumber: row.sale?.orderNumber ?? row.entry?.orderNumber ?? null,
+      status: row.sale?.status || row.entry?.status || null,
+    })),
+    sourceComponent,
+  }
 }
 
 export const readPendingSaleDiagnostics = () => readRawSaleQueue()
