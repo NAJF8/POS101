@@ -176,7 +176,7 @@ export default function App() {
         readCentralSettlementCorrections(),
       ])
       if (!active) return
-      window.__POS101_CASHBOX_PIPELINE = {
+      const pipeline = {
         rawSalesCount: salesResult.status === 'fulfilled' ? salesResult.value.length : null,
         normalizedSalesCount: salesResult.status === 'fulfilled' ? salesResult.value.length : null,
         operationalDaysCount: daysResult.status === 'fulfilled' ? daysResult.value.length : null,
@@ -187,6 +187,8 @@ export default function App() {
           .map(result => result.status === 'rejected' ? result.reason?.code || result.reason?.message || 'READ_FAILED' : null)
           .filter(Boolean),
       }
+      window.__POS101_CASHBOX_PIPELINE = pipeline
+      setCashboxDiagnostic(previous => previous ? { ...previous, pipeline } : previous)
       if (salesResult.status === 'fulfilled') setCentralSales(salesResult.value)
       else console.error('CENTRAL_SALES_STATE_BINDING_ERROR', salesResult.reason)
       if (daysResult.status === 'fulfilled') setCentralOperationalDays(Array.isArray(daysResult.value) ? daysResult.value : [])
