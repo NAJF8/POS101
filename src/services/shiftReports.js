@@ -47,7 +47,9 @@ export const buildShiftReport = ({ sales = [], expenses = [], transactions = [],
   })
   const shiftSales = daySales.filter(sale => saleShiftType(sale).value === shiftType)
   const shiftExpenses = dayExpenses.filter(expense => expenseShiftType(expense).value === shiftType)
-  const activeSales = shiftSales.filter(sale => !saleIsVoided(sale))
+  const calculatedSales = shiftSales.map(sale => ({ ...sale, inferredShiftType: saleShiftType(sale).inferred }))
+  const calculatedExpenses = shiftExpenses.map(expense => ({ ...expense, inferredShiftType: expenseShiftType(expense).inferred }))
+  const activeSales = calculatedSales.filter(sale => !saleIsVoided(sale))
   const cashSales = activeSales.filter(sale => paymentOf(sale) === 'cash').reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
   const electronicSales = activeSales.filter(sale => paymentOf(sale) === 'electronic').reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
   const totalSales = activeSales.reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
@@ -59,7 +61,8 @@ export const buildShiftReport = ({ sales = [], expenses = [], transactions = [],
     shiftType,
     shiftLabel: shiftType === 'morning' ? 'صباحي' : 'مسائي',
     sales: activeSales,
-    expenses: shiftExpenses,
+    expenses: calculatedExpenses,
+    inferredShiftType: [...calculatedSales, ...calculatedExpenses].some(row => row.inferredShiftType === true),
     ordersCount: activeSales.length,
     totalSales,
     cashSales,

@@ -831,7 +831,7 @@ export default function App() {
   }, [session, activeOrder, subtotal, activeDiscount, total, requestSalePrint])
 
   const initiateComplete = useCallback(payment => {
-    if (!session || !activeOrder.items.length || saleInFlight.current) return false
+    if (!session || !session.shiftType || !session.shiftId || !activeOrder.items.length || saleInFlight.current) return false
     if (operationalDay?.status !== 'open') {
       setOperationalDayError('اليوم التشغيلي مغلق. افتح يومًا جديدًا قبل البيع.')
       setModal('operational-day-required')
@@ -843,7 +843,7 @@ export default function App() {
   }, [session, activeOrder.items.length, operationalDay])
 
   const finalizeSale = useCallback(async (sellerName) => {
-    if (!session || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
+    if (!session || !session.shiftType || !session.shiftId || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
 
     let currentOperationalDay = null
     try {
@@ -1206,7 +1206,8 @@ export default function App() {
   if (isCentralConfigured() && !centralAuthReady) return null
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
 
-  const sellingBlocked = !session || !operationalDayCentralReady || operationalDay?.status !== 'open'
+  const activeShift = Boolean(session?.shiftId && (session?.shiftType === 'morning' || session?.shiftType === 'evening'))
+  const sellingBlocked = !activeShift || !operationalDayCentralReady || operationalDay?.status !== 'open'
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
@@ -1338,7 +1339,7 @@ export default function App() {
       )}
 
       {/* Login gate */}
-      {!session && !adminReady && (
+      {(!session || !activeShift) && !adminReady && (
         <ShiftLogin
           shifts={shifts}
           onClose={() => {}}

@@ -490,15 +490,12 @@ export function Receipt({ sale }) {
 
 /* ── Shift Login ── */
 export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogout, adminUser, adminBusy, adminError }) {
-  const [shiftId, setShiftId] = React.useState(shifts[0]?.shiftId || '')
   const [error, setError] = React.useState('')
   const [busy, setBusy] = React.useState(false)
   const logoUrl = `${import.meta.env.BASE_URL}assets/branding/logo-transparent.png`
 
-  const submit = async e => {
-    e?.preventDefault?.()
+  const submit = async shift => {
     setError('')
-    const shift = shifts.find(c => c.shiftId === shiftId)
     if (!shift) return
     setBusy(true)
     try { await onLogin({ ...shift }) } catch (err) { setError(err?.message || 'تعذر تسجيل الدخول.') } finally { setBusy(false) }
@@ -507,19 +504,16 @@ export function ShiftLogin({ shifts, onClose, onLogin, onAdminLogin, onAdminLogo
   return (
     <Dialog onClose={onClose} className="cashier-login">
       <img src={logoUrl} alt="101 COFFEE HOUSE" style={{ maxHeight: '100px', objectFit: 'contain', marginBottom: '1rem' }} />
-       <h2>دخول الكاشير والوردية</h2>
-       <form onSubmit={submit}>
-         <label>
-          الوردية
-          <select value={shiftId} onChange={e => setShiftId(e.target.value)}>
-            {shifts.map(c => (
-              <option key={c.shiftId} value={c.shiftId}>{c.name}</option>
-            ))}
-          </select>
-        </label>
-         {error && <p className="form-error" role="alert">{error}</p>}
-         <button className="primary-action" type="submit" disabled={busy}>{busy ? 'جارٍ فتح الوردية…' : 'بدء الوردية محلياً'}</button>
-      </form>
+       <h2>بدء الشفت قبل البيع</h2>
+       <p className="settings-notice">اختر الشفت الفعّال. لا يمكن تسجيل المبيعات قبل بدء أحد الشفتين.</p>
+       <div className="type-grid shift-start-grid" data-testid="shift-start-ui">
+         {shifts.map(shift => (
+           <button key={shift.shiftId} className="primary-action shift-start-button" type="button" disabled={busy} data-testid={`${shift.shiftId}-shift-start-button`} onClick={() => submit(shift)}>
+             {busy ? 'جارٍ بدء الشفت…' : `بدء الشفت ${shift.shiftType === 'morning' ? 'الصباحي' : 'المسائي'}`}
+           </button>
+         ))}
+       </div>
+       {error && <p className="form-error" role="alert">{error}</p>}
        <div className="admin-login-panel" dir="rtl">
          <div className="admin-login-heading">
            <h3>تسجيل دخول الإدارة</h3>
@@ -663,10 +657,14 @@ export function CashierMenu({ session, onClose, onLogout, settlementPreview = nu
   const difference = actual == null || !Number.isFinite(expectedCash) ? null : actual - expectedCash
   return (
     <Dialog onClose={onClose} className="cashier-menu">
-      <h2>{session.shiftName}</h2>
+      <h2>إنهاء الشفت {session.shiftLabel || (session.shiftType === 'morning' ? 'الصباحي' : 'المسائي')}</h2>
       <p>الوردية مفتوحة منذ {formatTime(session.openedAt, { hour: '2-digit', minute: '2-digit' })}</p>
+      <div className="report-card" role="status" data-testid="shift-end-report">
+        <strong>تقرير الشفت {session.shiftType === 'morning' ? 'الصباحي' : 'المسائي'}</strong>
+        {session.shiftType === 'morning' && <p>بعد إنهاء الشفت الصباحي يبقى اليوم التشغيلي مفتوحًا للشفت المسائي.</p>}
+      </div>
       {session.shiftType === 'evening' && <div className="report-card" role="status">
-        <strong>تسوية الشفت المسائي</strong>
+        <strong>تقرير الشفت المسائي وتسوية الصندوق</strong>
         <p>مبلغ الصندوق المتوقع بنهاية الشفت المسائي: <b>{Number.isFinite(expectedCash) ? formatMoney(expectedCash) : 'غير متوفر'}</b></p>
         <label>الكاش الفعلي بالصندوق<input inputMode="numeric" type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} /></label>
         {difference !== null && <p><b>{difference === 0 ? 'مطابق' : difference < 0 ? `نقص ${formatMoney(Math.abs(difference))}` : `زيادة ${formatMoney(difference)}`}</b></p>}

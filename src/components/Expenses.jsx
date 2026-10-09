@@ -85,6 +85,10 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       }
       return
     }
+    if (entryType === 'current' && (!session?.shiftType || !session?.shiftId)) {
+      setSyncMessage('يجب بدء الشفت قبل تسجيل مصروف جديد.')
+      return
+    }
     if (entryType === 'current' && (effectiveOperationalDay?.status !== 'open' || !effectiveOperationalDay?.id || !effectiveOperationalDay?.businessDate)) {
       setSyncMessage('يجب بدء يوم تشغيلي قبل تسجيل مصروف جديد حتى يُحسب المصروف ضمن نفس فترة العمل.')
       return

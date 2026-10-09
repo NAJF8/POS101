@@ -13,7 +13,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {} }) {
+export default function Header({ onOpenOrders, onCashierMenu, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {} }) {
   const now = useLiveClock()
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
@@ -30,8 +30,8 @@ export default function Header({ onOpenOrders, session, openOrdersCount = 0, cur
           <div className="header-block time-block">
             <Icon name="user" size={22} />
             <div className="block-info">
-              <b>{session.shiftName}</b>
-              <small>الوردية الحالية</small>
+              <b data-testid="active-shift-indicator">الشفت: {session.shiftLabel || (session.shiftType === 'morning' ? 'صباحي' : 'مسائي')}</b>
+              <small>{session.shiftName || 'الكاشير الحالي'}</small>
             </div>
           </div>
         )}
@@ -57,6 +57,10 @@ export default function Header({ onOpenOrders, session, openOrdersCount = 0, cur
           <i aria-hidden="true" />
           <span>{syncStatus.label || 'متصل'}</span>
         </div>}
+
+        {session && <button className="header-btn outline-btn" type="button" onClick={onCashierMenu} data-testid="end-shift-button">
+          <span>إنهاء الشفت</span>
+        </button>}
 
         {session && currentView === 'pos' && (
           <>
