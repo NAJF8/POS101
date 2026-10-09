@@ -26,6 +26,16 @@ assert.equal(report.sales.length, 2)
 assert.equal(report.expensesTotal, 586000)
 assert.equal(report.withdrawalsTotal, 25000)
 assert.equal(report.netTotal, -461000)
+assert.deepEqual(report.matchedSales.map(row => row.id), ['s1', 's2'])
+assert.equal(report.totals.totalSales, report.matchedSales.reduce((sum, row) => sum + row.total, 0))
+assert.equal(report.totals.cashSales, 100000)
+assert.equal(report.totals.electronicSales, 50000)
+assert.equal(report.totals.businessExpensesTotal, 586000)
+assert.equal(report.totals.withdrawalsTotal, 25000)
+assert.equal(report.totals.net, 100000 + 50000 - 586000 - 25000)
+const linkedWithdrawal = buildCaptainReport({ captain: staff[0], sales: [], expenses: [{ id: 'linked-expense', employeeCode: '102', businessDate: '2026-10-09', amount: 25000, category: 'سحوبات' }], transactions: [{ id: 'linked-transaction', type: 'withdrawal', linkedExpenseId: 'linked-expense', cashierCode: '102', businessDate: '2026-10-09', amount: 25000 }], from: '2026-10-01', to: '2026-10-09' })
+assert.equal(linkedWithdrawal.totals.withdrawalsTotal, 25000)
+assert.equal(linkedWithdrawal.matchedExpenses.length, 0)
 const employeeReport = buildEmployeeReport({ staff, sales, expenses, transactions, from: '2026-10-01', to: '2026-10-09' })
 const ali = employeeReport.summaries.find(row => row.employee.id === 'staff-ali')
 assert.equal(ali.salesTotal, report.salesTotal)
@@ -38,6 +48,10 @@ assert.equal(ali.withdrawalsTotal, 25000)
 const reportSource = fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8')
 const syncSource = fs.readFileSync(new URL('../src/services/salesSyncQueue.js', import.meta.url), 'utf8')
 assert.match(reportSource, /CAPTAIN_REPORT_DIAGNOSTIC/)
+assert.match(reportSource, /CAPTAIN_REPORT_RENDER_DIAGNOSTIC/)
+assert.match(reportSource, /captainReportData/)
+assert.match(reportSource, /printWindow\.print\(\)/)
+assert.match(reportSource, /captain-report-print-a4/)
 assert.match(reportSource, /matchesEmployee\(row, selectedCaptain\)/)
 assert.match(reportSource, /businessDateOf\(row\)/)
 assert.match(syncSource, /markSaleSynced/)
@@ -54,6 +68,11 @@ console.log(JSON.stringify({
   EMPLOYEE_MATCHES_SALES_BY_CODE_OR_NAME: 'PASS',
   EXPENSES_WITHDRAWALS_STILL_MATCH_EMPLOYEE: 'PASS',
   EMPLOYEE_REPORT_CLASSIFICATION_STILL_CORRECT: 'PASS',
+  CAPTAIN_REPORT_SHARED_DATASET: 'PASS',
+  CAPTAIN_REPORT_SUMMARY_USES_VISIBLE_ROWS: 'PASS',
+  CAPTAIN_REPORT_NET_FORMULA_CORRECT: 'PASS',
+  CAPTAIN_REPORT_NO_LINKED_DOUBLE_COUNTING: 'PASS',
+  CAPTAIN_REPORT_PRINT_HANDLER_PRESENT: 'PASS',
   NO_DOUBLE_COUNTING: 'PASS',
   SYNC_SAFETY_UNCHANGED: 'PASS',
 }, null, 2))

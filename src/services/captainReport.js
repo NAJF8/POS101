@@ -1,4 +1,4 @@
-import { isActiveExpense } from './expenseReporting.js'
+import { isActiveExpense, isWithdrawalExpense, normalizeExpense } from './expenseReporting.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
 import { sellerEligibleStaff } from './staffEligibility.js'
 import { matchesEmployee } from './employeeReport.js'
@@ -9,6 +9,19 @@ const amount = value => { const number = Number(value); return Number.isFinite(n
 const isVoided = row => row?.status === 'voided' || row?.voided === true
 const isClosedSale = row => ['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'].includes(text(row?.status).toLocaleLowerCase('ar-IQ'))
 const salaryCategory = 'راتب'
+const isSalaryRecord = row => text(row?.category || row?.expenseCategory) === salaryCategory
+const isInactiveTransaction = row => row?.status === 'voided' || row?.voided === true
+
+// One report-only classifier for expense rows and cashbox transactions. It
+// never writes or mutates the source records.
+export const classifyExpenseRecord = (row, { source = 'expense', salaryExpenseIds = new Set() } = {}) => {
+  const normalized = source === 'expense' ? normalizeExpense(row) : (row || {})
+  const withdrawal = source === 'transaction'
+    ? text(normalized.type || normalized.transactionType).toLocaleLowerCase('ar-IQ') === 'withdrawal' || isWithdrawalExpense(normalized)
+    : isWithdrawalExpense(normalized)
+  const salary = !withdrawal && (isSalaryRecord(normalized) || salaryExpenseIds.has(text(normalized.linkedExpenseId)))
+  return { row: normalized, kind: withdrawal ? 'withdrawal' : salary ? 'salary' : 'expense', amount: amount(normalized.amount) }
+}
 
 export const captainNameOf = row => text(row?.name || row?.employeeNameSnapshot || row?.cashierNameSnapshot || row?.seller || row?.person)
 export const captainCodeOf = row => text(row?.code || row?.employeeCode || row?.staffCode)
@@ -30,20 +43,35 @@ export const buildCaptainReport = ({ captain = null, staff = [], sales = [], exp
   const selected = new Set(Array.isArray(sections) ? sections : [])
   const valid = Boolean(captain) && isValidDateRange(from, to)
   const inRange = row => !isVoided(row) && valid && businessDateOf(row) >= from && businessDateOf(row) <= to && matchCaptainRecord(row, captain, staff)
-  const captainSales = filterRowsByBusinessDate(sales, from, to).filter(row => !isClosedSale(row) && inRange(row))
-  const captainExpenses = filterRowsByBusinessDate(expenses, from, to).filter(row => isActiveExpense(row) && inRange(row))
-  const captainTransactions = filterRowsByBusinessDate(transactions, from, to).filter(inRange)
-  const salesRows = selected.has('sales') ? captainSales : []
-  const expenseRows = selected.has('expenses') ? captainExpenses.filter(row => canonical(row.category) !== canonical(salaryCategory)) : []
-  const salaryRows = selected.has('salary') ? captainExpenses.filter(row => text(row.category) === salaryCategory) : []
-  const withdrawalRows = selected.has('withdrawals') ? captainTransactions.filter(row => row?.type === 'withdrawal') : []
-  const salesTotal = salesRows.reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
-  const cashSales = salesRows.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
-  const electronicSales = salesRows.filter(row => (row.paymentMethod || row.payment?.method) === 'electronic').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
-  const expensesTotal = expenseRows.reduce((sum, row) => sum + amount(row.amount), 0)
-  const salaryTotal = salaryRows.reduce((sum, row) => sum + amount(row.amount), 0)
-  const withdrawalsTotal = withdrawalRows.reduce((sum, row) => sum + amount(row.amount), 0)
-  return { valid, captain, from, to, sections: [...selected], sales: salesRows, expenses: expenseRows, salary: salaryRows, withdrawals: withdrawalRows, salesTotal, cashSales, electronicSales, expensesTotal, salaryTotal, withdrawalsTotal, netTotal: salesTotal - expensesTotal - salaryTotal - withdrawalsTotal }
+  const matchedSales = filterRowsByBusinessDate(sales, from, to).filter(row => !isClosedSale(row) && inRange(row))
+  const normalizedExpenses = filterRowsByBusinessDate(expenses, from, to).filter(row => isActiveExpense(row) && inRange(row)).map(row => classifyExpenseRecord(row))
+  const matchedTransactions = filterRowsByBusinessDate(transactions, from, to).filter(row => !isInactiveTransaction(row) && inRange(row))
+  const linkedExpenseIds = new Set(matchedTransactions.map(row => text(row.linkedExpenseId || row.sourceRefId)).filter(Boolean))
+  const salaryExpenseIds = new Set(normalizedExpenses.filter(item => item.kind === 'salary').map(item => text(item.row.id)).filter(Boolean))
+  const classifiedTransactions = matchedTransactions.map(row => classifyExpenseRecord(row, { source: 'transaction', salaryExpenseIds }))
+  const matchedExpenses = [
+    ...normalizedExpenses.filter(item => item.kind === 'expense' && !linkedExpenseIds.has(text(item.row.id))).map(item => item.row),
+    ...classifiedTransactions.filter(item => item.kind === 'expense').map(item => item.row),
+  ]
+  const matchedSalaries = [
+    ...normalizedExpenses.filter(item => item.kind === 'salary' && !linkedExpenseIds.has(text(item.row.id))).map(item => item.row),
+    ...classifiedTransactions.filter(item => item.kind === 'salary').map(item => item.row),
+  ]
+  const matchedWithdrawals = [
+    ...normalizedExpenses.filter(item => item.kind === 'withdrawal' && !linkedExpenseIds.has(text(item.row.id))).map(item => item.row),
+    ...classifiedTransactions.filter(item => item.kind === 'withdrawal').map(item => item.row),
+  ]
+  const totalOf = rows => rows.reduce((sum, row) => sum + amount(row.amount ?? row.total ?? row.subtotal), 0)
+  const totalSales = matchedSales.reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
+  const cashSales = matchedSales.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
+  const electronicSales = matchedSales.filter(row => (row.paymentMethod || row.payment?.method) === 'electronic').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
+  const totals = { totalSales, cashSales, electronicSales, ordersCount: matchedSales.length, businessExpensesTotal: totalOf(matchedExpenses), withdrawalsTotal: totalOf(matchedWithdrawals), salariesTotal: totalOf(matchedSalaries) }
+  totals.net = totals.cashSales + totals.electronicSales - totals.businessExpensesTotal - totals.withdrawalsTotal - totals.salariesTotal
+  const salesRows = selected.has('sales') ? matchedSales : []
+  const expenseRows = selected.has('expenses') ? matchedExpenses : []
+  const salaryRows = selected.has('salary') ? matchedSalaries : []
+  const withdrawalRows = selected.has('withdrawals') ? matchedWithdrawals : []
+  return { valid, captain, from, to, sections: [...selected], matchedSales, matchedExpenses, matchedWithdrawals, matchedSalaries, totals, sales: salesRows, expenses: expenseRows, salary: salaryRows, withdrawals: withdrawalRows, salesTotal: totalOf(salesRows.map(row => ({ amount: row.total ?? row.subtotal }))), cashSales: salesRows.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0), electronicSales: salesRows.filter(row => (row.paymentMethod || row.payment?.method) === 'electronic').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0), expensesTotal: totalOf(expenseRows), salaryTotal: totalOf(salaryRows), withdrawalsTotal: totalOf(withdrawalRows), netTotal: totalOf(salesRows.map(row => ({ amount: row.total ?? row.subtotal }))) - totalOf(expenseRows) - totalOf(salaryRows) - totalOf(withdrawalRows) }
 }
 
 export const CAPTAIN_SALARY_CATEGORY = salaryCategory
