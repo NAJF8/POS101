@@ -14,20 +14,41 @@ export const isActiveExpense = expense => !isDeletedExpense(expense)
 const text = value => String(value ?? '').trim()
 const normalizedMarker = value => text(value).toLocaleLowerCase('ar-IQ').replace(/[\u200f\u200e\u061c]/g, '').replace(/[\s_-]+/g, ' ')
 const explicitTransactionType = row => normalizedMarker(row?.transactionType || row?.movementType || row?.recordType || row?.type)
+const currentCategoryMarker = row => normalizedMarker(row?.category || row?.expenseCategory)
+const currentTypeMarker = row => normalizedMarker(row?.type)
+const isWithdrawalMarker = value => value === 'سحوبات' || value.includes('سحب') || value.includes('withdrawal')
 const withdrawalMarker = row => [row?.category, row?.expenseCategory, row?.type, row?.transactionType, row?.movementType, row?.recordType]
   .map(normalizedMarker)
-  .some(value => value === 'سحوبات' || value.includes('سحب') || value.includes('withdrawal'))
+  .some(isWithdrawalMarker)
+const hasCurrentBusinessExpenseMarker = row => {
+  const category = currentCategoryMarker(row)
+  const type = currentTypeMarker(row)
+  const current = category || type
+  return Boolean(current) && !isWithdrawalMarker(current)
+}
 
 // Report-only compatibility classifier. It never writes or mutates the source row.
 export const classifyWithdrawalExpense = (row, { fundingSource = row?.fundingSource, paymentSource = row?.paymentSource } = {}) => {
   const source = normalizeFundingSource(fundingSource ?? paymentSource)
   if (source !== 'cashbox') return { withdrawal: false, inferred: false }
+  // Current category/type is the user's latest edit. It must override stale
+  // transaction/derived fields from a previous withdrawal classification.
+  if (hasCurrentBusinessExpenseMarker(row)) return { withdrawal: false, inferred: false }
+  const categoryOrTypeIsWithdrawal = isWithdrawalMarker(currentCategoryMarker(row) || currentTypeMarker(row))
+  if (categoryOrTypeIsWithdrawal) return { withdrawal: true, inferred: explicitTransactionType(row) !== 'withdrawal' }
   const explicit = explicitTransactionType(row)
   if (explicit === 'withdrawal' || explicit.includes('withdrawal') || explicit.includes('سحب')) return { withdrawal: true, inferred: false }
-  return { withdrawal: withdrawalMarker(row), inferred: withdrawalMarker(row) }
+  const inferred = withdrawalMarker(row)
+  return { withdrawal: inferred, inferred }
 }
 
-export const isWithdrawalExpense = expense => Boolean(expense?.derivedTransactionType === 'withdrawal' || classifyWithdrawalExpense(expense).withdrawal)
+export const isWithdrawalExpense = expense => {
+  const classification = classifyWithdrawalExpense(expense)
+  if (classification.withdrawal) return true
+  // A report-only derived value remains compatible for genuinely incomplete
+  // legacy rows, but never overrides a current expense category/type.
+  return !hasCurrentBusinessExpenseMarker(expense) && !explicitTransactionType(expense) && expense?.derivedTransactionType === 'withdrawal'
+}
 export const isRegularExpense = expense => isActiveExpense(expense) && !isWithdrawalExpense(expense)
 
 const normalizeDigits = value => String(value ?? '').replace(/[٠-٩۰-۹]/g, digit => {
@@ -114,7 +135,9 @@ export const normalizeExpense = (expense, options = {}) => {
     // Keep the drawer alias for new records while the internal fundingSource
     // remains cashbox-compatible with existing settlement code.
     paymentSource: String(paymentSourceValue || '').trim().toLowerCase() === 'cash_drawer' ? 'cash_drawer' : fundingSource,
-    derivedTransactionType: withdrawal.withdrawal ? 'withdrawal' : firstValue(raw.derivedTransactionType, raw.transactionType, raw.type, 'expense'),
+    // Persist/read back a non-withdrawal classification after an edit. This
+    // prevents a stale derived withdrawal from winning over "مشتريات".
+    derivedTransactionType: withdrawal.withdrawal ? 'withdrawal' : 'expense',
     inferredWithdrawal: Boolean(withdrawal.inferred),
     shift: firstValue(raw.shift, raw.shiftName, raw.shift_id, raw.shiftId, ''),
     shiftId: firstValue(raw.shiftId, raw.shift_id, ''),

@@ -2260,6 +2260,10 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
     Number(savedValue.amount) !== Number(payload.amount) ||
     String(savedValue.description || '') !== String(payload.description || '') ||
     String(savedValue.category || '') !== String(payload.category || '') ||
+    String(savedValue.transactionType || '') !== String(payload.transactionType || '') ||
+    String(savedValue.recordType || '') !== String(payload.recordType || '') ||
+    String(savedValue.type || '') !== String(payload.type || '') ||
+    String(savedValue.derivedTransactionType || '') !== String(payload.derivedTransactionType || '') ||
     String(savedValue.employeeId || '') !== String(payload.employeeId || '') ||
     String(savedValue.employeeNameSnapshot || '') !== String(payload.employeeNameSnapshot || '') ||
     String(savedValue.person || '') !== String(payload.person || '') ||
@@ -2748,6 +2752,9 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const savedTransaction = transactionReadBack.exists() ? transactionReadBack.val() : null
   if (!savedTransaction
     || savedExpense.fundingSource !== 'cashbox'
+    || String(savedExpense.transactionType || '') !== String(normalized.transactionType || '')
+    || String(savedExpense.type || '') !== String(normalized.type || '')
+    || String(savedExpense.derivedTransactionType || '') !== String(normalized.derivedTransactionType || '')
     || savedTransaction.type !== desiredTransactionType
     || String(savedExpense.linkedTransactionId || '') !== transactionId
     || Number(savedExpense.amount) !== Number(expensePayload.amount)
