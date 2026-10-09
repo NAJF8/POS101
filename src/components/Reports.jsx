@@ -5,7 +5,7 @@ import { logoDataUri } from '../assets/logo'
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
-import { isActiveExpense, isCashboxExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
+import { isActiveExpense, isCashboxExpense, isRegularExpense, isWithdrawalExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
 import { readCentralExpensesForReports, readLocalExpenses, subscribeCentralExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
@@ -323,29 +323,32 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     if (reportType !== 'period') return EMPTY_PERIOD_DATASET
     const valid = isValidDateRange(periodFrom, periodTo)
     const rangeSales = reportSales
-    const rangeExpenses = filterRowsByBusinessDate((Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo)
+    const normalizedRangeExpenses = filterRowsByBusinessDate((Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })), periodFrom, periodTo).filter(isActiveExpense)
+    const rangeExpenses = normalizedRangeExpenses.filter(isRegularExpense)
+    const rangeWithdrawalExpenses = normalizedRangeExpenses.filter(isWithdrawalExpense)
     const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo).filter(row => row?.status !== 'voided' && row?.voided !== true)
     const dailyMap = new Map()
     const ensureDay = date => { if (!dailyMap.has(date)) dailyMap.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, adjustments: 0, net: 0, orders: 0 }); return dailyMap.get(date) }
     rangeSales.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.total ?? row.subtotal); day.sales += value; day.orders += 1; if ((row.paymentMethod || row.payment?.method) === 'cash') day.cash += value; if ((row.paymentMethod || row.payment?.method) === 'electronic') day.electronic += value })
     rangeExpenses.forEach(row => { ensureDay(businessDateOf(row)).expenses += numberValue(row.amount) })
     rangeTransactions.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.amount); if (row.type === 'withdrawal') day.withdrawals += value; if (row.type === 'deposit' || row.type === 'return') day.deposits += value; if (row.type === 'adjustment') day.adjustments += numberValue(row.signedAmount ?? row.amount) })
+    rangeWithdrawalExpenses.filter(row => !rangeTransactions.some(transaction => String(transaction.linkedExpenseId || transaction.sourceRefId || '') === String(row.id || ''))).forEach(row => { ensureDay(businessDateOf(row)).withdrawals += numberValue(row.amount) })
     const daily = [...dailyMap.values()].sort((a, b) => a.businessDate.localeCompare(b.businessDate)).map(row => ({ ...row, net: row.cash - row.expenses - row.withdrawals + row.deposits + row.adjustments }))
     const grossSales = rangeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
     const cashSales = rangeSales.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
     const electronicSales = rangeSales.filter(row => (row.paymentMethod || row.payment?.method) === 'electronic').reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
     const expensesTotal = rangeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
     const cashboxExpenses = rangeExpenses.filter(isCashboxExpense).reduce((sum, row) => sum + numberValue(row.amount), 0)
-    const withdrawals = rangeTransactions.filter(row => row.type === 'withdrawal').reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const withdrawals = rangeTransactions.filter(row => row.type === 'withdrawal').reduce((sum, row) => sum + numberValue(row.amount), 0) + rangeWithdrawalExpenses.filter(row => !rangeTransactions.some(transaction => String(transaction.linkedExpenseId || transaction.sourceRefId || '') === String(row.id || ''))).reduce((sum, row) => sum + numberValue(row.amount), 0)
     const deposits = rangeTransactions.filter(row => row.type === 'deposit' || row.type === 'return').reduce((sum, row) => sum + numberValue(row.amount), 0)
     const adjustments = rangeTransactions.filter(row => row.type === 'adjustment').reduce((sum, row) => sum + numberValue(row.signedAmount ?? row.amount), 0)
     const beforeTransactions = (Array.isArray(cashboxTransactions) ? cashboxTransactions : []).filter(row => businessDateOf(row) < periodFrom)
     const beforeSales = (Array.isArray(sales) ? sales : []).filter(row => businessDateOf(row) < periodFrom && (row.paymentMethod || row.payment?.method) === 'cash')
-    const beforeExpenses = (Array.isArray(expenses) ? expenses : []).filter(row => businessDateOf(row) < periodFrom)
+    const beforeExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })).filter(row => businessDateOf(row) < periodFrom && isRegularExpense(row))
     const beforeBalance = calculateCashboxBalance(beforeTransactions) + beforeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - beforeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
     const endTransactions = (Array.isArray(cashboxTransactions) ? cashboxTransactions : []).filter(row => businessDateOf(row) <= periodTo)
     const endSales = (Array.isArray(sales) ? sales : []).filter(row => businessDateOf(row) <= periodTo && (row.paymentMethod || row.payment?.method) === 'cash')
-    const endExpenses = (Array.isArray(expenses) ? expenses : []).filter(row => businessDateOf(row) <= periodTo)
+    const endExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })).filter(row => businessDateOf(row) <= periodTo && isRegularExpense(row))
     const endBalance = calculateCashboxBalance(endTransactions) + endSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - endExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
     const employeeMap = new Map()
     const addEmployee = (row, value, kind) => { const name = row.employeeNameSnapshot || row.cashierNameSnapshot || row.person || row.seller || row.cashierName || 'غير محدد'; const key = String(row.employeeId || row.cashierId || name); const current = employeeMap.get(key) || { name, orders: 0, sales: 0, expenses: 0, withdrawals: 0 }; if (kind === 'sale') { current.orders += 1; current.sales += value } else if (kind === 'withdrawal') current.withdrawals += value; else current.expenses += value; employeeMap.set(key, current) }
@@ -676,6 +679,8 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         <tr><td>المبيعات الإلكترونية</td><td className="number-cell">{format(shift.electronicSales)}</td></tr>
         <tr><td>الخصومات</td><td className="number-cell">{format(shift.discounts)}</td></tr>
         <tr><td>مصاريف من الصندوق</td><td className="number-cell">{format(shift.drawerExpenses)}</td></tr>
+        <tr><td>السحوبات</td><td className="number-cell">{format(shift.withdrawalsTotal)}</td></tr>
+        <tr className="summary-highlight"><td>إجمالي النقدي الخارج من الصندوق</td><td className="number-cell">{format(shift.drawerExpenses + shift.withdrawalsTotal)}</td></tr>
         <tr className="summary-highlight"><td>صافي الكاش للشفت</td><td className="number-cell">{format(shift.netCash)}</td></tr>
         <tr><td>المبيعات الملغاة / المبطلة</td><td className="number-cell">{formatNumber(shift.voidedCount)}</td></tr>
         <tr><td>الكاشير</td><td>{shift.cashierNames.join('، ') || 'غير محدد'}</td></tr>
@@ -781,6 +786,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <tr><td>مصاريف من الإدارة</td><td className="number-cell">{format(toMoneyNumber(managementExpenses, 0))}</td></tr>
             <tr><td>سحوبات من الصندوق</td><td className="number-cell">{format(toMoneyNumber(cashboxWithdrawals, 0))}</td></tr>
             <tr><td>سحوبات من الإدارة</td><td className="number-cell">{format(toMoneyNumber(managementWithdrawals, 0))}</td></tr>
+            <tr className="summary-highlight"><td>إجمالي النقدي الخارج من الصندوق</td><td className="number-cell">{format(toMoneyNumber(cashboxExpenses, 0) + toMoneyNumber(cashboxWithdrawals, 0))}</td></tr>
             <tr><td>إجمالي الخدمة</td><td className="number-cell">{format(toMoneyNumber(totalServiceCharge, 0))}</td></tr>
             <tr><td>إجمالي التسديدات</td><td className="number-cell">{format(0)}</td></tr>
             <tr><td>المجموع بعد كل التصفيات</td><td className="number-cell">{format(toMoneyNumber(finalAfterAllSettlements, 0))}</td></tr>
@@ -891,16 +897,16 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           <label>نوع الحركة<select aria-label="نوع الحركة" value={expenseTypeFilter} onChange={event => setExpenseTypeFilter(event.target.value)}><option value="all">الكل</option><option value="expenses">مصاريف</option><option value="salary">رواتب</option><option value="withdrawals">سحوبات</option><option value="other">أخرى</option></select></label>
         </div>
         <table className="print-table" data-testid="cash-outflow-report">
-          <thead><tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>الموظف</th><th>الكود</th><th>المبلغ</th><th>المصدر</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>الموظف / الكاشير</th><th>الكود</th><th>المبلغ</th><th>المصدر</th><th>الشفت</th></tr></thead>
           <tbody>
             {filteredCashOutflows.map((row, idx) => (
               <tr key={`${row.source}:${row.id}`}>
-                <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || '—'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.sourceLabel || (row.source === 'expense' ? 'المصاريف' : row.source || '—')}</td>
+                <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || 'غير محدد'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.sourceLabel || (row.source === 'expense' ? 'المصاريف' : row.source || '—')}</td><td>{row.shiftLabel || (row.shiftType === 'morning' ? 'صباحي' : row.shiftType === 'evening' ? 'مسائي' : 'غير محدد')}</td>
               </tr>
             ))}
-            {filteredCashOutflows.length === 0 && <tr><td colSpan="7">لا توجد مصاريف أو سحوبات نقدية مسجلة</td></tr>}
+            {filteredCashOutflows.length === 0 && <tr><td colSpan="8">لا توجد مصاريف أو سحوبات نقدية مسجلة</td></tr>}
             <tr style={{ fontWeight: 'bold' }}>
-              <td colSpan="5">إجمالي التدفقات النقدية الخارجة</td>
+              <td colSpan="6">إجمالي التدفقات النقدية الخارجة</td>
               <td>{format(sumCashOutflowReport(filteredCashOutflows))}</td><td>—</td>
             </tr>
           </tbody>

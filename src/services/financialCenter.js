@@ -1,4 +1,4 @@
-import { isCashboxExpense, isManagementExpense } from './expenseReporting.js'
+import { isCashboxExpense, isManagementExpense, isWithdrawalExpense, isRegularExpense, normalizeExpense } from './expenseReporting.js'
 
 export const toMoneyNumber = (value, fallback = 0) => {
   if (value === null || value === undefined || value === '') return fallback
@@ -70,13 +70,17 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
   const validSales = sales.filter(sale => !isVoided(sale))
   const cashSales = validSales.filter(sale => paymentMethod(sale) === 'cash').reduce((sum, sale) => sum + saleAmount(sale), 0)
   const electronicSales = validSales.filter(sale => paymentMethod(sale) === 'electronic').reduce((sum, sale) => sum + saleAmount(sale), 0)
-  const validExpenses = expenses.filter(expense => !isVoided(expense))
-  const cashboxExpenses = validExpenses.filter(isCashboxExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
-  const managementExpenses = validExpenses.filter(isManagementExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
+  const validExpenses = expenses.filter(expense => !isVoided(expense)).map(normalizeExpense)
+  const ordinaryExpenses = validExpenses.filter(isRegularExpense)
+  const cashboxExpenses = ordinaryExpenses.filter(isCashboxExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
+  const managementExpenses = ordinaryExpenses.filter(isManagementExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
   const expenseTotal = cashboxExpenses + managementExpenses
   const movementTransactions = transactions.filter(row => !isSettlementBookkeeping(row))
   const withdrawalRows = movementTransactions.filter(row => row?.type === 'withdrawal' && !isVoided(row))
+  const linkedWithdrawalExpenseIds = new Set(withdrawalRows.map(row => String(row?.linkedExpenseId || row?.sourceRefId || '')).filter(Boolean))
+  const derivedWithdrawals = validExpenses.filter(isWithdrawalExpense).filter(row => !linkedWithdrawalExpenseIds.has(String(row.id || '')))
   const cashboxWithdrawals = withdrawalRows.filter(isCashboxWithdrawal).reduce((sum, row) => sum + amount(row.amount), 0)
+    + derivedWithdrawals.filter(isCashboxExpense).reduce((sum, row) => sum + amount(row.amount), 0)
   const managementWithdrawals = withdrawalRows.filter(isManagementWithdrawal).reduce((sum, row) => sum + amount(row.amount), 0)
   const withdrawals = cashboxWithdrawals + managementWithdrawals
   const deposits = movementTransactions.filter(row => row?.type === 'deposit' && !isVoided(row)).reduce((sum, row) => sum + amount(row.amount), 0)
@@ -120,8 +124,11 @@ export const calculateFinancialReport = ({ sales = [], expenses = [], transactio
   const byDay = new Map()
   const ensure = date => { if (!byDay.has(date)) byDay.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, net: 0, orders: 0 }); return byDay.get(date) }
   filteredSales.forEach(sale => { const row = ensure(resolveFinancialBusinessDate(sale)); const value = saleAmount(sale); row.sales += value; row.orders += 1; if (paymentMethod(sale) === 'cash') row.cash += value; if (paymentMethod(sale) === 'electronic') row.electronic += value })
-  filteredExpenses.forEach(expense => { const row = ensure(resolveFinancialBusinessDate(expense)); if (isCashboxExpense(expense)) row.expenses += amount(expense.amount) })
+  const normalizedExpenses = filteredExpenses.map(normalizeExpense)
+  normalizedExpenses.filter(isRegularExpense).forEach(expense => { const row = ensure(resolveFinancialBusinessDate(expense)); if (isCashboxExpense(expense)) row.expenses += amount(expense.amount) })
   filteredTransactions.forEach(transaction => { const row = ensure(resolveFinancialBusinessDate(transaction)); if (isCashboxWithdrawal(transaction)) row.withdrawals += amount(transaction.amount); if (transaction.type === 'deposit' || transaction.type === 'return') row.deposits += amount(transaction.amount) })
+  const transactionExpenseIds = new Set(filteredTransactions.filter(row => row?.type === 'withdrawal').map(row => String(row.linkedExpenseId || row.sourceRefId || '')).filter(Boolean))
+  normalizedExpenses.filter(isWithdrawalExpense).filter(row => !transactionExpenseIds.has(String(row.id || ''))).forEach(expense => { ensure(resolveFinancialBusinessDate(expense)).withdrawals += amount(expense.amount) })
   for (const row of byDay.values()) row.net = row.cash - row.expenses - row.withdrawals + row.deposits
   return { ...summary, daily: [...byDay.values()].sort((a, b) => a.businessDate.localeCompare(b.businessDate)), filteredSales, filteredExpenses, filteredTransactions }
 }

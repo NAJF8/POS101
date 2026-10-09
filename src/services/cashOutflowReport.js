@@ -1,4 +1,4 @@
-import { isActiveExpense, isManagementExpense, normalizeExpense, fundingSourceLabel } from './expenseReporting.js'
+import { isActiveExpense, isManagementExpense, isWithdrawalExpense, normalizeExpense, fundingSourceLabel } from './expenseReporting.js'
 import { resolveFinancialBusinessDate } from './financialCenter.js'
 import { employeeCodeOf, employeeNameOf, matchEmployeeRecord } from './employeeReport.js'
 
@@ -39,7 +39,7 @@ export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], s
   const rows = expenseRows.map(row => {
     const person = matchEmployeeRecord(row, staff)
     const salary = text(row.category || row.expenseCategory) === 'راتب'
-    return { id: text(row.id) || `expense:${mirrorKeyOf(row)}`, source: 'expense', sourceType: 'expense', sourceLabel: fundingSourceLabel(row.fundingSource), fundingSource: row.fundingSource, typeLabel: salary ? 'راتب' : text(row.category) || 'أخرى', amount: amount(row.amount), employeeId: text(person?.id || row.employeeId || row.staffId), employeeName: text(person?.name || employeeNameOf(row) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(row)), description: descriptionOf(row), notes: text(row.notes || row.description), businessDate: dateOf(row, operationalDayDates), createdAt: row.createdAt || row.created_at || row.timestamp || row.date || 0, operationalDayId: text(row.operationalDayId || row.operational_day_id || row.shiftId), original: row }
+    return { id: text(row.id) || `expense:${mirrorKeyOf(row)}`, source: isWithdrawalExpense(row) ? 'withdrawal' : 'expense', sourceType: isWithdrawalExpense(row) ? 'withdrawal' : 'expense', sourceLabel: fundingSourceLabel(row.fundingSource), fundingSource: row.fundingSource, typeLabel: isWithdrawalExpense(row) ? 'سحوبات' : (salary ? 'راتب' : text(row.category) || 'أخرى'), amount: amount(row.amount), employeeId: text(person?.id || row.employeeId || row.staffId), employeeName: text(person?.name || employeeNameOf(row) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(row)), description: descriptionOf(row), notes: text(row.notes || row.description), businessDate: dateOf(row, operationalDayDates), createdAt: row.createdAt || row.created_at || row.timestamp || row.date || 0, operationalDayId: text(row.operationalDayId || row.operational_day_id || row.shiftId), shiftType: text(row.shiftType || row.shift_type), shiftLabel: text(row.shiftLabel), original: row }
   })
   for (const transaction of (Array.isArray(transactions) ? transactions : []).filter(isCashOutflowTransaction)) {
     const refs = refsOf(transaction)
@@ -49,7 +49,7 @@ export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], s
     const person = matchEmployeeRecord(transaction, staff)
     const type = typeOf(transaction)
     const withdrawal = type === 'withdrawal' || type.includes('withdrawal')
-    rows.push({ id: text(transaction.id || transaction.transactionId) || `cashbox:${mirrorKeyOf(transaction)}`, source: withdrawal && transaction.fundingSource === 'management' ? 'الإدارة' : 'الصندوق', sourceLabel: withdrawal && transaction.fundingSource === 'management' ? 'من الإدارة' : (withdrawal ? 'من الصندوق' : ''), sourceType: text(transaction.type || transaction.transactionType) || 'cash_out', typeLabel: withdrawal ? 'سحوبات' : 'أخرى', fundingSource: withdrawal && transaction.fundingSource === 'management' ? 'management' : (withdrawal ? 'cashbox' : ''), amount: amount(transaction.amount), employeeId: text(person?.id || transaction.employeeId || transaction.staffId || transaction.cashierId), employeeName: text(person?.name || employeeNameOf(transaction) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(transaction)), description: descriptionOf(transaction), notes: text(transaction.notes || transaction.reason || transaction.note), businessDate: dateOf(transaction, operationalDayDates), createdAt: transaction.createdAt || transaction.created_at || transaction.timestamp || transaction.date || 0, operationalDayId: text(transaction.operationalDayId || transaction.operational_day_id || transaction.shiftId), original: transaction })
+    rows.push({ id: text(transaction.id || transaction.transactionId) || `cashbox:${mirrorKeyOf(transaction)}`, source: withdrawal && transaction.fundingSource === 'management' ? 'الإدارة' : 'الصندوق', sourceLabel: withdrawal && transaction.fundingSource === 'management' ? 'من الإدارة' : (withdrawal ? 'من الصندوق' : ''), sourceType: text(transaction.type || transaction.transactionType) || 'cash_out', typeLabel: withdrawal ? 'سحوبات' : 'أخرى', fundingSource: withdrawal && transaction.fundingSource === 'management' ? 'management' : (withdrawal ? 'cashbox' : ''), amount: amount(transaction.amount), employeeId: text(person?.id || transaction.employeeId || transaction.staffId || transaction.cashierId), employeeName: text(person?.name || employeeNameOf(transaction) || 'غير محدد'), employeeCode: text(person?.code || employeeCodeOf(transaction)), description: descriptionOf(transaction), notes: text(transaction.notes || transaction.reason || transaction.note), businessDate: dateOf(transaction, operationalDayDates), createdAt: transaction.createdAt || transaction.created_at || transaction.timestamp || transaction.date || 0, operationalDayId: text(transaction.operationalDayId || transaction.operational_day_id || transaction.shiftId), shiftType: text(transaction.shiftType || transaction.shift_type), shiftLabel: text(transaction.shiftLabel), original: transaction })
   }
   return rows.sort((left, right) => `${left.businessDate}|${left.createdAt}|${left.id}`.localeCompare(`${right.businessDate}|${right.createdAt}|${right.id}`))
 }
@@ -57,7 +57,7 @@ export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], s
 export const filterCashOutflowReport = (rows, from, to, type = 'all') => (Array.isArray(rows) ? rows : []).filter(row => {
   if (from && row.businessDate < from) return false
   if (to && row.businessDate > to) return false
-  if (type === 'expenses') return row.source === 'expense' && row.typeLabel !== 'راتب'
+  if (type === 'expenses') return row.source === 'expense' && row.typeLabel !== 'راتب' && !String(row.typeLabel || '').startsWith('سحوبات')
   if (type === 'salary') return row.typeLabel === 'راتب'
   if (type === 'withdrawals') return String(row.typeLabel || '').startsWith('سحوبات')
   if (type === 'other') return row.typeLabel === 'أخرى'

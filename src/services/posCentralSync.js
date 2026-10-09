@@ -22,7 +22,7 @@ import {
   update,
 } from 'firebase/database'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
-import { areExpenseDuplicates, expenseFingerprint, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
+import { areExpenseDuplicates, expenseFingerprint, isWithdrawalExpense, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettlement, calculateSettlementCorrection, getEffectiveSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
@@ -223,7 +223,7 @@ const centralExpensePayload = (expense, user, { preserveCreatedAt = false } = {}
     updatedBy: user?.uid || normalized.updatedBy || '',
     deviceId: normalized.deviceId || getDeviceId(),
     fundingSource: normalized.fundingSource,
-    paymentSource: normalized.fundingSource,
+    paymentSource: normalized.paymentSource || normalized.fundingSource,
     syncStatus: 'synced',
   }
 }
@@ -2242,11 +2242,12 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   const previousSnapshot = existing ? await get(ref(db, `pos101_expenses/${id}`)) : null
   const previous = previousSnapshot?.exists() ? normalizeExpense({ ...previousSnapshot.val(), id }) : null
   const payloadSource = normalized.fundingSource
+  const desiredTransactionType = isWithdrawalExpense(normalized) ? 'withdrawal' : 'expense'
   const transactionId = `expense-${safeKey(id)}`
   const payload = centralExpensePayload({ ...normalized, id, fundingSource: payloadSource, ...(payloadSource === 'cashbox' ? { linkedTransactionId: transactionId } : { linkedTransactionId: '' }) }, user, { preserveCreatedAt: existing })
   const updates = { [`pos101_expenses/${id}`]: payload }
   if (payloadSource === 'cashbox') {
-    updates[`${cashboxTransactionsPath}/${transactionId}`] = { id: transactionId, type: 'expense', amount: payload.amount, businessDate: payload.businessDate, operationalDayId: payload.operationalDayId || '', employeeId: payload.employeeId || payload.cashierId || '', employeeNameSnapshot: payload.employeeNameSnapshot || payload.person || payload.cashierName || '', reason: payload.description || payload.notes || '', source: 'cashier expense', sourceRefId: id, linkedExpenseId: id, fundingSource: 'cashbox', status: 'active', createdAt: previous?.createdAt || Date.now(), createdByUid: previous?.createdByUid || user.uid, createdByName: previous?.createdByName || user.displayName || user.email || '' }
+    updates[`${cashboxTransactionsPath}/${transactionId}`] = { id: transactionId, type: desiredTransactionType, transactionType: desiredTransactionType, amount: payload.amount, businessDate: payload.businessDate, operationalDayId: payload.operationalDayId || '', shiftId: payload.shiftId || '', shiftType: payload.shiftType || '', shiftLabel: payload.shiftLabel || '', employeeId: payload.employeeId || payload.cashierId || '', employeeNameSnapshot: payload.employeeNameSnapshot || payload.person || payload.cashierName || '', reason: payload.description || payload.notes || '', source: desiredTransactionType === 'withdrawal' ? 'drawer' : 'cashier expense', sourceRefId: id, linkedExpenseId: id, fundingSource: 'cashbox', paymentSource: desiredTransactionType === 'withdrawal' ? 'cash_drawer' : 'cashbox', status: 'active', createdAt: previous?.createdAt || Date.now(), createdByUid: previous?.createdByUid || user.uid, createdByName: previous?.createdByName || user.displayName || user.email || '' }
   } else if (previous?.fundingSource === 'cashbox' || previous?.linkedTransactionId) {
     updates[`${cashboxTransactionsPath}/${previous.linkedTransactionId || transactionId}`] = null
   }
@@ -2708,6 +2709,7 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const existingTransactionSnapshot = await get(financialPath(`${cashboxTransactionsPath}/${transactionId}`))
   const existingExpenseSnapshot = await get(ref(db, `pos101_expenses/${expenseId}`))
   const existingTransaction = existingTransactionSnapshot.exists() ? existingTransactionSnapshot.val() : null
+  const desiredTransactionType = isWithdrawalExpense(normalized) ? 'withdrawal' : 'expense'
   if (existingTransaction && (String(existingTransaction.linkedExpenseId || existingTransaction.sourceRefId || '') !== String(expenseId))) {
     throw Object.assign(new Error('معرف حركة الصندوق مرتبط بسجل مصروف آخر.'), { code: 'CASHBOX_TRANSACTION_COLLISION' })
   }
@@ -2718,17 +2720,19 @@ export const saveCentralExpenseWithCashbox = async expense => {
     if (existingExpense.fundingSource === 'cashbox'
       && Number(existingExpense.amount) === Number(normalized.amount)
       && String(existingExpense.businessDate || '') === String(normalized.businessDate || '')
-      && String(existingExpense.linkedTransactionId || '') === transactionId) {
+      && String(existingExpense.linkedTransactionId || '') === transactionId
+      && String(existingTransaction.type || '') === desiredTransactionType) {
       return existingExpense
     }
   }
   if (!normalized.amount || !normalized.businessDate || !normalized.createdAt) throw new Error('المبلغ والتاريخ التشغيلي ووقت الإنشاء مطلوبة للمصروف.')
   const expensePayload = { ...centralExpensePayload({ ...normalized, id: expenseId, fundingSource: 'cashbox' }, user), fundingSource: 'cashbox', paymentSource: 'cashbox', linkedTransactionId: transactionId }
-  const transactionPayload = { id: transactionId, type: 'expense', amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, fundingSource: 'cashbox', status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
+  const expensePayloadWithSource = { ...expensePayload, paymentSource: desiredTransactionType === 'withdrawal' ? 'cash_drawer' : 'cashbox' }
+  const transactionPayload = { id: transactionId, type: desiredTransactionType, transactionType: desiredTransactionType, amount: expensePayload.amount, businessDate: expensePayload.businessDate, operationalDayId: expensePayload.operationalDayId || '', shiftId: expensePayload.shiftId || '', shiftType: expensePayload.shiftType || '', shiftLabel: expensePayload.shiftLabel || '', employeeId: expensePayload.employeeId || expensePayload.cashierId || '', employeeNameSnapshot: expensePayload.employeeNameSnapshot || expensePayload.person || expensePayload.cashierName || '', reason: expensePayload.description || expensePayload.notes || '', source: desiredTransactionType === 'withdrawal' ? 'drawer' : 'cashier expense', sourceRefId: expenseId, linkedExpenseId: expenseId, fundingSource: 'cashbox', paymentSource: desiredTransactionType === 'withdrawal' ? 'cash_drawer' : 'cashbox', status: 'active', createdAt: Date.now(), createdByUid: user.uid, createdByName: user.displayName || user.email || '' }
   const auditId = `audit-linked-expense-${safeKey(expenseId)}`
   const audit = financialAuditPayload({ id: auditId, user, action: 'create', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: transactionPayload.reason, businessDate: expensePayload.businessDate })
   try {
-    await update(ref(db), { [`pos101_expenses/${expenseId}`]: expensePayload, [`${cashboxTransactionsPath}/${transactionId}`]: transactionPayload, [`${auditPath}/${auditId}`]: audit })
+    await update(ref(db), { [`pos101_expenses/${expenseId}`]: expensePayloadWithSource, [`${cashboxTransactionsPath}/${transactionId}`]: transactionPayload, [`${auditPath}/${auditId}`]: audit })
   } catch (error) {
     try {
       await saveFinancialAudit({ action: 'failed linked write', entityType: 'expense_with_cashbox', entityId: expenseId, after: { expense: expensePayload, transaction: transactionPayload }, reason: error?.message || 'atomic update failed', businessDate: expensePayload.businessDate })
@@ -2744,6 +2748,7 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const savedTransaction = transactionReadBack.exists() ? transactionReadBack.val() : null
   if (!savedTransaction
     || savedExpense.fundingSource !== 'cashbox'
+    || savedTransaction.type !== desiredTransactionType
     || String(savedExpense.linkedTransactionId || '') !== transactionId
     || Number(savedExpense.amount) !== Number(expensePayload.amount)
     || Number(savedTransaction.amount) !== Number(transactionPayload.amount)

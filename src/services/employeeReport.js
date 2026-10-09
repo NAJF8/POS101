@@ -1,4 +1,4 @@
-import { isActiveExpense } from './expenseReporting.js'
+import { isActiveExpense, isWithdrawalExpense, normalizeExpense } from './expenseReporting.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
 
 const text = value => String(value ?? '').trim()
@@ -71,9 +71,12 @@ export const buildEmployeeReport = ({ staff = [], sales = [], expenses = [], tra
     else if (kind === 'expense') { summary.expensesTotal += value; summary.expenses.push(record) }
     else { summary.withdrawalsTotal += value; summary.withdrawals.push(record) }
   }
-  const linkedExpenseIds = new Set((Array.isArray(transactions) ? transactions : []).filter(row => row?.type === 'expense').map(row => text(row.linkedExpenseId)).filter(Boolean))
+  const linkedExpenseIds = new Set((Array.isArray(transactions) ? transactions : []).map(row => text(row.linkedExpenseId || row.sourceRefId)).filter(Boolean))
   const salaryExpenseIds = new Set((Array.isArray(expenses) ? expenses : []).filter(isSalary).map(row => text(row.id)).filter(Boolean))
-  filterRowsByBusinessDate(expenses, from, to).forEach(row => { if (!linkedExpenseIds.has(text(row.id))) add(row, isSalary(row) ? 'salary' : 'expense', amount(row.amount)) })
+  filterRowsByBusinessDate(expenses, from, to).forEach(row => {
+    const normalized = normalizeExpense(row)
+    if (!linkedExpenseIds.has(text(row.id))) add(normalized, isWithdrawalExpense(normalized) ? 'withdrawal' : (isSalary(normalized) ? 'salary' : 'expense'), amount(normalized.amount))
+  })
   filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'expense').forEach(row => add(row, isSalary(row) || salaryExpenseIds.has(text(row.linkedExpenseId)) ? 'salary' : 'expense', amount(row.amount)))
   filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'withdrawal').forEach(row => add(row, 'withdrawal', amount(row.amount)))
   const summaries = [...rows.values()].map(summary => ({ ...summary, employeeTotal: summary.expensesTotal + summary.salaryTotal + summary.withdrawalsTotal })).sort((a, b) => b.employeeTotal - a.employeeTotal || text(a.employee.name).localeCompare(text(b.employee.name), 'ar'))
