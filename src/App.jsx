@@ -15,7 +15,7 @@ import { Expenses } from './components/Expenses'
 import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
-import { enqueueSale, buildSalesBackup, markSaleSynced, enqueueVoidUpdate, markSaleVoidedCentral, resolveVoidedSaleLocally, readSaleSyncStatus, readPendingSaleDiagnostics } from './services/salesSyncQueue'
+import { enqueueSale, buildSalesBackup, markSaleSynced, enqueueVoidUpdate, markSaleVoidedCentral, resolveVoidedSaleLocally, readSaleSyncStatus, readHeaderPendingDiagnostic, readPendingSaleDiagnostics } from './services/salesSyncQueue'
 import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, isOperationalDayClosedError, isOperationalDayUser, readCashboxReadDiagnostics, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDay, readCentralOperationalDays, readCentralCashboxTransactions, readCentralSettlements, readCentralSettlementCorrections, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readLocalOperationalDay, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
@@ -163,6 +163,12 @@ export default function App() {
     window.addEventListener('offline', offline)
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline) }
   }, [])
+
+  useEffect(() => {
+    const diagnostic = readHeaderPendingDiagnostic({ orders, openOrderCount: openOrdersCount })
+    window.__POS101_HEADER_PENDING_DIAGNOSTIC__ = diagnostic
+    console.info('HEADER_PENDING_DIAGNOSTIC', diagnostic)
+  }, [orders, openOrdersCount, saleSyncStatus.activePendingQueueCount, saleSyncStatus.pendingVoidCount])
 
   useEffect(() => {
     if (!centralAuthUser?.uid) return undefined
@@ -1316,7 +1322,7 @@ export default function App() {
   const cashierSyncState = useMemo(() => {
     if (cashierSyncPhase === 'saving') return { state: 'saving', label: 'جاري الحفظ...' }
     if (!isOnline || !centralAuthReady || !centralAuthUser) return { state: 'offline', label: 'بانتظار الاتصال' }
-    if (saleSyncStatus.pendingCount > 0 || saleSyncStatus.pendingVoidCount > 0) return { state: 'pending', label: 'يوجد طلب غير مثبت' }
+    if (saleSyncStatus.activePendingQueueCount > 0) return { state: 'pending', label: 'يوجد طلب غير مثبت' }
     if (cashierSyncPhase === 'saved') return { state: 'saved', label: 'محفوظ' }
     return { state: 'connected', label: 'متصل' }
   }, [cashierSyncPhase, isOnline, centralAuthReady, centralAuthUser, saleSyncStatus])
