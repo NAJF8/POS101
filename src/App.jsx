@@ -147,7 +147,7 @@ export default function App() {
   const [staffStatus, setStaffStatus] = useState({ state: 'idle', error: '' })
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
-  const [cashboxDiagnostic, setCashboxDiagnostic] = useState(null)
+  const [cashboxDiagnostic, setCashboxDiagnostic] = useState(() => new URLSearchParams(window.location.search).has('cashbox-debug') ? { status: 'starting' } : null)
   const settlementCorrectionListener = useRef(null)
   const pendingTablesListener = useRef(null)
   const [settlementCorrections, setSettlementCorrections] = useState([])
