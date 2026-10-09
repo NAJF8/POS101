@@ -12,7 +12,6 @@ import Employees from './components/Employees'
 import FinancialCenter from './components/FinancialCenter'
 import Reports from './components/Reports'
 import { Expenses } from './components/Expenses'
-import { Purchases } from './components/Purchases'
 import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
@@ -21,7 +20,7 @@ import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canS
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { getOpenOrders } from './services/orderState.js'
-import { VERSION_CHECK_INTERVAL_MS, createVersionController, installServiceWorker } from './services/versionUpdate.js'
+import { BUILD_SHA, VERSION_CHECK_INTERVAL_MS, createVersionController, installServiceWorker } from './services/versionUpdate.js'
 import { readLocalSales } from './services/reportSales.js'
 import { calculateOperationalDaySummary } from './services/operationalDayReport.js'
 import { canonicalSalesForOperationalDay, reconcileCanonicalSales } from './services/canonicalSales.js'
@@ -68,8 +67,8 @@ const recalculateDiscount = (order, discountPresets) => {
   return { ...order, discount: { ...order.discount, value: discountValue(orderSubtotal(order), order.discount, discountPresets) } }
 }
 const shifts = [
-  { shiftId: 'morning', name: 'كاشير صباحي' },
-  { shiftId: 'evening', name: 'كاشير مسائي' }
+  { shiftId: 'morning', shiftType: 'morning', shiftLabel: 'صباحي', name: 'كاشير صباحي' },
+  { shiftId: 'evening', shiftType: 'evening', shiftLabel: 'مسائي', name: 'كاشير مسائي' }
 ]
 
 const LEGACY_STAFF_NAME_FIELDS = ['seller', 'cashierNameSnapshot', 'cashierName', 'employeeNameSnapshot', 'employeeName', 'captainName']
@@ -173,7 +172,12 @@ export default function App() {
   }, [])
 
   const downloadSalesBackup = useCallback(() => {
-    const backup = buildSalesBackup()
+    const backup = {
+      ...buildSalesBackup(),
+      operationalDay: operationalDay || readLocalOperationalDay() || null,
+      appVersion: BUILD_SHA,
+      liveBundle: Array.from(document.scripts).find(script => /\/assets\/index-[^/]+\.js(?:\?|$)/.test(script.src))?.src || null,
+    }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -181,7 +185,7 @@ export default function App() {
     anchor.download = `pos101-sales-backup-${backup.createdAt.replace(/[:.]/g, '-')}.json`
     anchor.click()
     URL.revokeObjectURL(url)
-  }, [])
+  }, [operationalDay])
 
 
   const activeOrder = orders[active] || orders[0]
@@ -885,6 +889,9 @@ export default function App() {
       operationKey: stableOperationKey,
       orderNumber: centralOrder.orderNumber,
       cashierId: session.shiftId,
+      shiftId: session.shiftId,
+      shiftType: session.shiftType || session.shiftId,
+      shiftLabel: session.shiftLabel || (session.shiftId === 'morning' ? 'صباحي' : 'مسائي'),
       cashierNameSnapshot: sellerName,
       shift: session.name,
       seller: sellerName,
@@ -1103,6 +1110,8 @@ export default function App() {
       cashierId: cashier.cashierId || cashier.shiftId,
       cashierNameSnapshot: cashier.name,
       shiftId: cashier.shiftId,
+      shiftType: cashier.shiftType || cashier.shiftId,
+      shiftLabel: cashier.shiftLabel || (cashier.shiftId === 'morning' ? 'صباحي' : 'مسائي'),
       shiftName: cashier.name,
       name: cashier.name,
       openedAt: Date.now(),
@@ -1214,7 +1223,6 @@ export default function App() {
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
-          canAccessBackupTools={backupRecoveryVisible}
           syncStatus={cashierSyncState}
           currentView={currentView}
           onNavigate={requestView}
@@ -1305,7 +1313,6 @@ export default function App() {
       {currentView === 'expenses' && session && (
         <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
-      {currentView === 'purchases' && session && <Purchases session={session} operationalDay={operationalDay} onNavigate={setCurrentView} />}
       {currentView === 'expense-entry' && session && (
         <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
@@ -1345,7 +1352,7 @@ export default function App() {
       )}
 
       {/* Modals */}
-      {modal === 'cashier-menu' && <CashierMenu session={session} onClose={() => setModal(null)} onLogout={logout} />}
+      {modal === 'cashier-menu' && <CashierMenu session={session} settlementPreview={settlementPreview} onClose={() => setModal(null)} onLogout={logout} />}
       {modal === 'financial-pin' && <FinancialPinDialog staff={staff} onClose={() => { setFinancialPinTarget(null); setModal(null) }} onUnlock={unlockFinancialView} />}
       {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>{operationalDayError ? 'تعذر إكمال البيع' : 'يجب بدء اليوم التشغيلي أولاً'}</h2><p>{operationalDayError || 'لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.'}</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => { setModal(null); setOperationalDayError('') }}>رجوع</button><button type="button" className="primary-action" onClick={() => { setModal(null); setOperationalDayError(''); setCurrentView('dashboard') }}>الانتقال إلى بدء اليوم</button></div></div></div>}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}

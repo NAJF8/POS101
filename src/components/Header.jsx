@@ -13,7 +13,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, canAccessBackupTools = false, syncStatus = {} }) {
+export default function Header({ onOpenOrders, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {} }) {
   const now = useLiveClock()
 
   const timeStr = formatTime(now, { hour: '2-digit', minute: '2-digit' })
@@ -60,10 +60,10 @@ export default function Header({ onOpenOrders, session, openOrdersCount = 0, cur
 
         {session && currentView === 'pos' && (
           <>
-            {canAccessBackupTools && <button className="header-btn outline-btn" type="button" onClick={onDownloadSalesBackup} aria-label="تنزيل نسخة المبيعات">
+            <button className="header-btn outline-btn" type="button" onClick={onDownloadSalesBackup} aria-label="تنزيل نسخة المبيعات">
               <Icon name="download" size={20} />
               <span>تنزيل نسخة المبيعات</span>
-            </button>}
+            </button>
             <button className="header-btn outline-btn" onClick={() => window.dispatchEvent(new CustomEvent('open-history'))}>
               <Icon name="receipt" size={20} />
               <span>سجل الطلبات</span>
