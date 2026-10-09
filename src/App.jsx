@@ -1146,7 +1146,7 @@ export default function App() {
   const repairBackup = useCallback(payload => runOneClickSyncRepair(payload), [])
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
-  const backupRecoveryVisible = Boolean(adminReady || staffManagerReady)
+  const backupRecoveryVisible = Boolean(!session && (adminReady || staffManagerReady))
   const backupRecoveryCanWrite = adminReady && BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED
   const requestView = useCallback(view => {
     const protectedView = view === 'expenses' || view === 'reports' ? view : null
