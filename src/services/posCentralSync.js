@@ -2273,6 +2273,7 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   const saved = normalizeExpense({ ...readBack.val(), id })
   await syncAccExpenseBestEffort(saved, existing ? 'upsert' : 'upsert')
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), saved])
+  dispatchExpensesUpdated()
   authDebug('POS_EXPENSE_WRITE_SUCCESS', { existing: Boolean(existing) })
   return saved
 }
@@ -2751,6 +2752,7 @@ export const saveCentralExpenseWithCashbox = async expense => {
     throw Object.assign(new Error('تعذر التحقق من اكتمال حفظ مصروف الصندوق وحركته المرتبطة.'), { code: 'CASHBOX_EXPENSE_READBACK_FAILED' })
   }
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== expenseId), savedExpense])
+  dispatchExpensesUpdated()
   return savedExpense
 }
 export const saveCashboxTransaction = async transaction => {
