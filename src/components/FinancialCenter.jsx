@@ -60,11 +60,10 @@ export default function FinancialCenter({ transactions = [], centralSales = [], 
   const cashboxRows = cashboxReportData.rows
   const currentCashboxRow = cashboxReportData.selected || cashboxRows.find(row => String(row.day.id) === String(operationalDay?.id)) || cashboxRows[0] || null
   const displayedReport = cashboxReportData.summary || report
-  const salesSourceUnavailable = cashboxRows.length > 0 && cashboxSales.length === 0
+  const salesSourceUnavailable = cashboxSales.length === 0
   const cardValue = (label, value) => {
     if (salesSourceUnavailable && ['إجمالي المبيعات', 'نقدي', 'إلكتروني'].includes(label)) return 'غير متوفر'
-    if (currentCashboxRow && label === 'رصيد الصندوق' && !currentCashboxRow.openingCashKnown) return 'غير متوفر'
-    if (currentCashboxRow && label === 'المتوقع' && !currentCashboxRow.openingCashKnown) return 'غير متوفر'
+    if ((!currentCashboxRow || !currentCashboxRow.openingCashKnown) && ['رصيد الصندوق', 'المتوقع'].includes(label)) return 'غير متوفر'
     return formatMoney(value)
   }
   const openCorrectionGate = settlement => { setCorrectionTarget(settlement); setCorrectionStage('code'); setSystemCode(''); setCorrectionError('') }
@@ -83,6 +82,7 @@ export default function FinancialCenter({ transactions = [], centralSales = [], 
   return <section className="financial-center" dir="rtl">
     <div className="financial-heading"><div><button className="back-link" type="button" onClick={() => onNavigate?.('dashboard')}>← الرئيسية</button><h1>الصندوق</h1><p>المصدر المركزي للحركات هو Firebase، مع اعتماد businessDate.</p></div><div className="report-print-actions"><button className="primary-action" type="button" onClick={() => window.print()}>طباعة A4 / PDF</button><button className="outline-btn" type="button" onClick={() => window.print()}>طباعة حرارية 80mm</button></div></div>
     <div className="financial-filters"><label>من تاريخ<input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><label>إلى تاريخ<input type="date" value={to} onChange={e => setTo(e.target.value)} /></label><button type="button" onClick={() => { setFrom(today()); setTo(today()) }}>اليوم</button><button type="button" onClick={() => { const d = new Date(); d.setDate(d.getDate() - 6); setFrom(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(d)); setTo(today()) }}>آخر 7 أيام</button></div>
+    {salesSourceUnavailable && <p role="alert">تعذر تحميل بيانات الصندوق</p>}
     <div className="financial-cards">{[['رصيد الصندوق', displayedReport.openingCashBalance ?? balance], ['إجمالي المبيعات', displayedReport.sales], ['نقدي', displayedReport.cashSales], ['إلكتروني', displayedReport.electronicSales], ['إجمالي المصاريف', displayedReport.cashboxExpenses ?? displayedReport.expenses ?? displayedReport.expensesTotal], ['مصاريف من الصندوق', displayedReport.cashboxExpenses], ['مصاريف من الإدارة', displayedReport.managementExpenses], ['سحوبات من الصندوق', displayedReport.cashboxWithdrawals], ['سحوبات من الإدارة', displayedReport.managementWithdrawals], ['إجمالي السحوبات', displayedReport.withdrawals], ['المتوقع', displayedReport.expectedCash ?? displayedReport.expectedClosingCash]].map(([label, value]) => <article key={label} className="financial-card"><span>{label}</span><strong>{cardValue(label, value)}</strong></article>)}</div>
     {currentCashboxRow && <section className="settings-card end-day-report-summary" aria-label="ملخص نهاية اليوم"><h2>ملخص نهاية اليوم</h2><div className="financial-table-wrap"><table className="financial-table"><tbody>
       <tr><td>الرصيد الافتتاحي</td><td>{currentCashboxRow.openingCashKnown ? safeMoney(currentCashboxRow.openingCashBalance) : 'غير متوفر'}</td></tr>
