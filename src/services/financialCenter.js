@@ -129,6 +129,23 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
     return { day, settlement, effective, ...summary, salesRecordsMatched: summary.orderCount, salesCashTotal: summary.cashSales, salesElectronicTotal: summary.electronicSales, drawerExpenses: summary.cashboxExpenses, drawerWithdrawals: summary.cashboxWithdrawals, excludedVoidedSalesCount: daySales.filter(isExplicitVoidedSale).length, excludedCancelledSalesCount: daySales.filter(isExplicitCancelledSale).length, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
   })
 }
+
+// One report-only dataset for the cashbox screen and its printed DOM. It uses
+// the same businessDate-filtered day rows for cards, daily detail, and history.
+export const buildCashboxReportData = ({ from = '', to = '', operationalDays = [], settlements = [], settlementCorrections = [], sales = [], expenses = [], transactions = [] } = {}) => {
+  const inRange = row => { const date = resolveFinancialBusinessDate(row); return date && date >= from && date <= to }
+  const dates = new Set([...sales, ...expenses, ...transactions].filter(inRange).map(resolveFinancialBusinessDate))
+  const sourceDays = (Array.isArray(operationalDays) ? operationalDays : []).filter(day => day?.businessDate >= from && day?.businessDate <= to)
+  const knownDates = new Set(sourceDays.map(day => day.businessDate))
+  const fallbackDays = [...dates].filter(date => !knownDates.has(date)).map(date => {
+    const settlement = settlements.find(row => row?.businessDate === date)
+    return { id: `business-date:${date}`, businessDate: date, status: 'fallback', fallbackFromBusinessDate: true, openingCashBalance: settlement?.openingCashBalance }
+  })
+  const rows = buildCashboxReportRows({ operationalDays: [...sourceDays, ...fallbackDays], settlements, settlementCorrections, sales, expenses, transactions })
+  const dailyRows = rows.map(row => ({ businessDate: row.day.businessDate, sales: row.sales, cash: row.cashSales, electronic: row.electronicSales, expenses: row.cashboxExpenses, withdrawals: row.cashboxWithdrawals, deposits: row.deposits, net: row.openingCashKnown ? row.expectedClosingCash : row.cashSales - row.cashboxExpenses - row.cashboxWithdrawals + row.deposits, expectedCash: row.openingCashKnown ? row.expectedClosingCash : null, openingCashBalance: row.openingCashBalance, orders: row.orderCount, fallbackFromBusinessDate: Boolean(row.day.fallbackFromBusinessDate) }))
+  const selected = from === to ? rows.find(row => row.day.businessDate === from) || null : null
+  return { rows, dailyRows, selected, operationalDays: rows.map(row => row.day), summary: selected }
+}
 export const calculateFinancialReport = ({ sales = [], expenses = [], transactions = [], from, to } = {}) => {
   const inRange = row => { const date = resolveFinancialBusinessDate(row); return (!from || date >= from) && (!to || date <= to) }
   const filteredSales = sales.filter(inRange)

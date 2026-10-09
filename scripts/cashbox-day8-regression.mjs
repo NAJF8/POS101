@@ -42,6 +42,11 @@ assert.match(financialSource, /resolveFinancialBusinessDate\(row\) === day\.busi
 assert.match(financialSource, /dayOpening = day\.openingCashBalance \?\? day\.openingBalance/)
 assert.match(centerSource, /CASHBOX_REPORT_DIAGNOSTIC/)
 assert.match(centerSource, /displayedReport\.expectedCash \?\? displayedReport\.expectedClosingCash/)
+assert.match(centerSource, /buildCashboxReportData/)
+assert.match(centerSource, /cashboxReportData\.dailyRows/)
+assert.match(centerSource, /LIVE_BUILD_META/)
+assert.match(appSource, /centralSales=\{adminReady \? adminCentralSales : centralSales\}/)
+assert.match(appSource, /adminCentralSales\.length/)
 assert.doesNotMatch(financialSource + centerSource + appSource, /set\(ref\(db, `pos101_sales/)
 assert.doesNotMatch(centerSource, /localStorage\.clear\(/)
 
