@@ -698,7 +698,7 @@ export const isOperationalDayClosedError = error => new Set([
 const readLegacyOperationalDay = async () => latestOperationalDay(operationalDayValues(await get(operationalDaysRef())))
 
 export const readCentralOperationalDay = async () => {
-  await requireOperationalDayRole()
+  await financialUser(false)
   const currentSnapshot = await get(operationalDayCurrentRef())
   if (currentSnapshot.exists()) return cacheOperationalDay(normalizeOperationalDay(currentSnapshot.val()), { central: true })
   const legacy = await readLegacyOperationalDay()
@@ -761,7 +761,7 @@ export const findOperationalDayByBusinessDate = async businessDate => {
 }
 
 export const readCentralOperationalDays = async () => {
-  await requireOperationalDayRole()
+  await financialUser(false)
   const [legacySnapshot, currentSnapshot] = await Promise.all([get(operationalDaysRef()), get(operationalDayCurrentRef())])
   const days = operationalDayValues(legacySnapshot)
   const current = currentSnapshot.exists() ? normalizeOperationalDay(currentSnapshot.val()) : null
@@ -1749,8 +1749,7 @@ export const subscribeCentralSales = callback => {
     if (!configured || !db) return
     await authReady
     const user = auth?.currentUser
-    const permission = await canSyncPosSales(user)
-    if (!active || !permission.allowed) return
+    if (!active || !user) return
     stop = onValue(salesRef(), snapshot => {
       const centralSales = centralValues(snapshot)
       const merged = mergeCentralSalesLocally(centralSales)
