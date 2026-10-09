@@ -1749,11 +1749,15 @@ export const subscribeCentralSales = (callback, authenticatedUser = auth?.curren
   // subscribeCentralAuth invokes this after Firebase has delivered the user;
   // waiting on the module-level restore promise here can strand the read
   // listener even though auth.currentUser and the RTDB token are ready.
-  stop = onValue(salesRef(), snapshot => {
+  const publish = snapshot => {
     const centralSales = centralValues(snapshot)
     const merged = mergeCentralSalesLocally(centralSales)
     callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
+  }
+  stop = onValue(salesRef(), snapshot => {
+    publish(snapshot)
   }, error => console.error('CENTRAL_SALES_SUBSCRIBE_ERROR', error))
+  void get(salesRef()).then(snapshot => { if (active) publish(snapshot) }).catch(error => console.error('CENTRAL_SALES_READ_ERROR', error))
   return () => { active = false; stop() }
 }
 
