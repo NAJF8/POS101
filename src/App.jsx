@@ -19,6 +19,7 @@ import { enqueueSale, buildSalesBackup, markSaleSynced, enqueueVoidUpdate, markS
 import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, isOperationalDayClosedError, readCashboxReadDiagnostics, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readLocalOperationalDay, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
+import { readCentralSalesForReports } from './services/posCentralSync.js'
 import { getOpenOrders } from './services/orderState.js'
 import { BUILD_SHA, VERSION_CHECK_INTERVAL_MS, createVersionController, installServiceWorker } from './services/versionUpdate.js'
 import { readLocalSales } from './services/reportSales.js'
@@ -374,6 +375,9 @@ export default function App() {
         productListener.current = subscribeCentralProducts(setCentralProducts)
       }
        if (!user) return
+       void readCentralSalesForReports().then(rows => {
+         if (centralAuth()?.currentUser?.uid === user.uid) setCentralSales(rows)
+       }).catch(error => console.error('CENTRAL_SALES_REPORT_READ_ERROR', error))
        centralListener.current = subscribeCentralSales(({ centralSales: receivedSales, centralCount, mergedSales }) => {
          if (receivedSales) setCentralSales(receivedSales)
          if (mergedSales) setAdminCentralSales(mergedSales)

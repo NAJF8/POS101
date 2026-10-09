@@ -698,7 +698,8 @@ export const isOperationalDayClosedError = error => new Set([
 const readLegacyOperationalDay = async () => latestOperationalDay(operationalDayValues(await get(operationalDaysRef())))
 
 export const readCentralOperationalDay = async () => {
-  await financialUser(false)
+  if (!auth?.currentUser) await authReady
+  if (!auth?.currentUser) throw Object.assign(new Error('AUTH_REQUIRED'), { code: 'AUTH_REQUIRED' })
   const currentSnapshot = await get(operationalDayCurrentRef())
   if (currentSnapshot.exists()) return cacheOperationalDay(normalizeOperationalDay(currentSnapshot.val()), { central: true })
   const legacy = await readLegacyOperationalDay()
@@ -761,7 +762,8 @@ export const findOperationalDayByBusinessDate = async businessDate => {
 }
 
 export const readCentralOperationalDays = async () => {
-  await financialUser(false)
+  if (!auth?.currentUser) await authReady
+  if (!auth?.currentUser) throw Object.assign(new Error('AUTH_REQUIRED'), { code: 'AUTH_REQUIRED' })
   const [legacySnapshot, currentSnapshot] = await Promise.all([get(operationalDaysRef()), get(operationalDayCurrentRef())])
   const days = operationalDayValues(legacySnapshot)
   const current = currentSnapshot.exists() ? normalizeOperationalDay(currentSnapshot.val()) : null
@@ -1760,6 +1762,11 @@ export const subscribeCentralSales = (callback, authenticatedUser = auth?.curren
   }, error => console.error('CENTRAL_SALES_SUBSCRIBE_ERROR', error))
   void get(salesRef()).then(snapshot => { if (active) publish(snapshot) }).catch(error => console.error('CENTRAL_SALES_READ_ERROR', error))
   return () => { active = false; stop() }
+}
+
+export const readCentralSalesForReports = async () => {
+  if (!configured || !db || !auth?.currentUser) throw Object.assign(new Error('AUTH_REQUIRED'), { code: 'AUTH_REQUIRED' })
+  return centralValues(await get(salesRef()))
 }
 
 const maskDiagnosticUid = uid => {
