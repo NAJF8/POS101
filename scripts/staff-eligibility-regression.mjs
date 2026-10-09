@@ -40,8 +40,8 @@ const expensesSource = fs.readFileSync(new URL('../src/components/Expenses.jsx',
 assert.match(expensesSource, /'سحوبات'/)
 assert.doesNotMatch(expensesSource, /saveCashboxTransaction/)
 assert.match(expensesSource, /saveCentralExpenseWithCashbox/)
-assert.match(expensesSource, /recordType: 'expense', type: 'expense'/)
-assert.match(expensesSource, /سحوبات - تُحسب ضمن المصاريف/)
+assert.match(expensesSource, /recordType: isWithdrawal \? 'withdrawal' : 'expense'/)
+assert.match(expensesSource, /سحب موظف \/ كاشير من الصندوق/)
 assert.match(expensesSource, /employeeId: personId/)
 assert.match(expensesSource, /staff\.filter\(row => row\.active !== false\)/)
 
