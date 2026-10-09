@@ -454,7 +454,11 @@ export default function App() {
     }
     const publish = value => {
       if (!active) return
-      setCashboxDiagnostic(value)
+      setCashboxDiagnostic(previous => ({
+        ...value,
+        ...(previous?.pipeline ? { pipeline: previous.pipeline } : {}),
+        ...(previous?.stateCounts ? { stateCounts: previous.stateCounts } : {}),
+      }))
       window.__POS101_CASHBOX_DIAGNOSTIC = value
     }
     const finish = value => { window.clearTimeout(timeout); publish(value) }
