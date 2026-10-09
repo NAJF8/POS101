@@ -1,4 +1,4 @@
-import { isCashboxExpense, isManagementExpense, isWithdrawalExpense, isRegularExpense, normalizeExpense } from './expenseReporting.js'
+import { buildMoneyOutLedger, classifyMoneyOutRecord, includedMoneyOutRows, moneyOutWarnings } from './moneyOutClassifier.js'
 
 export const toMoneyNumber = (value, fallback = 0) => {
   if (value === null || value === undefined || value === '') return fallback
@@ -45,8 +45,8 @@ const paymentMethod = sale => sale?.paymentMethod || sale?.payment?.method || ''
 
 export const LEGACY_WITHDRAWAL_DEFAULT = 'cashbox'
 export const normalizeFundingSource = value => value === 'management' ? 'management' : LEGACY_WITHDRAWAL_DEFAULT
-export const isCashboxWithdrawal = row => row?.type === 'withdrawal' && normalizeFundingSource(row?.fundingSource) === 'cashbox'
-export const isManagementWithdrawal = row => row?.type === 'withdrawal' && normalizeFundingSource(row?.fundingSource) === 'management'
+export const isCashboxWithdrawal = row => row?.type === 'withdrawal' && classifyMoneyOutRecord(row, { source: 'transaction' }).cashboxImpact === 'drawer'
+export const isManagementWithdrawal = row => row?.type === 'withdrawal' && classifyMoneyOutRecord(row, { source: 'transaction' }).cashboxImpact === 'admin'
 export const isSettlementBookkeeping = row => row?.type === 'settlement' || row?.source === 'settlement'
 
 export const cashAnalysisStatus = difference => difference === null || difference === undefined
@@ -67,32 +67,37 @@ export const calculateEndDayCashAnalysis = ({ openingCashBalance, cashSales = 0,
   return { netDrawerMovement, netCashSalesFromDrawer, cashSalesDifference, cashSalesDifferenceStatus: cashAnalysisStatus(cashSalesDifference), actualCash: actual, difference }
 }
 
-export const calculateCashboxBalance = transactions => (Array.isArray(transactions) ? transactions : []).reduce((balance, transaction) => {
-  if (isVoided(transaction)) return balance
-  const value = amount(transaction?.amount)
-  if (['deposit', 'return'].includes(transaction?.type)) return balance + value
-  if (transaction?.type === 'withdrawal') return isCashboxWithdrawal(transaction) ? balance - value : balance
-  if (transaction?.type === 'expense') return transaction?.fundingSource === 'management' ? balance : balance - value
-  if (transaction?.type === 'adjustment') return balance + amount(transaction?.signedAmount ?? transaction?.amount)
-  return balance
-}, 0)
+export const calculateCashboxBalance = (transactions, expenses = []) => {
+  const list = Array.isArray(transactions) ? transactions : []
+  const transactionRows = buildMoneyOutLedger({ expenses, transactions: list }).filter(row => row.source === 'transaction')
+  const byOriginal = new Map(transactionRows.map(row => [row.original, row]))
+  return list.reduce((balance, transaction) => {
+    if (isVoided(transaction)) return balance
+    const value = amount(transaction?.amount)
+    if (['deposit', 'return'].includes(transaction?.type)) return balance + value
+    if (transaction?.type === 'withdrawal' || transaction?.type === 'expense') {
+      const classified = byOriginal.get(transaction) || classifyMoneyOutRecord(transaction, { source: 'transaction' })
+      return classified.includeInReports && classified.cashboxImpact === 'drawer' ? balance - value : balance
+    }
+    if (transaction?.type === 'adjustment') return balance + amount(transaction?.signedAmount ?? transaction?.amount)
+    return balance
+  }, 0)
+}
 
 export const calculateSettlement = ({ sales = [], expenses = [], transactions = [], openingCashBalance } = {}) => {
   const validSales = sales.filter(sale => !isVoided(sale))
   const cashSales = validSales.filter(sale => paymentMethod(sale) === 'cash').reduce((sum, sale) => sum + saleAmount(sale), 0)
   const electronicSales = validSales.filter(sale => paymentMethod(sale) === 'electronic').reduce((sum, sale) => sum + saleAmount(sale), 0)
-  const validExpenses = expenses.filter(expense => !isVoided(expense)).map(normalizeExpense)
-  const ordinaryExpenses = validExpenses.filter(isRegularExpense)
-  const cashboxExpenses = ordinaryExpenses.filter(isCashboxExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
-  const managementExpenses = ordinaryExpenses.filter(isManagementExpense).reduce((sum, expense) => sum + amount(expense?.amount), 0)
+  const moneyOutRows = buildMoneyOutLedger({ expenses, transactions })
+  const includedRows = includedMoneyOutRows(moneyOutRows)
+  const ordinaryExpenses = includedRows.filter(row => ['business_expense', 'salary'].includes(row.reportBucket))
+  const cashboxExpenses = ordinaryExpenses.filter(row => row.cashboxImpact === 'drawer').reduce((sum, row) => sum + amount(row.amount), 0)
+  const managementExpenses = ordinaryExpenses.filter(row => row.cashboxImpact === 'admin').reduce((sum, row) => sum + amount(row.amount), 0)
   const expenseTotal = cashboxExpenses + managementExpenses
   const movementTransactions = transactions.filter(row => !isSettlementBookkeeping(row))
-  const withdrawalRows = movementTransactions.filter(row => row?.type === 'withdrawal' && !isVoided(row))
-  const linkedWithdrawalExpenseIds = new Set(withdrawalRows.map(row => String(row?.linkedExpenseId || row?.sourceRefId || '')).filter(Boolean))
-  const derivedWithdrawals = validExpenses.filter(isWithdrawalExpense).filter(row => !linkedWithdrawalExpenseIds.has(String(row.id || '')))
-  const cashboxWithdrawals = withdrawalRows.filter(isCashboxWithdrawal).reduce((sum, row) => sum + amount(row.amount), 0)
-    + derivedWithdrawals.filter(isCashboxExpense).reduce((sum, row) => sum + amount(row.amount), 0)
-  const managementWithdrawals = withdrawalRows.filter(isManagementWithdrawal).reduce((sum, row) => sum + amount(row.amount), 0)
+  const withdrawalRows = includedRows.filter(row => row.reportBucket === 'withdrawal')
+  const cashboxWithdrawals = withdrawalRows.filter(row => row.cashboxImpact === 'drawer').reduce((sum, row) => sum + amount(row.amount), 0)
+  const managementWithdrawals = withdrawalRows.filter(row => row.cashboxImpact === 'admin').reduce((sum, row) => sum + amount(row.amount), 0)
   const withdrawals = cashboxWithdrawals + managementWithdrawals
   const deposits = movementTransactions.filter(row => row?.type === 'deposit' && !isVoided(row)).reduce((sum, row) => sum + amount(row.amount), 0)
   const adjustments = movementTransactions.filter(row => row?.type === 'adjustment' && !isVoided(row)).reduce((sum, row) => sum + amount(row.signedAmount ?? row.amount), 0)
@@ -100,7 +105,7 @@ export const calculateSettlement = ({ sales = [], expenses = [], transactions = 
   const openingKnown = openingCashBalance !== null && openingCashBalance !== undefined && openingCashBalance !== '' && Number.isFinite(Number(openingCashBalance))
   const openingValue = openingKnown ? Number(openingCashBalance) : 0
   const expectedClosingCash = openingValue + dailyCashMovement
-  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingKnown ? openingValue : null, openingCashBalanceOrZero: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, finalNetSaleWithoutOpening: cashSales + electronicSales - expenseTotal - withdrawals + deposits, cashOnlyNetWithoutOpening: cashSales - expenseTotal - withdrawals + deposits, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0, ...calculateEndDayCashAnalysis({ openingCashBalance: openingKnown ? openingValue : null, cashSales, expenses: expenseTotal, withdrawals, expectedCash: expectedClosingCash }) }
+  return { sales: validSales.reduce((sum, sale) => sum + saleAmount(sale), 0), cashSales, electronicSales, expenses: expenseTotal, cashboxExpenses, managementExpenses, withdrawals, cashboxWithdrawals, managementWithdrawals, deposits, adjustments, dailyCashMovement, openingCashBalance: openingKnown ? openingValue : null, openingCashBalanceOrZero: openingValue, openingCashKnown: openingKnown, expectedCash: expectedClosingCash, expectedClosingCash, finalAfterAllSettlements: expectedClosingCash, finalNetSaleWithoutOpening: cashSales + electronicSales - expenseTotal - withdrawals + deposits, cashOnlyNetWithoutOpening: cashSales - expenseTotal - withdrawals + deposits, orderCount: validSales.length, averageOrder: validSales.length ? (cashSales + electronicSales) / validSales.length : 0, moneyOutRows, moneyOutWarnings: moneyOutWarnings(moneyOutRows), ...calculateEndDayCashAnalysis({ openingCashBalance: openingKnown ? openingValue : null, cashSales, expenses: expenseTotal, withdrawals, expectedCash: expectedClosingCash }) }
 }
 
 export const calculateCashboxDay = ({ openingCashBalance, actualCash, sales = [], expenses = [], transactions = [] } = {}) => {
@@ -216,19 +221,20 @@ export const calculateFinancialReport = ({ sales = [], expenses = [], transactio
   const byDay = new Map()
   const ensure = date => { if (!byDay.has(date)) byDay.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, net: 0, orders: 0 }); return byDay.get(date) }
   filteredSales.forEach(sale => { const row = ensure(resolveFinancialBusinessDate(sale)); const value = saleAmount(sale); row.sales += value; row.orders += 1; if (paymentMethod(sale) === 'cash') row.cash += value; if (paymentMethod(sale) === 'electronic') row.electronic += value })
-  const normalizedExpenses = filteredExpenses.map(normalizeExpense)
-  normalizedExpenses.filter(isRegularExpense).forEach(expense => { const row = ensure(resolveFinancialBusinessDate(expense)); if (isCashboxExpense(expense)) row.expenses += amount(expense.amount) })
-  filteredTransactions.forEach(transaction => { const row = ensure(resolveFinancialBusinessDate(transaction)); if (isCashboxWithdrawal(transaction)) row.withdrawals += amount(transaction.amount); if (transaction.type === 'deposit' || transaction.type === 'return') row.deposits += amount(transaction.amount) })
-  const transactionExpenseIds = new Set(filteredTransactions.filter(row => row?.type === 'withdrawal').map(row => String(row.linkedExpenseId || row.sourceRefId || '')).filter(Boolean))
-  normalizedExpenses.filter(isWithdrawalExpense).filter(row => !transactionExpenseIds.has(String(row.id || ''))).forEach(expense => { ensure(resolveFinancialBusinessDate(expense)).withdrawals += amount(expense.amount) })
+  const moneyOutRows = buildMoneyOutLedger({ expenses: filteredExpenses, transactions: filteredTransactions })
+  moneyOutRows.filter(row => row.includeInReports && row.businessDate).forEach(moneyOut => {
+    const row = ensure(moneyOut.businessDate)
+    if (['business_expense', 'salary'].includes(moneyOut.reportBucket) && moneyOut.cashboxImpact === 'drawer') row.expenses += amount(moneyOut.amount)
+    if (moneyOut.reportBucket === 'withdrawal' && moneyOut.cashboxImpact === 'drawer') row.withdrawals += amount(moneyOut.amount)
+  })
+  filteredTransactions.forEach(transaction => { const row = ensure(resolveFinancialBusinessDate(transaction)); if (transaction.type === 'deposit' || transaction.type === 'return') row.deposits += amount(transaction.amount) })
   for (const row of byDay.values()) row.net = row.cash - row.expenses - row.withdrawals + row.deposits
   return { ...summary, daily: [...byDay.values()].sort((a, b) => a.businessDate.localeCompare(b.businessDate)), filteredSales, filteredExpenses, filteredTransactions }
 }
 
 export const calculateEmployeeExpenseReport = (expenses = [], transactions = [], { from = '', to = '' } = {}) => {
   const inRange = row => { const date = resolveFinancialBusinessDate(row); return (!from || date >= from) && (!to || date <= to) }
-  const linkedExpenseIds = new Set(transactions.map(row => row.linkedExpenseId).filter(Boolean))
-  const rows = [...expenses.filter(row => !linkedExpenseIds.has(row.id)).map(row => ({ ...row, source: row.source || 'cashier expense', type: row.type || 'expense' })), ...transactions.filter(row => row.type === 'withdrawal' || row.type === 'expense').map(row => ({ ...row, source: row.source || `cashbox ${row.type}` }))].filter(inRange).filter(row => !isVoided(row))
+  const rows = buildMoneyOutLedger({ expenses, transactions }).filter(row => row.includeInReports && row.reportBucket !== 'ignored' && inRange(row.original)).map(row => ({ ...row.original, amount: row.amount, source: row.reportBucket === 'withdrawal' ? 'cashbox withdrawal' : 'cashier expense', type: row.reportBucket }))
   const unique = rows
   const grouped = new Map()
   unique.forEach(row => { const id = String(row.employeeId || row.cashierId || row.person || 'unknown'); const name = row.employeeNameSnapshot || row.person || row.cashierNameSnapshot || 'غير محدد'; const current = grouped.get(id) || { employeeId: id, name, total: 0, operations: 0, withdrawals: 0, cashierExpenses: 0, rows: [] }; const value = amount(row.amount); current.total += value; current.operations += 1; if (row.source === 'cashbox withdrawal') current.withdrawals += value; else current.cashierExpenses += value; current.rows.push(row); grouped.set(id, current) })

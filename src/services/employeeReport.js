@@ -1,5 +1,5 @@
-import { isActiveExpense, isWithdrawalExpense, normalizeExpense } from './expenseReporting.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
+import { buildMoneyOutLedger } from './moneyOutClassifier.js'
 
 const text = value => String(value ?? '').trim()
 const normalizeText = value => text(value).replace(/[\u200f\u200e\u061c]/g, '').replace(/[\s\u00a0]+/g, ' ').toLocaleLowerCase('ar-IQ')
@@ -8,7 +8,6 @@ const amount = value => { const number = Number(value); return Number.isFinite(n
 const isVoided = row => row?.status === 'voided' || row?.voided === true
 const isClosedSale = row => ['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'].includes(text(row?.status).toLocaleLowerCase('ar-IQ'))
 export const EMPLOYEE_SALARY_CATEGORY = 'راتب'
-const isSalary = row => text(row?.category) === EMPLOYEE_SALARY_CATEGORY || text(row?.expenseCategory) === EMPLOYEE_SALARY_CATEGORY
 
 const nestedShift = row => row?.shift && typeof row.shift === 'object' ? row.shift : {}
 const identityFieldValues = (row, fields) => fields.flatMap(field => [row?.[field], nestedShift(row)?.[field]]).map(text).filter(Boolean)
@@ -90,7 +89,7 @@ export const buildEmployeeReport = ({ staff = [], sales = [], expenses = [], tra
   const people = (Array.isArray(staff) ? staff : []).filter(row => row?.id && row?.name)
   const rows = new Map(people.map(person => [String(person.id), { employee: person, salesTotal: 0, cashSales: 0, electronicSales: 0, ordersCount: 0, sales: [], expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, expenses: [], salary: [], withdrawals: [] }]))
   const add = (record, kind, value) => {
-    if (isVoided(record) || (kind === 'expense' && !isActiveExpense(record)) || !inRange(record, from, to)) return
+    if (!inRange(record, from, to)) return
     const person = employeeForRecord(record, people)
     if (!person) return
     const summary = addSummary(rows, person)
@@ -110,14 +109,10 @@ export const buildEmployeeReport = ({ staff = [], sales = [], expenses = [], tra
     if (paymentMethod(record) === 'electronic') summary.electronicSales += value
     else summary.cashSales += value
   })
-  const linkedExpenseIds = new Set((Array.isArray(transactions) ? transactions : []).map(row => text(row.linkedExpenseId || row.sourceRefId)).filter(Boolean))
-  const salaryExpenseIds = new Set((Array.isArray(expenses) ? expenses : []).filter(isSalary).map(row => text(row.id)).filter(Boolean))
-  filterRowsByBusinessDate(expenses, from, to).forEach(row => {
-    const normalized = normalizeExpense(row)
-    if (!linkedExpenseIds.has(text(row.id))) add(normalized, isWithdrawalExpense(normalized) ? 'withdrawal' : (isSalary(normalized) ? 'salary' : 'expense'), amount(normalized.amount))
+  buildMoneyOutLedger({ expenses, transactions }).filter(row => row.includeInReports && row.reportBucket !== 'ignored' && inRange(row.original, from, to)).forEach(row => {
+    const kind = row.reportBucket === 'salary' ? 'salary' : row.reportBucket === 'withdrawal' ? 'withdrawal' : 'expense'
+    add(row.original, kind, amount(row.amount))
   })
-  filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'expense').forEach(row => add(row, isSalary(row) || salaryExpenseIds.has(text(row.linkedExpenseId)) ? 'salary' : 'expense', amount(row.amount)))
-  filterRowsByBusinessDate(transactions, from, to).filter(row => row?.type === 'withdrawal').forEach(row => add(row, 'withdrawal', amount(row.amount)))
   const summaries = [...rows.values()].map(summary => ({ ...summary, employeeTotal: summary.expensesTotal + summary.salaryTotal + summary.withdrawalsTotal })).sort((a, b) => b.salesTotal - a.salesTotal || b.employeeTotal - a.employeeTotal || text(a.employee.name).localeCompare(text(b.employee.name), 'ar'))
   return { summaries, total: summaries.reduce((result, row) => ({ salesTotal: result.salesTotal + row.salesTotal, cashSales: result.cashSales + row.cashSales, electronicSales: result.electronicSales + row.electronicSales, ordersCount: result.ordersCount + row.ordersCount, expensesTotal: result.expensesTotal + row.expensesTotal, salaryTotal: result.salaryTotal + row.salaryTotal, withdrawalsTotal: result.withdrawalsTotal + row.withdrawalsTotal, employeeTotal: result.employeeTotal + row.employeeTotal }), { salesTotal: 0, cashSales: 0, electronicSales: 0, ordersCount: 0, expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, employeeTotal: 0 }) }
 }

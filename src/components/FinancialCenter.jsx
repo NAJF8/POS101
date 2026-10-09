@@ -59,7 +59,7 @@ export default function FinancialCenter({ transactions = [], centralSales = [], 
   }, [adminDiagnostic])
   const report = useMemo(() => calculateFinancialReport({ sales, expenses, transactions, from, to }), [sales, expenses, transactions, from, to])
   const employees = useMemo(() => calculateEmployeeExpenseReport(expenses, transactions, { from, to }), [expenses, transactions, from, to])
-  const balance = calculateCashboxBalance(transactions)
+  const balance = calculateCashboxBalance(transactions, expenses)
   const closedSettlements = useMemo(() => settlements.filter(row => row.businessDate >= from && row.businessDate <= to).map(settlement => ({ settlement, effective: getEffectiveSettlement(settlement, settlementCorrections.filter(row => row.settlementId === settlement.id)) })), [settlements, settlementCorrections, from, to])
   const cashboxReportData = useMemo(() => buildCashboxReportData({ from, to, operationalDays, settlements, settlementCorrections, sales: cashboxSales, expenses, transactions }), [from, to, operationalDays, settlements, settlementCorrections, cashboxSales, expenses, transactions])
   const cashboxDebugEnabled = new URLSearchParams(window.location.search).has('cashbox-debug')

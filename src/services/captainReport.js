@@ -1,7 +1,8 @@
-import { isActiveExpense, isWithdrawalExpense, normalizeExpense } from './expenseReporting.js'
+import { isWithdrawalExpense, normalizeExpense } from './expenseReporting.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
 import { sellerEligibleStaff } from './staffEligibility.js'
 import { matchesEmployee } from './employeeReport.js'
+import { buildMoneyOutLedger, classifyMoneyOutRecord } from './moneyOutClassifier.js'
 
 const text = value => String(value ?? '').trim()
 const canonical = value => text(value).replace(/[\u200f\u200e\u061c]/g, '').replace(/[\s\u00a0]+/g, ' ').toLocaleLowerCase('ar-IQ')
@@ -10,27 +11,21 @@ const isVoided = row => row?.status === 'voided' || row?.voided === true
 const isClosedSale = row => ['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'].includes(text(row?.status).toLocaleLowerCase('ar-IQ'))
 const salaryCategory = 'راتب'
 const isSalaryRecord = row => text(row?.category || row?.expenseCategory) === salaryCategory
-const isInactiveTransaction = row => row?.status === 'voided' || row?.voided === true
 
-// One report-only classifier for expense rows and cashbox transactions. It
-// never writes or mutates the source records.
+// Compatibility wrapper retained for callers that need the old kind shape.
+// The shared money-out classifier is the source of truth for the decision.
 export const classifyExpenseRecord = (row, { source = 'expense', salaryExpenseIds = new Set() } = {}) => {
+  const classified = classifyMoneyOutRecord(row, { source })
   const normalized = source === 'expense' ? normalizeExpense(row) : (row || {})
-  const withdrawal = source === 'transaction'
-    ? text(normalized.type || normalized.transactionType).toLocaleLowerCase('ar-IQ') === 'withdrawal' || isWithdrawalExpense(normalized)
-    : isWithdrawalExpense(normalized)
-  const salary = !withdrawal && (isSalaryRecord(normalized) || salaryExpenseIds.has(text(normalized.linkedExpenseId)))
+  const withdrawal = classified.reportBucket === 'withdrawal' || (source === 'transaction' && text(normalized.type || normalized.transactionType).toLocaleLowerCase('ar-IQ') === 'withdrawal') || (source === 'expense' && isWithdrawalExpense(normalized))
+  const salary = !withdrawal && (classified.reportBucket === 'salary' || isSalaryRecord(normalized) || salaryExpenseIds.has(text(normalized.linkedExpenseId)))
   return { row: normalized, kind: withdrawal ? 'withdrawal' : salary ? 'salary' : 'expense', amount: amount(normalized.amount) }
 }
 
 export const captainNameOf = row => text(row?.name || row?.employeeNameSnapshot || row?.cashierNameSnapshot || row?.seller || row?.person)
 export const captainCodeOf = row => text(row?.code || row?.employeeCode || row?.staffCode)
 
-// Match stable identifiers first, then exact normalized names. Similar names
-// remain ambiguous and are intentionally excluded from a captain report.
-export const matchCaptainRecord = (record, captain, staff = []) => {
-  return matchesEmployee(record, captain)
-}
+export const matchCaptainRecord = (record, captain, staff = []) => matchesEmployee(record, captain)
 
 export const filterCaptainCandidates = (staff = [], query = '') => {
   const needle = canonical(query)
@@ -44,23 +39,13 @@ export const buildCaptainReport = ({ captain = null, staff = [], sales = [], exp
   const valid = Boolean(captain) && isValidDateRange(from, to)
   const inRange = row => !isVoided(row) && valid && businessDateOf(row) >= from && businessDateOf(row) <= to && matchCaptainRecord(row, captain, staff)
   const matchedSales = filterRowsByBusinessDate(sales, from, to).filter(row => !isClosedSale(row) && inRange(row))
-  const normalizedExpenses = filterRowsByBusinessDate(expenses, from, to).filter(row => isActiveExpense(row) && inRange(row)).map(row => classifyExpenseRecord(row))
-  const matchedTransactions = filterRowsByBusinessDate(transactions, from, to).filter(row => !isInactiveTransaction(row) && inRange(row))
-  const linkedExpenseIds = new Set(matchedTransactions.map(row => text(row.linkedExpenseId || row.sourceRefId)).filter(Boolean))
-  const salaryExpenseIds = new Set(normalizedExpenses.filter(item => item.kind === 'salary').map(item => text(item.row.id)).filter(Boolean))
-  const classifiedTransactions = matchedTransactions.map(row => classifyExpenseRecord(row, { source: 'transaction', salaryExpenseIds }))
-  const matchedExpenses = [
-    ...normalizedExpenses.filter(item => item.kind === 'expense' && !linkedExpenseIds.has(text(item.row.id))).map(item => item.row),
-    ...classifiedTransactions.filter(item => item.kind === 'expense').map(item => item.row),
-  ]
-  const matchedSalaries = [
-    ...normalizedExpenses.filter(item => item.kind === 'salary' && !linkedExpenseIds.has(text(item.row.id))).map(item => item.row),
-    ...classifiedTransactions.filter(item => item.kind === 'salary').map(item => item.row),
-  ]
-  const matchedWithdrawals = [
-    ...normalizedExpenses.filter(item => item.kind === 'withdrawal' && !linkedExpenseIds.has(text(item.row.id))).map(item => item.row),
-    ...classifiedTransactions.filter(item => item.kind === 'withdrawal').map(item => item.row),
-  ]
+  const moneyOutRows = valid
+    ? buildMoneyOutLedger({ expenses, transactions }).filter(row => row.includeInReports && row.reportBucket !== 'ignored' && row.businessDate >= from && row.businessDate <= to && matchCaptainRecord(row.original, captain, staff))
+    : []
+  const rowsForBucket = bucket => moneyOutRows.filter(row => row.reportBucket === bucket).map(row => row.original)
+  const matchedExpenses = rowsForBucket('business_expense')
+  const matchedSalaries = rowsForBucket('salary')
+  const matchedWithdrawals = rowsForBucket('withdrawal')
   const totalOf = rows => rows.reduce((sum, row) => sum + amount(row.amount ?? row.total ?? row.subtotal), 0)
   const totalSales = matchedSales.reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)
   const cashSales = matchedSales.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + amount(row.total ?? row.subtotal), 0)

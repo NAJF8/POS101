@@ -68,6 +68,7 @@
     ,"test:purchases-shifts-ui": "node scripts/purchases-shifts-ui-regression.mjs"
     ,"test:expense-edit-report-update": "node scripts/expense-edit-report-update-regression.mjs"
     ,"test:shift-ui": "node scripts/shift-ui-regression.mjs"
+    ,"test:money-out-classifier": "node scripts/money-out-classifier-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

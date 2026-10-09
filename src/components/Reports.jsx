@@ -362,11 +362,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const beforeTransactions = (Array.isArray(cashboxTransactions) ? cashboxTransactions : []).filter(row => businessDateOf(row) < periodFrom)
     const beforeSales = (Array.isArray(sales) ? sales : []).filter(row => businessDateOf(row) < periodFrom && (row.paymentMethod || row.payment?.method) === 'cash')
     const beforeExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })).filter(row => businessDateOf(row) < periodFrom && isRegularExpense(row))
-    const beforeBalance = calculateCashboxBalance(beforeTransactions) + beforeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - beforeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const beforeBalance = calculateCashboxBalance(beforeTransactions, beforeExpenses) + beforeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - beforeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
     const endTransactions = (Array.isArray(cashboxTransactions) ? cashboxTransactions : []).filter(row => businessDateOf(row) <= periodTo)
     const endSales = (Array.isArray(sales) ? sales : []).filter(row => businessDateOf(row) <= periodTo && (row.paymentMethod || row.payment?.method) === 'cash')
     const endExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })).filter(row => businessDateOf(row) <= periodTo && isRegularExpense(row))
-    const endBalance = calculateCashboxBalance(endTransactions) + endSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - endExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
+    const endBalance = calculateCashboxBalance(endTransactions, endExpenses) + endSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0) - endExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
     const employeeMap = new Map()
     const addEmployee = (row, value, kind) => { const name = row.employeeNameSnapshot || row.cashierNameSnapshot || row.person || row.seller || row.cashierName || 'غير محدد'; const key = String(row.employeeId || row.cashierId || name); const current = employeeMap.get(key) || { name, orders: 0, sales: 0, expenses: 0, withdrawals: 0 }; if (kind === 'sale') { current.orders += 1; current.sales += value } else if (kind === 'withdrawal') current.withdrawals += value; else current.expenses += value; employeeMap.set(key, current) }
     rangeSales.forEach(row => addEmployee(row, numberValue(row.total ?? row.subtotal), 'sale'))

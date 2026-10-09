@@ -1,4 +1,5 @@
-import { isActiveExpense, isCashboxExpense, isRegularExpense, isWithdrawalExpense, normalizeExpense } from './expenseReporting.js'
+import { isActiveExpense, normalizeExpense } from './expenseReporting.js'
+import { buildMoneyOutLedger } from './moneyOutClassifier.js'
 
 const amount = value => {
   const parsed = Number(value)
@@ -48,13 +49,13 @@ export const buildShiftReport = ({ sales = [], expenses = [], transactions = [],
   })
   const shiftSales = daySales.filter(sale => saleShiftType(sale).value === shiftType)
   const shiftExpenses = dayExpenses.filter(expense => expenseShiftType(expense).value === shiftType)
-  const shiftTransactions = (Array.isArray(transactions) ? transactions : []).filter(row => {
-    if (businessDate && text(row?.businessDate) !== text(businessDate)) return false
-    if (operationalDayId && text(row?.operationalDayId || row?.operational_day_id) !== text(operationalDayId)) return false
-    return row?.status !== 'voided' && !row?.voided && transactionType(row) === 'withdrawal' && rowShiftType(row).value === shiftType
+  const moneyOutRows = buildMoneyOutLedger({ expenses, transactions }).filter(row => {
+    if (!row.includeInReports || row.reportBucket === 'ignored') return false
+    if (businessDate && text(row.businessDate) !== text(businessDate)) return false
+    if (operationalDayId && text(row.original?.operationalDayId || row.original?.operational_day_id) !== text(operationalDayId)) return false
+    return rowShiftType(row.original).value === shiftType
   })
-  const linkedExpenseIds = new Set(shiftTransactions.map(row => text(row?.linkedExpenseId || row?.sourceRefId)).filter(Boolean))
-  const withdrawalRows = [...shiftTransactions, ...shiftExpenses.filter(isWithdrawalExpense).filter(row => !linkedExpenseIds.has(text(row.id)))]
+  const withdrawalRows = moneyOutRows.filter(row => row.reportBucket === 'withdrawal').map(row => row.original)
   const calculatedSales = shiftSales.map(sale => ({ ...sale, inferredShiftType: saleShiftType(sale).inferred }))
   const calculatedExpenses = shiftExpenses.map(expense => ({ ...expense, inferredShiftType: expenseShiftType(expense).inferred }))
   const activeSales = calculatedSales.filter(sale => !saleIsVoided(sale))
@@ -62,10 +63,10 @@ export const buildShiftReport = ({ sales = [], expenses = [], transactions = [],
   const electronicSales = activeSales.filter(sale => paymentOf(sale) === 'electronic').reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
   const totalSales = activeSales.reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
   const discounts = activeSales.reduce((sum, sale) => sum + amount(sale.discount), 0)
-  const drawerExpenses = shiftExpenses.filter(isRegularExpense).filter(isCashboxExpense).filter(expense => expense.status !== 'voided' && !expense.voided).reduce((sum, expense) => sum + amount(expense.amount), 0)
+  const drawerExpenses = moneyOutRows.filter(row => ['business_expense', 'salary'].includes(row.reportBucket) && row.cashboxImpact === 'drawer').reduce((sum, row) => sum + amount(row.amount), 0)
   const withdrawalsTotal = withdrawalRows.reduce((sum, row) => sum + amount(row.amount), 0)
   const voidedCount = shiftSales.filter(saleIsVoided).length
-  const times = [...shiftSales, ...shiftExpenses, ...shiftTransactions].map(row => amount(row.createdAt || row.created_at || row.timestamp || row.date)).filter(Boolean)
+  const times = [...shiftSales, ...shiftExpenses, ...withdrawalRows].map(row => amount(row.createdAt || row.created_at || row.timestamp || row.date)).filter(Boolean)
   return {
     shiftType,
     shiftLabel: shiftType === 'morning' ? 'صباحي' : 'مسائي',
