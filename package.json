@@ -30,6 +30,8 @@
     "test:expense-withdrawal-classification": "node scripts/expense-withdrawal-classification-regression.mjs",
     "test:management-payments-report": "node scripts/management-payments-report-regression.mjs",
     "test:employee-report": "node scripts/employee-report-regression.mjs",
+    "test:captain-report": "node scripts/captain-report-regression.mjs",
+    "test:captain-report-sales-matcher": "node scripts/captain-report-sales-matcher-regression.mjs",
     "test:delivery-discount-report": "node scripts/delivery-discount-report-regression.mjs",
     "test:sale-edit": "node scripts/sale-edit-regression.mjs",
     "test:sale-edit-modal": "node scripts/sale-edit-modal-regression.mjs",

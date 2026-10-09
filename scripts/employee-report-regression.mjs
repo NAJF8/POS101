@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildEmployeeReport, filterEmployeeSummaries, matchEmployeeRecord } from '../src/services/employeeReport.js'
+import { buildEmployeeReport, filterEmployeeSummaries, matchEmployeeRecord, matchesEmployee } from '../src/services/employeeReport.js'
 
 const staff = [
   { id: 's1', code: '101-E01', name: 'علي', active: true },
@@ -21,6 +21,7 @@ const transactions = [
 
 assert.equal(matchEmployeeRecord({ employeeId: 's1' }, staff).name, 'علي')
 assert.equal(matchEmployeeRecord({ employeeNameSnapshot: 'سارة' }, staff).code, '101-E02')
+assert.equal(matchesEmployee({ cashierCode: '101-E01' }, staff[0]), true)
 assert.equal(filterEmployeeSummaries([{ employee: staff[0] }], '101-E01').length, 1)
 const report = buildEmployeeReport({ staff, sales, expenses, transactions, from: '2026-10-01', to: '2026-10-31' })
 const ali = report.summaries.find(row => row.employee.id === 's1')
@@ -28,18 +29,20 @@ assert.equal(ali.expensesTotal, 100)
 assert.equal(ali.salaryTotal, 300)
 assert.equal(ali.withdrawalsTotal, 200)
 assert.equal(ali.employeeTotal, 600)
+assert.equal(ali.salesTotal, 1000)
+assert.equal(ali.ordersCount, 1)
+assert.equal(ali.cashSales, 1000)
 assert.equal(ali.expenses.some(row => row.category === 'راتب'), false)
 assert.equal(ali.salary.length, 1)
 assert.equal(ali.withdrawals.length, 1)
-assert.equal(Object.hasOwn(ali, 'salesTotal'), false)
-assert.equal(Object.hasOwn(ali, 'ordersCount'), false)
 assert.equal(report.total.employeeTotal, 600)
+assert.equal(report.total.salesTotal, 1000)
 const historical = buildEmployeeReport({ staff, sales, expenses, transactions, from: '2026-09-01', to: '2026-09-30' })
 assert.equal(historical.summaries.find(row => row.employee.id === 's1').expensesTotal, 250)
 
 console.log(JSON.stringify({
-  EMPLOYEE_REPORT_NO_SALES: 'PASS',
-  EMPLOYEE_REPORT_NO_ORDER_COUNT: 'PASS',
+  EMPLOYEE_REPORT_SALES: 'PASS',
+  EMPLOYEE_REPORT_ORDER_COUNT: 'PASS',
   EMPLOYEE_EXPENSES: 'PASS',
   EMPLOYEE_SALARY: 'PASS',
   EMPLOYEE_WITHDRAWALS: 'PASS',
