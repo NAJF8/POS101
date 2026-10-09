@@ -29,6 +29,8 @@ export const resolveFinancialBusinessDate = (record, operationalDayDates = {}) =
 
 const invalidStatuses = new Set(['voided', 'cancelled', 'canceled', 'abandoned', 'draft', 'باطل', 'ملغي'])
 const isVoided = row => invalidStatuses.has(String(row?.status || '').trim().toLowerCase()) || row?.voided === true
+const isExplicitVoidedSale = row => row?.voided === true || String(row?.status || '').trim().toLowerCase() === 'voided' || row?.status === 'باطل'
+const isExplicitCancelledSale = row => ['cancelled', 'canceled', 'abandoned', 'draft', 'ملغي'].includes(String(row?.status || '').trim().toLowerCase())
 const saleAmount = sale => amount(sale?.total ?? sale?.subtotal)
 const paymentMethod = sale => sale?.paymentMethod || sale?.payment?.method || ''
 
@@ -104,15 +106,27 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
   const days = operationalDays.filter(day => day?.id).slice().sort((left, right) => Number(right.endedAt || right.startedAt || 0) - Number(left.endedAt || left.startedAt || 0))
   const byDate = new Map()
   days.forEach(day => { const list = byDate.get(day.businessDate) || []; list.push(day); byDate.set(day.businessDate, list) })
-  const rowsForDay = (rows, day) => rows.filter(row => String(row?.operationalDayId || '') === String(day.id) || (!row?.operationalDayId && byDate.get(day.businessDate)?.length === 1 && resolveFinancialBusinessDate(row) === day.businessDate))
+  const rowDayId = row => String(row?.operationalDayId || row?.operational_day_id || row?.dayId || '').trim()
+  const rowsForDay = (rows, day) => rows.filter(row => {
+    const dateMatches = resolveFinancialBusinessDate(row) === day.businessDate
+    const sourceDayId = rowDayId(row)
+    if (sourceDayId === String(day.id)) return true
+    // A recovered legacy row may have a correct businessDate but no or stale
+    // operational-day key. Use the date only when the date identifies one day.
+    return dateMatches && byDate.get(day.businessDate)?.length === 1
+  })
   return days.map(day => {
-    const settlement = settlements.find(row => String(row.operationalDayId || '') === String(day.id)) || null
+    const settlement = settlements.find(row => String(row.operationalDayId || row.operational_day_id || '') === String(day.id)) || settlements.find(row => !row.operationalDayId && !row.operational_day_id && row.businessDate === day.businessDate && byDate.get(day.businessDate)?.length === 1) || null
     const effective = settlement ? getEffectiveSettlement(settlement, settlementCorrections.filter(row => String(row.settlementId || '') === String(settlement.id))) : null
-    const opening = settlement && Number.isFinite(Number(settlement.openingCashBalance))
-      ? Number(settlement.openingCashBalance)
-      : Number.isFinite(Number(day.openingCashBalance)) ? Number(day.openingCashBalance) : null
-    const summary = calculateCashboxDay({ openingCashBalance: opening, actualCash: effective?.effectiveActualCash, sales: rowsForDay(sales, day), expenses: rowsForDay(expenses, day), transactions: rowsForDay(transactions, day) })
-    return { day, settlement, effective, ...summary, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
+    const isKnownMoney = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+    const dayOpening = day.openingCashBalance ?? day.openingBalance
+    const settlementOpening = settlement?.openingCashBalance
+    // The operational-day opening is authoritative for the cashbox report.
+    // A stale settlement opening of 0 must not erase a known day opening.
+    const opening = isKnownMoney(dayOpening) ? Number(dayOpening) : isKnownMoney(settlementOpening) ? Number(settlementOpening) : null
+    const daySales = rowsForDay(sales, day)
+    const summary = calculateCashboxDay({ openingCashBalance: opening, actualCash: effective?.effectiveActualCash, sales: daySales, expenses: rowsForDay(expenses, day), transactions: rowsForDay(transactions, day) })
+    return { day, settlement, effective, ...summary, salesRecordsMatched: summary.orderCount, salesCashTotal: summary.cashSales, salesElectronicTotal: summary.electronicSales, drawerExpenses: summary.cashboxExpenses, drawerWithdrawals: summary.cashboxWithdrawals, excludedVoidedSalesCount: daySales.filter(isExplicitVoidedSale).length, excludedCancelledSalesCount: daySales.filter(isExplicitCancelledSale).length, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
   })
 }
 export const calculateFinancialReport = ({ sales = [], expenses = [], transactions = [], from, to } = {}) => {

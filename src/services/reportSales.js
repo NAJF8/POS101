@@ -109,7 +109,11 @@ const centralClosedSalesForDate = (centralSales, date, days) => {
     const id = saleOperationalDayId(sale)
     // A closed date is authoritative by operationalDayId. The explicit date
     // fallback is only for legacy central rows that have no day id at all.
-    return id ? closedIds.has(id) : !id
+    if (id && closedIds.has(id)) return true
+    // A recovered central sale can retain the correct businessDate while its
+    // legacy operational-day key is absent/stale. Date fallback is safe only
+    // when that businessDate has one closed operational day.
+    return businessDateForSale(sale) === date && closedIds.size === 1
   })
 }
 

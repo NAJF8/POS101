@@ -32,6 +32,7 @@
     "test:employee-report": "node scripts/employee-report-regression.mjs",
     "test:captain-report": "node scripts/captain-report-regression.mjs",
     "test:captain-report-sales-matcher": "node scripts/captain-report-sales-matcher-regression.mjs",
+    "test:cashbox-day8": "node scripts/cashbox-day8-regression.mjs",
     "test:delivery-discount-report": "node scripts/delivery-discount-report-regression.mjs",
     "test:sale-edit": "node scripts/sale-edit-regression.mjs",
     "test:sale-edit-modal": "node scripts/sale-edit-modal-regression.mjs",
