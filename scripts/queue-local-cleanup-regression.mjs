@@ -21,7 +21,7 @@ globalThis.localStorage = {
 }
 globalThis.window = {}
 const q = await import(`../src/services/salesSyncQueue.js?local-cleanup=${Date.now()}`)
-const central = (saleId, orderNumber, total) => ({ saleId, orderNumber, total, businessDate: '2026-10-07', operationalDayId: 'day-2026-10-07' })
+const central = (saleId, orderNumber, total) => ({ saleId, orderNumber, total, businessDate: '2026-10-07', operationalDayId: 'day-2026-10-07', items: [{ id: 'coffee', quantity: 1, price: total }] })
 const result = q.reconcileLocalQueueAgainstCentral([
   central('2afeb665-4abc-463d-b3d2-e417b539a180', 1288, 9000),
   central('631f1c9f-e32d-46a1-b509-9d05751ed83c', 1292, 5000),
@@ -30,14 +30,14 @@ const result = q.reconcileLocalQueueAgainstCentral([
 assert.equal(result.firebaseWritesPerformed, 0)
 assert.equal(result.backupBeforeCleanup, 'PASS')
 assert.match(result.backupFilename, /^POS101-localStorage-before-queue-cleanup-/)
-assert.equal(result.removedVerified, 3)
-assert.equal(result.quarantinedMalformed, 1)
+assert.equal(result.removedVerified, 2)
+assert.equal(result.quarantinedMalformed, 2)
 assert.equal(result.retainedValidUnresolved, 0)
 assert.equal(JSON.parse(store.get('pos101.syncQueue')).length, 0)
 const quarantine = JSON.parse(store.get('pos101.syncQueue.quarantine'))
-assert.equal(quarantine.length, 1)
-assert.equal(quarantine[0].saleId, 'legacy-1023')
-assert.deepEqual(quarantine[0].rawQueuePayload, { sale: { saleId: 'legacy-1023', orderNumber: 1023 } })
+assert.equal(quarantine.length, 2)
+assert.deepEqual(quarantine.map(row => row.saleId).sort(), ['2afeb665-4abc-463d-b3d2-e417b539a180', 'legacy-1023'])
+assert.deepEqual(quarantine.find(row => row.saleId === 'legacy-1023').rawQueuePayload, { sale: { saleId: 'legacy-1023', orderNumber: 1023 } })
 assert.equal(JSON.parse(store.get('pos101.sales')).find(row => row.saleId === '631f1c9f-e32d-46a1-b509-9d05751ed83c').centralVerified, undefined)
 assert.equal(window.__POS101_LAST_QUEUE_CLEANUP_BACKUP__.filename, result.backupFilename)
 console.log(JSON.stringify({

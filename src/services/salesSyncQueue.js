@@ -127,14 +127,10 @@ const centralMatchForQueueEntry = (rawEntry, centralSales) => {
     const sameIdentity = (localSaleId && comparable(remote?.saleId || remote?.id) === localSaleId)
       || (localOrderNumber && comparable(remote?.orderNumber) === localOrderNumber)
     if (!sameIdentity) return false
-    const fields = [
-      ['orderNumber', local?.orderNumber ?? rawEntry?.orderNumber, remote?.orderNumber],
-      ['total', local?.total ?? local?.subtotal ?? rawEntry?.total, remote?.total ?? remote?.subtotal],
-      ['businessDate', local?.businessDate ?? rawEntry?.businessDate, remote?.businessDate],
-      ['operationalDayId', local?.operationalDayId || local?.operational_day_id || rawEntry?.operationalDayId, remote?.operationalDayId || remote?.operational_day_id],
-      ['operationKey', local?.operationKey || local?.operation_key || rawEntry?.operationKey, remote?.operationKey || remote?.operation_key],
-    ]
-    return fields.every(([, left, right]) => left === undefined || left === null || left === '' || comparable(left) === comparable(right))
+    // Identity and headline totals are only candidate filters. A queue item
+    // may be removed or marked synced only after the complete financial
+    // payload has been read back from Firebase.
+    return salePayloadMatches(local, remote)
   }) || null
 }
 
@@ -569,7 +565,11 @@ export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
     ? sales.map((row, rowIndex) => rowIndex === index ? { ...row, ...synced } : row)
     : sales.some(row => saleIdOf(row) === saleId) ? sales : [...sales, synced]
   writeJson(SALES_KEY, nextSales)
-  writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => !entry?.sale || !sameSaleIdentity(entry.sale, sale)))
+  writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => {
+    if (entry?.expense || entry?.kind === 'expense' || entry?.type === 'expense') return true
+    const queuedSale = entry?.sale || entry
+    return !sameSaleIdentity(queuedSale, sale)
+  }))
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: synced }))
 }
 
