@@ -1146,7 +1146,7 @@ export default function App() {
   const repairBackup = useCallback(payload => runOneClickSyncRepair(payload), [])
   const productManagerReady = isCentralProductManager(productAuthUser)
   const staffManagerReady = canManageStaff(centralAuthUser, staffAuthorizationRecord)
-  const backupRecoveryVisible = Boolean(session || adminReady || staffManagerReady)
+  const backupRecoveryVisible = Boolean(adminReady || staffManagerReady)
   const backupRecoveryCanWrite = adminReady && BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED
   const requestView = useCallback(view => {
     const protectedView = view === 'expenses' || view === 'reports' ? view : null
@@ -1157,8 +1157,9 @@ export default function App() {
       setModal('financial-pin')
       return
     }
+    if (view === 'backup-recovery' && !backupRecoveryVisible) return
     setCurrentView(view)
-  }, [adminReady, currentView])
+  }, [adminReady, backupRecoveryVisible, currentView])
   const unlockFinancialView = useCallback(async ({ staffId, pin }) => {
     const cashier = staff.find(row => String(row.id) === String(staffId))
     if (!cashier || !await verifyCashierPin(pin, cashier)) return false
@@ -1188,6 +1189,10 @@ export default function App() {
     return { state: 'connected', label: 'متصل' }
   }, [cashierSyncPhase, isOnline, centralAuthReady, centralAuthUser, saleSyncStatus])
 
+  useEffect(() => {
+    if (currentView === 'backup-recovery' && !backupRecoveryVisible) setCurrentView('dashboard')
+  }, [currentView, backupRecoveryVisible])
+
   const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
   if (isCentralConfigured() && !centralAuthReady) return null
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
@@ -1209,6 +1214,7 @@ export default function App() {
           onLogout={logout}
           openOrdersCount={openOrdersCount}
           onDownloadSalesBackup={downloadSalesBackup}
+          canAccessBackupTools={backupRecoveryVisible}
           syncStatus={cashierSyncState}
           currentView={currentView}
           onNavigate={requestView}
@@ -1305,7 +1311,7 @@ export default function App() {
       )}
       {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} operationalDays={centralOperationalDays} settlements={settlements} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} onBeforePrint={syncBeforeReportPrint} />}
 
-      {currentView === 'backup-recovery' && (
+      {currentView === 'backup-recovery' && backupRecoveryVisible && (
         <section className="settings-page backup-recovery-route" dir="rtl">
           <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => setCurrentView('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>فحص واسترداد نسخة المبيعات</h1><p>{TEMP_OPEN_ONE_BUTTON_REPAIR ? 'ارفع ملف JSON واضغط إصلاح المزامنة تلقائيًا.' : 'فحص Firebase أولاً واسترداد فردي فقط بعد التحقق والموافقة.'}</p></div><span className="settings-lock">{TEMP_OPEN_ONE_BUTTON_REPAIR ? 'إصلاح تلقائي' : 'فحص آمن فقط'}</span></div>
           <SalesBackupRecovery adminUser={adminAuthUser || centralAuthUser} canReadback={adminReady} canRecover={backupRecoveryCanWrite} canRepair={TEMP_OPEN_ONE_BUTTON_REPAIR || adminReady} onInspect={inspectBackup} onMarkLocal={markBackupLocal} onRecover={recoverBackup} onRepair={repairBackup} />

@@ -64,6 +64,7 @@ const service = fs.readFileSync(new URL('../src/services/posCentralSync.js', imp
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/Dashboard.jsx', import.meta.url), 'utf8')
 const settings = fs.readFileSync(new URL('../src/components/Settings.jsx', import.meta.url), 'utf8')
+const header = fs.readFileSync(new URL('../src/components/Header.jsx', import.meta.url), 'utf8')
 const styles = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const readbackSource = service.match(/export const markBackupSaleReadbackLocally[\s\S]*?export const recoverBackupSale/)?.[0] || ''
 const inspectSource = service.match(/export const inspectBackupSales[\s\S]*?export const markBackupSaleReadbackLocally/)?.[0] || ''
@@ -76,13 +77,18 @@ assert.match(service, /runTransaction\(saleRef/)
 assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
 assert.match(service, /audit-backup-recovery/)
 assert.match(app, /currentView === 'backup-recovery'/)
-assert.match(app, /backupRecoveryVisible = Boolean\(session \|\| adminReady \|\| staffManagerReady\)/)
+assert.match(app, /backupRecoveryVisible = Boolean\(adminReady \|\| staffManagerReady\)/)
 assert.match(app, /canAccessBackupRecovery=\{backupRecoveryVisible\}/)
+assert.match(app, /canAccessBackupTools=\{backupRecoveryVisible\}/)
 assert.match(app, /canRecover=\{backupRecoveryCanWrite\}/)
-assert.match(dashboard, /فحص واسترداد نسخة المبيعات/)
-assert.match(dashboard, /\{ id: 'backup-recovery', title: 'فحص واسترداد نسخة المبيعات'/)
+assert.match(dashboard, /canAccessBackupRecovery \? \[\{ id: 'backup-recovery', title: 'فحص واسترداد نسخة المبيعات'/)
 assert.match(settings, /onNavigate\('backup-recovery'\)/)
 assert.match(settings, /<section className="settings-card backup-recovery-entry">/)
+assert.match(settings, /canAccessBackupRecovery && <section className="settings-card backup-recovery-entry">/)
+assert.match(app, /currentView === 'backup-recovery' && backupRecoveryVisible/)
+assert.match(app, /view === 'backup-recovery' && !backupRecoveryVisible/)
+assert.match(header, /canAccessBackupTools = false/)
+assert.match(header, /canAccessBackupTools && <button[^>]+aria-label="تنزيل نسخة المبيعات"/s)
 assert.doesNotMatch(app, /adminReady && !session && currentView === 'backup-recovery'/)
 assert.match(component, /تم الفحص، لكن الإصلاح يحتاج صلاحية إدارة/) 
 assert.match(app, /<SalesBackupRecovery adminUser=/)
@@ -159,11 +165,11 @@ assert.doesNotMatch(readbackSource, /runTransaction|pos101_sales/)
 
 console.log(JSON.stringify({
   BACKUP_FILE_UPLOAD_UI: 'PASS', BACKUP_JSON_PARSE: 'PASS', BACKUP_SUMMARY: 'PASS', PENDING_SALES_DETECTED: 'PASS', SALE_1309_DETECTED_FROM_BACKUP: 'PASS', AUTH_FIREBASE_CHECK_WIRING: 'PASS',
-  BACKUP_RECOVERY_CARD_VISIBLE_FOR_CASHIER: 'PASS', BACKUP_RECOVERY_CARD_VISIBLE_FOR_ADMIN: 'PASS', BACKUP_RECOVERY_ROUTE_WORKS_WITH_ACTIVE_SESSION: 'PASS', CASHIER_CAN_UPLOAD_AND_PARSE_BACKUP: 'PASS', CASHIER_CAN_SEE_PENDING_SALES: 'PASS', CASHIER_CANNOT_RECOVER: 'PASS', CASHIER_CANNOT_MARK_LOCAL_READBACK: 'PASS', ADMIN_RECOVERY_STILL_PROTECTED: 'PASS', COPY_INSPECTION_REPORT: 'PASS',
+  BACKUP_RECOVERY_CARD_HIDDEN_FOR_CASHIER: 'PASS', BACKUP_RECOVERY_CARD_VISIBLE_FOR_ADMIN: 'PASS', BACKUP_RECOVERY_ROUTE_BLOCKED_FOR_CASHIER: 'PASS', CASHIER_RECOVERY_TOOLBAR_HIDDEN: 'PASS', ADMIN_RECOVERY_STILL_PROTECTED: 'PASS', COPY_INSPECTION_REPORT: 'PASS',
   ORDER_1309_EXISTS_IN_FIREBASE: 'PASS', NO_RECOVERY_WRITE: 'PASS', LOCAL_READBACK_ONLY_FOR_1309: 'PASS', NO_FIREBASE_SALE_WRITE: 'PASS', CANONICAL_REPORT_INCLUDES_1309: 'PASS', END_DAY_NO_BLOCK_FOR_1309: 'PASS', CURRENT_DAY_TOTAL: 196500,
   EXISTS_EXACT_MATCH_NO_WRITE_CLASSIFICATION: 'PASS', MISSING_SAFE_TO_RECOVER_CLASSIFICATION: 'PASS',
   CONFLICT_BLOCKS_RECOVERY: 'PASS', CLOSED_DAY_BLOCKS_RECOVERY: 'PASS', ONE_BY_ONE_RECOVERY_ONLY: 'PASS', CONFIRMATION_NAME_CODE_REASON_REQUIRED: 'PASS', RECOVERY_WRITE_ONCE_WIRING: 'PASS', RECOVERY_READBACK_WIRING: 'PASS', NO_DUPLICATE_SALE_ID_GUARD: 'PASS', NO_DUPLICATE_ORDER_NUMBER_GUARD: 'PASS', SYNCED_ROWS_SKIPPED: 'PASS',
   UPLOAD_DIAGNOSTIC_PARSE: 'PASS', ONE_CLICK_BUTTON_VISIBLE: 'PASS', CONFIRMATION_REQUIRED: 'PASS', OWNER_NAME_CODE_REASON_REQUIRED: 'PASS', EXISTS_EXACT_MATCH_READBACK_ONLY: 'PASS', MISSING_SAFE_SALE_RECOVERED_ONCE: 'PASS', DUPLICATE_SALE_BLOCKED: 'PASS', ORDER_CONFLICT_BLOCKED: 'PASS', QUEUE_RESOLVED_ONLY_AFTER_READBACK: 'PASS', INVALID_QUEUE_NOT_DELETED_BLINDLY: 'PASS', END_DAY_READY_ONLY_AFTER_CLEAN_SYNC: 'PASS', NO_TOUCH_1056: 'PASS', NO_TOUCH_CLOSED_DAY: 'PASS', NO_ACCOUNTING_REGRESSION: 'PASS', ONE_CLICK_SYNC_REPAIR: 'PASS',
-  BACKUP_INSPECTION_AVAILABLE_TO_CASHIER: 'PASS', BACKUP_UPLOAD_PARSE_WITHOUT_ADMIN: 'PASS', QUEUE_ONLY_JSON_PARSE: 'PASS', PENDING_QUEUE_ITEMS_VISIBLE: 'PASS', COPY_REPORT_VISIBLE_TO_ALL: 'PASS', FIREBASE_READ_ATTEMPT_DOES_NOT_BLOCK_LOCAL_REPORT: 'PASS', ADMIN_ONLY_WRITE_GUARDS_STILL_ENABLED: 'PASS', RECOVERY_STILL_BLOCKED_WITHOUT_OWNER_APPROVAL: 'PASS', NO_FIREBASE_WRITE: 'PASS', NO_LOCALSTORAGE_WRITE: 'PASS',
+  ADMIN_INSPECTION_RETAINED: 'PASS', ADMIN_UPLOAD_PARSE_RETAINED: 'PASS', QUEUE_ONLY_JSON_PARSE: 'PASS', PENDING_QUEUE_ITEMS_VISIBLE: 'PASS', COPY_REPORT_RETAINED: 'PASS', FIREBASE_READ_ATTEMPT_DOES_NOT_BLOCK_LOCAL_REPORT: 'PASS', ADMIN_ONLY_WRITE_GUARDS_STILL_ENABLED: 'PASS', RECOVERY_STILL_BLOCKED_WITHOUT_OWNER_APPROVAL: 'PASS', NO_FIREBASE_WRITE: 'PASS', NO_LOCALSTORAGE_WRITE: 'PASS',
   BACKUP_RECOVERY_PAGE_SCROLLS: 'PASS', BACKUP_RECOVERY_TABLE_ACCESSIBLE: 'PASS', LAST_ROW_AND_BUTTONS_REACHABLE: 'PASS', CASHIER_DASHBOARD_UNCHANGED: 'PASS', REPORTS_UNCHANGED: 'PASS', MOBILE_OR_1024_HEIGHT_SCROLL: 'PASS',
 }, null, 2))
