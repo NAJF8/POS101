@@ -339,11 +339,16 @@ export default function App() {
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setProductAuthUser(isCentralProductManager(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
+      if (new URLSearchParams(window.location.search).has('cashbox-debug')) {
+        void readCashboxReadDiagnostics().catch(error => {
+          window.__POS101_CASHBOX_DIAGNOSTIC = { authReady: false, error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' }
+          console.error('CASHBOX_READ_DIAGNOSTIC_ERROR', error)
+        })
+      }
       if (!user) {
         setSyncAuthStatus(null)
         return
       }
-      if (new URLSearchParams(window.location.search).has('cashbox-debug')) void readCashboxReadDiagnostics().catch(error => console.error('CASHBOX_READ_DIAGNOSTIC_ERROR', error))
       void readCentralOperationalDays().then(days => {
         if (centralAuth()?.currentUser?.uid === user.uid) setCentralOperationalDays(Array.isArray(days) ? days : [])
       }).catch(error => console.error('OPERATIONAL_DAYS_READ_ERROR', error))
