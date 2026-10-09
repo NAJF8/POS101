@@ -1766,7 +1766,10 @@ const maskDiagnosticUid = uid => {
 
 const diagnosticRead = async path => {
   try {
-    const snapshot = await get(ref(db, path))
+    const snapshot = await Promise.race([
+      get(ref(db, path)),
+      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('READ_TIMEOUT'), { code: 'READ_TIMEOUT' })), 8000)),
+    ])
     const value = snapshot.val()
     return { path, ok: true, exists: snapshot.exists(), count: snapshot.exists() && value && typeof value === 'object' ? Object.keys(value).length : snapshot.exists() ? 1 : 0 }
   } catch (error) {
@@ -1775,9 +1778,11 @@ const diagnosticRead = async path => {
 }
 
 export const readCashboxReadDiagnostics = async () => {
-  await authReady
   const user = auth?.currentUser
-  const permission = await canSyncPosSales(user)
+  const permission = await Promise.race([
+    canSyncPosSales(user),
+    new Promise(resolve => setTimeout(() => resolve({ allowed: false, role: 'timeout', authReady: Boolean(user?.uid) }), 8000)),
+  ])
   const [sales, expenses, operationalDays, operationalCurrent, transactions, settlements, corrections] = await Promise.all([
     diagnosticRead('pos101_sales'),
     diagnosticRead('pos101_expenses'),
