@@ -314,7 +314,10 @@ const queueEntryForSale = (sale, { existing = null, error = '', queuedAt = Date.
   }
 }
 
-export const readRawSaleQueue = () => readJson(QUEUE_KEY, [])
+export const readRawSaleQueue = () => {
+  const value = readJson(QUEUE_KEY, [])
+  return Array.isArray(value) ? value : []
+}
 export const readSaleQueue = () => readRawSaleQueue().filter(isSaleEntry)
 export const readVoidUpdateQueue = () => readRawSaleQueue().filter(isVoidUpdateEntry)
 

@@ -43,9 +43,10 @@ assert.match(app, /HEADER_PENDING_DIAGNOSTIC/)
 assert.match(app, /saleSyncStatus\.activePendingQueueCount > 0/)
 
 localStorage.setItem('pos101.sales', JSON.stringify({ legacy: base }))
-localStorage.setItem('pos101.syncQueue', '[]')
+localStorage.setItem('pos101.syncQueue', JSON.stringify({ legacy: base }))
 const legacyStorage = queue.readHeaderPendingDiagnostic({ orders: [], openOrderCount: 0 })
 assert.equal(legacyStorage.activePendingQueueCount, 0)
+assert.deepEqual(queue.readRawSaleQueue(), [])
 
 console.log(JSON.stringify({
   VOIDED_1321_NOT_BLOCKING: 'PASS',
