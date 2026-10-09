@@ -118,6 +118,10 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
   const dayDates = Object.fromEntries(days.map(day => [String(day.id), day.businessDate]))
   const rowDayId = row => String(row?.operationalDayId || row?.operational_day_id || row?.dayId || '').trim()
   const rowsForDay = (rows, day) => rows.filter(row => {
+    const explicitDate = [row?.businessDate, row?.business_date, row?.shiftBusinessDate, row?.date]
+      .map(value => normalizeBusinessDate(value))
+      .find(Boolean)
+    if (explicitDate) return explicitDate === day.businessDate
     const dateMatches = resolveFinancialBusinessDate(row, dayDates) === day.businessDate
     const sourceDayId = rowDayId(row)
     if (sourceDayId === String(day.id)) return true
