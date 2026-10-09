@@ -340,14 +340,6 @@ export default function App() {
       setAdminAuthUser(isCentralAdminUser(user) ? user : null)
       setProductAuthUser(isCentralProductManager(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
-      if (new URLSearchParams(window.location.search).has('cashbox-debug')) {
-        void readCashboxReadDiagnostics().then(result => setCashboxDiagnostic(result)).catch(error => {
-          const result = { authReady: false, error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' }
-          setCashboxDiagnostic(result)
-          window.__POS101_CASHBOX_DIAGNOSTIC = result
-          console.error('CASHBOX_READ_DIAGNOSTIC_ERROR', error)
-        })
-      }
       if (!user) {
         setSyncAuthStatus(null)
         return
@@ -405,6 +397,49 @@ export default function App() {
       setAdminCentralSales([])
       setProductAuthUser(null)
     }
+  }, [])
+
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('cashbox-debug')) return undefined
+    let active = true
+    const maskUid = uid => {
+      const value = String(uid || '')
+      return value.length > 8 ? `${value.slice(0, 4)}…${value.slice(-4)}` : value ? 'present' : ''
+    }
+    const publish = value => {
+      if (!active) return
+      setCashboxDiagnostic(value)
+      window.__POS101_CASHBOX_DIAGNOSTIC = value
+    }
+    const timeout = window.setTimeout(() => publish({ status: 'timeout', reason: 'Cashbox Firebase diagnostic exceeded 10 seconds.' }), 10000)
+    void (async () => {
+      try {
+        publish({ status: 'auth_wait' })
+        let user = centralAuth()?.currentUser || null
+        for (let attempt = 0; !user && attempt < 10; attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, 500))
+          user = centralAuth()?.currentUser || null
+        }
+        if (!user) {
+          publish({ status: 'auth_failed', authReady: false, uidMasked: '', authorized: false, error: 'AUTH_REQUIRED: Firebase auth.currentUser was not ready.' })
+          return
+        }
+        publish({ status: 'auth_ready', authReady: true, uidMasked: maskUid(user.uid), emailAvailable: Boolean(user.email) })
+        publish({ status: 'rules_read_test', authReady: true, uidMasked: maskUid(user.uid), emailAvailable: Boolean(user.email) })
+        const result = await Promise.race([
+          readCashboxReadDiagnostics(),
+          new Promise(resolve => window.setTimeout(() => resolve({ status: 'timeout', authReady: true, uidMasked: maskUid(user.uid), error: 'READ_TEST_TIMEOUT' }), 8000)),
+        ])
+        if (!active) return
+        if (result.status === 'timeout') { publish(result); return }
+        const paths = result.paths || {}
+        const readsOk = [paths.sales, paths.expenses, paths.operationalDays, paths.operationalCurrent, paths.settlements].every(row => row?.ok)
+        publish({ ...result, status: readsOk ? 'success' : 'permission_denied' })
+      } catch (error) {
+        publish({ status: 'error', authReady: Boolean(centralAuth()?.currentUser), uidMasked: maskUid(centralAuth()?.currentUser?.uid), error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' })
+      }
+    })()
+    return () => { active = false; window.clearTimeout(timeout) }
   }, [])
 
   useEffect(() => {
@@ -1229,6 +1264,7 @@ export default function App() {
       {saleSyncWarning && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">{saleSyncWarning}</div>}
       {cashierToast && <div className="cashier-success-toast" role="status" aria-live="polite">{cashierToast}</div>}
       {new URLSearchParams(window.location.search).has('cashbox-debug') && cashboxDiagnostic && <pre data-testid="cashbox-debug" style={{ whiteSpace: 'pre-wrap', direction: 'ltr', textAlign: 'left' }}>{JSON.stringify(cashboxDiagnostic)}</pre>}
+      {new URLSearchParams(window.location.search).has('cashbox-debug') && ['timeout', 'auth_failed', 'permission_denied', 'error'].includes(cashboxDiagnostic?.status) && <p role="alert">تعذر إكمال فحص Firebase: {cashboxDiagnostic.error || cashboxDiagnostic.reason || cashboxDiagnostic.status}</p>}
       {session && operationalDay?.status === 'closed' && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">اليوم التشغيلي مغلق. افتح يومًا جديدًا قبل البيع.</div>}
       {session && (
         <Header
