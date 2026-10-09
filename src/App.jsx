@@ -346,10 +346,14 @@ export default function App() {
       void readCentralOperationalDays().then(days => {
         if (centralAuth()?.currentUser?.uid === user.uid) setCentralOperationalDays(Array.isArray(days) ? days : [])
       }).catch(error => console.error('OPERATIONAL_DAYS_READ_ERROR', error))
-      if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
+      if (user) {
+        // Cashbox is a read path for every authorized POS user; its Firebase
+        // listeners enforce read authorization and never broaden write access.
         cashboxListener.current = subscribeCentralCashboxTransactions(setCashboxTransactions)
         settlementListener.current = subscribeCentralSettlements(setSettlements)
         settlementCorrectionListener.current = subscribeCentralSettlementCorrections(setSettlementCorrections)
+      }
+      if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         operationalDayListener.current = subscribeOperationalDay(day => { setOperationalDayCentralReady(true); setOperationalDay(day) })
         pendingTablesListener.current = subscribePendingTables(setPendingTables)
         // Migrate the device cache before attaching the listener. Otherwise an
@@ -368,7 +372,7 @@ export default function App() {
       if (isCentralAdminUser(user) || isCentralCashierUser(user)) {
         productListener.current = subscribeCentralProducts(setCentralProducts)
       }
-       if (!isCentralAdminUser(user) && !isCentralCashierUser(user)) return
+       if (!user) return
        centralListener.current = subscribeCentralSales(({ centralSales: receivedSales, centralCount, mergedSales }) => {
          if (receivedSales) setCentralSales(receivedSales)
          if (mergedSales) setAdminCentralSales(mergedSales)
@@ -1238,7 +1242,7 @@ export default function App() {
         <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} canAccessBackupRecovery={backupRecoveryVisible} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
       {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
-      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} cashboxSales={adminCentralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} settlements={settlements} settlementCorrections={settlementCorrections} onSaveSettlementCorrection={saveSettlementCorrection} onSaveTransaction={saveCashboxTransaction} onUpdateTransaction={updateCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} adminDiagnostic={Boolean(adminReady && !session)} />}
+      {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} cashboxSales={centralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} settlements={settlements} settlementCorrections={settlementCorrections} onSaveSettlementCorrection={saveSettlementCorrection} onSaveTransaction={saveCashboxTransaction} onUpdateTransaction={updateCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} adminDiagnostic={Boolean(adminReady && !session)} />}
 
       {currentView === 'orders' && (session || adminReady) && (
         <OrderHistoryMenu

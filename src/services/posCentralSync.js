@@ -1743,12 +1743,21 @@ const readAndMergeAdminSales = async () => {
 export const runAdminCentralRefresh = readAndMergeAdminSales
 
 export const subscribeCentralSales = callback => {
-  if (!configured || !db || !isOperationalDayUser(auth?.currentUser)) return () => {}
-  return onValue(salesRef(), snapshot => {
-    const centralSales = centralValues(snapshot)
-    const merged = mergeCentralSalesLocally(centralSales)
-    callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
-  }, () => {})
+  let active = true
+  let stop = () => {}
+  void (async () => {
+    if (!configured || !db) return
+    await authReady
+    const user = auth?.currentUser
+    const permission = await canSyncPosSales(user)
+    if (!active || !permission.allowed) return
+    stop = onValue(salesRef(), snapshot => {
+      const centralSales = centralValues(snapshot)
+      const merged = mergeCentralSalesLocally(centralSales)
+      callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
+    }, () => {})
+  })()
+  return () => { active = false; stop() }
 }
 
 export const subscribeCentralSalesReadOnly = callback => {
