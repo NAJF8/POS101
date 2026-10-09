@@ -2779,9 +2779,13 @@ export const saveCentralExpenseWithCashbox = async expense => {
   // successful save. Reuse the same canonical IDs and repair the paired record.
   if (existingTransaction && existingExpenseSnapshot.exists()) {
     const existingExpense = normalizeExpense({ ...existingExpenseSnapshot.val(), id: expenseId })
+    const sameEditableFields = [
+      'amount', 'businessDate', 'operationalDayId', 'description', 'notes', 'category',
+      'employeeId', 'employeeNameSnapshot', 'cashierNameSnapshot', 'employeeName', 'person',
+      'transactionType', 'recordType', 'type', 'derivedTransactionType', 'entryType',
+    ].every(field => String(existingExpense[field] ?? '') === String(normalized[field] ?? ''))
     if (existingExpense.fundingSource === 'cashbox'
-      && Number(existingExpense.amount) === Number(normalized.amount)
-      && String(existingExpense.businessDate || '') === String(normalized.businessDate || '')
+      && sameEditableFields
       && String(existingExpense.linkedTransactionId || '') === transactionId
       && String(existingTransaction.type || '') === desiredTransactionType) {
       return existingExpense
@@ -2816,7 +2820,10 @@ export const saveCentralExpenseWithCashbox = async expense => {
     || savedTransaction.type !== desiredTransactionType
     || String(savedExpense.linkedTransactionId || '') !== transactionId
     || Number(savedExpense.amount) !== Number(expensePayload.amount)
+    || String(savedExpense.employeeNameSnapshot || '') !== String(expensePayload.employeeNameSnapshot || '')
+    || String(savedExpense.person || '') !== String(expensePayload.person || '')
     || Number(savedTransaction.amount) !== Number(transactionPayload.amount)
+    || String(savedTransaction.employeeNameSnapshot || '') !== String(transactionPayload.employeeNameSnapshot || '')
     || String(savedTransaction.linkedExpenseId || '') !== expenseId
     || String(savedTransaction.fundingSource || '') !== 'cashbox') {
     throw Object.assign(new Error('تعذر التحقق من اكتمال حفظ مصروف الصندوق وحركته المرتبطة.'), { code: 'CASHBOX_EXPENSE_READBACK_FAILED' })

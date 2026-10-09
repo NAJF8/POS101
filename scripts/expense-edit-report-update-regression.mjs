@@ -31,6 +31,9 @@ assert.match(sync, /export const saveCentralExpenseWithCashbox = async/)
 assert.match(sync, /dispatchExpensesUpdated\(\)/)
 assert.match(sync, /EXPENSE_EDIT_READBACK_FAILED/)
 assert.match(sync, /DELETE_READBACK_FAILED/)
+assert.match(sync, /const sameEditableFields = \[/)
+assert.match(sync, /'employeeNameSnapshot', 'cashierNameSnapshot', 'employeeName', 'person'/)
+assert.match(expensesSource, /employeeNameSnapshot: person, cashierNameSnapshot: person, employeeName: person/)
 assert.match(reports, /subscribeCentralExpenses\(/)
 assert.match(reports, /pos101-expenses-updated/)
 assert.match(expensesSource, /saveCentralExpenseWithCashbox/)
@@ -40,4 +43,6 @@ for (const label of [
   'EMPLOYEE_EXPENSE_REPORT_UPDATES', 'CASHIER_EXPENSE_REPORT_UPDATES', 'MORNING_REPORT_UPDATES_AFTER_EXPENSE_EDIT',
   'EVENING_REPORT_UPDATES_AFTER_EXPENSE_EDIT', 'END_DAY_EXPENSE_RECALC', 'DRAWER_CASH_RECALCULATES_AFTER_PAYMENT_SOURCE_CHANGE',
 ]) console.log(`${label}=PASS`)
+console.log('WITHDRAWAL_EDIT_NAME_PATCH_REACHES_CANONICAL_FIELDS=PASS')
+console.log('WITHDRAWAL_EDIT_IDEMPOTENCY_GUARD_INCLUDES_NAME=PASS')
 console.log('SYNC_SAFETY_UNCHANGED=PASS')
