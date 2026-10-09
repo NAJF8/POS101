@@ -2166,7 +2166,8 @@ export const readLocalExpenses = () => readCachedExpenses()
 // This is read-only with respect to Firebase; the local cache is only merged,
 // never replaced, so pending/legacy rows remain protected.
 export const readCentralExpensesForReports = async ({ includeAllLocal = false, persistCache = true, dispatchUpdate = true } = {}) => {
-  await requireExpenseRole(false)
+  if (!auth?.currentUser) await authReady
+  if (!auth?.currentUser) throw Object.assign(new Error('AUTH_REQUIRED'), { code: 'AUTH_REQUIRED' })
   const [expensesSnapshot, daysSnapshot] = await Promise.all([
     get(expensesRef()),
     get(operationalDaysRef()),
@@ -2553,10 +2554,7 @@ export const readCentralCashboxTransactions = async () => { await financialUser(
 export const subscribeCentralCashboxTransactions = (callback, onError = error => console.error('CASHBOX_SUBSCRIBE_ERROR', error)) => {
   let active = true
   let stop = () => {}
-  void financialUser(false).then(() => {
-    if (!active) return
-    stop = onValue(financialPath(cashboxTransactionsPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
-  }).catch(error => onError(error))
+  if (auth?.currentUser) stop = onValue(financialPath(cashboxTransactionsPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
   return () => { active = false; stop() }
 }
 const settlementPath = 'pos101_cashbox_settlements'
@@ -2577,10 +2575,7 @@ export const readCentralSettlements = async () => { await financialUser(false); 
 export const subscribeCentralSettlements = (callback, onError = error => console.error('SETTLEMENT_SUBSCRIBE_ERROR', error)) => {
   let active = true
   let stop = () => {}
-  void financialUser(false).then(() => {
-    if (!active) return
-    stop = onValue(financialPath(settlementPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
-  }).catch(error => onError(error))
+  if (auth?.currentUser) stop = onValue(financialPath(settlementPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
   return () => { active = false; stop() }
 }
 
@@ -2588,10 +2583,7 @@ export const readCentralSettlementCorrections = async () => { await financialUse
 export const subscribeCentralSettlementCorrections = (callback, onError = error => console.error('SETTLEMENT_CORRECTION_SUBSCRIBE_ERROR', error)) => {
   let active = true
   let stop = () => {}
-  void financialUser(false).then(() => {
-    if (!active) return
-    stop = onValue(financialPath(settlementCorrectionsPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
-  }).catch(error => onError(error))
+  if (auth?.currentUser) stop = onValue(financialPath(settlementCorrectionsPath), snapshot => callback(objectValues(snapshot)), error => onError(error))
   return () => { active = false; stop() }
 }
 

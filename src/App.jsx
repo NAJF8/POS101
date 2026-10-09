@@ -16,7 +16,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup, markSaleSynced, enqueueVoidUpdate, markSaleVoidedCentral, resolveVoidedSaleLocally, readSaleSyncStatus, readPendingSaleDiagnostics } from './services/salesSyncQueue'
-import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, isOperationalDayClosedError, readCashboxReadDiagnostics, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDay, readCentralOperationalDays, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readLocalOperationalDay, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, isOperationalDayClosedError, readCashboxReadDiagnostics, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDay, readCentralOperationalDays, readCentralCashboxTransactions, readCentralSettlements, readCentralSettlementCorrections, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readLocalOperationalDay, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { readCentralSalesForReports } from './services/posCentralSync.js'
@@ -167,9 +167,27 @@ export default function App() {
   useEffect(() => {
     if (!centralAuthUser?.uid) return undefined
     let active = true
-    void readCentralSalesForReports().then(rows => {
-      if (active && rows.length) setCentralSales(rows)
-    }).catch(error => console.error('CENTRAL_SALES_STATE_BINDING_ERROR', error))
+    const bindReadOnlyCashboxState = async () => {
+      const [salesResult, daysResult, transactionsResult, settlementsResult, correctionsResult] = await Promise.allSettled([
+        readCentralSalesForReports(),
+        readCentralOperationalDays(),
+        readCentralCashboxTransactions(),
+        readCentralSettlements(),
+        readCentralSettlementCorrections(),
+      ])
+      if (!active) return
+      if (salesResult.status === 'fulfilled') setCentralSales(salesResult.value)
+      else console.error('CENTRAL_SALES_STATE_BINDING_ERROR', salesResult.reason)
+      if (daysResult.status === 'fulfilled') setCentralOperationalDays(Array.isArray(daysResult.value) ? daysResult.value : [])
+      else console.error('CENTRAL_OPERATIONAL_DAYS_STATE_BINDING_ERROR', daysResult.reason)
+      if (transactionsResult.status === 'fulfilled') setCashboxTransactions(Array.isArray(transactionsResult.value) ? transactionsResult.value : [])
+      else console.error('CENTRAL_TRANSACTIONS_STATE_BINDING_ERROR', transactionsResult.reason)
+      if (settlementsResult.status === 'fulfilled') setSettlements(Array.isArray(settlementsResult.value) ? settlementsResult.value : [])
+      else console.error('CENTRAL_SETTLEMENTS_STATE_BINDING_ERROR', settlementsResult.reason)
+      if (correctionsResult.status === 'fulfilled') setSettlementCorrections(Array.isArray(correctionsResult.value) ? correctionsResult.value : [])
+      else console.error('CENTRAL_CORRECTIONS_STATE_BINDING_ERROR', correctionsResult.reason)
+    }
+    void bindReadOnlyCashboxState()
     return () => { active = false }
   }, [centralAuthUser?.uid])
 
