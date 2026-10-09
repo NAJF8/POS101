@@ -42,6 +42,11 @@ const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 assert.match(app, /HEADER_PENDING_DIAGNOSTIC/)
 assert.match(app, /saleSyncStatus\.activePendingQueueCount > 0/)
 
+localStorage.setItem('pos101.sales', JSON.stringify({ legacy: base }))
+localStorage.setItem('pos101.syncQueue', '[]')
+const legacyStorage = queue.readHeaderPendingDiagnostic({ orders: [], openOrderCount: 0 })
+assert.equal(legacyStorage.activePendingQueueCount, 0)
+
 console.log(JSON.stringify({
   VOIDED_1321_NOT_BLOCKING: 'PASS',
   ACTIVE_VOID_UPDATE_STILL_BLOCKS: 'PASS',

@@ -421,7 +421,8 @@ const saleIsVoidedBeforeCentral = sale => Boolean(sale && isVoidedSale(sale) && 
 // been verified (or the sale was explicitly voided before central creation).
 export const readHeaderPendingDiagnostic = ({ orders = [], openOrderCount = null } = {}) => {
   const rawQueue = readRawSaleQueue()
-  const localSales = readJson(SALES_KEY, [])
+  const storedSales = readJson(SALES_KEY, [])
+  const localSales = Array.isArray(storedSales) ? storedSales : []
   const localById = new Map(localSales.map(sale => [String(saleIdOf(sale) || ''), sale]))
   const saleWriteEntries = rawQueue.filter(isSaleEntry)
   const voidUpdateEntries = rawQueue.filter(isVoidUpdateEntry)
