@@ -2243,7 +2243,7 @@ export const subscribeCentralExpenses = callback => {
       const expenses = expenseValues(snapshot)
       const localExpenses = readCachedExpenses()
       authDebug('POS_EXPENSE_REMOTE_UPDATE', { count: expenses.length })
-      const merged = cacheCentralExpenses(dedupeExpensesById(expenses))
+      const merged = cacheCentralExpenses(expenses)
       callback?.(merged, {
         centralCount: expenses.length,
         centralExpenses: expenses,
