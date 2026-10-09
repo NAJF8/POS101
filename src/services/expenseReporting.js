@@ -175,16 +175,37 @@ export const areExpenseDuplicates = (left, right, toleranceMs = 2 * 60 * 1000) =
   return (!personA && !personB) || (Boolean(personA && personB) && personA === personB)
 }
 
+const expenseFreshness = expense => Number(expense?.updatedAt || expense?.createdAt || expense?.date || expense?.timestamp || 0) || 0
+const expenseIdOf = expense => String(expense?.id || expense?.expenseId || '').trim()
+
+// Firebase listeners and local merges can deliver the same expense id more than
+// once. Keep the newest representation without collapsing different ids or
+// changing financial records.
+export const dedupeExpensesById = (expenses = []) => {
+  const byId = new Map()
+  for (const raw of Array.isArray(expenses) ? expenses : []) {
+    const expense = normalizeExpense(raw)
+    const id = String(expenseIdOf(expense) || '').trim()
+    if (!id) {
+      byId.set(`__missing__${byId.size}`, expense)
+      continue
+    }
+    const previous = byId.get(id)
+    if (!previous || expenseFreshness(expense) >= expenseFreshness(previous)) byId.set(id, expense)
+  }
+  return [...byId.values()]
+}
+
 export const mergeExpensesConservatively = (localExpenses = [], remoteExpenses = []) => {
-  const local = Array.isArray(localExpenses) ? localExpenses.map(normalizeExpense) : []
-  const remote = Array.isArray(remoteExpenses) ? remoteExpenses.map(normalizeExpense) : []
+  const local = dedupeExpensesById(localExpenses)
+  const remote = dedupeExpensesById(remoteExpenses)
   const merged = [...remote]
   for (const localRow of local) {
     const index = merged.findIndex(remoteRow => areExpenseDuplicates(localRow, remoteRow))
     if (index >= 0) merged[index] = { ...localRow, ...merged[index], syncStatus: 'synced' }
     else merged.push(localRow)
   }
-  return merged
+  return dedupeExpensesById(merged)
 }
 
 export const getExpensesForBusinessDate = (expenses = [], dateKey, options = {}) => {

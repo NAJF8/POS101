@@ -22,7 +22,7 @@ import {
   update,
 } from 'firebase/database'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
-import { areExpenseDuplicates, expenseFingerprint, isWithdrawalExpense, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
+import { areExpenseDuplicates, dedupeExpensesById, expenseFingerprint, isWithdrawalExpense, matchOperationalDayByBusinessDate, mergeExpensesConservatively, normalizeDateKey, normalizeExpense, safeCreatedAtForBusinessDate } from './expenseReporting.js'
 import { normalizeStaffCanSell } from './staffEligibility.js'
 import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettlement, calculateSettlementCorrection, getEffectiveSettlement, makeSettlementIdempotencyKey } from './financialCenter.js'
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
@@ -182,11 +182,11 @@ export const kioskAuthStatus = async () => {
 const readCachedExpenses = () => {
   try {
     const value = JSON.parse(localStorage.getItem(EXPENSES_KEY) || '[]')
-    return Array.isArray(value) ? value.map(normalizeExpense) : []
+    return dedupeExpensesById(value)
   } catch { return [] }
 }
 const writeLocalExpenses = expenses => {
-  const next = JSON.stringify(expenses)
+  const next = JSON.stringify(dedupeExpensesById(expenses))
   if (localStorage.getItem(EXPENSES_KEY) === next) return false
   localStorage.setItem(EXPENSES_KEY, next)
   return true
@@ -2226,7 +2226,7 @@ const mergeCentralExpensesWithPendingLocal = centralExpenses => {
 }
 
 const cacheCentralExpenses = expenses => {
-  const merged = mergeExpensesConservatively(readCachedExpenses(), expenses)
+  const merged = dedupeExpensesById(mergeExpensesConservatively(readCachedExpenses(), expenses))
   if (writeLocalExpenses(merged)) dispatchExpensesUpdated()
   return merged
 }
@@ -2243,7 +2243,7 @@ export const subscribeCentralExpenses = callback => {
       const expenses = expenseValues(snapshot)
       const localExpenses = readCachedExpenses()
       authDebug('POS_EXPENSE_REMOTE_UPDATE', { count: expenses.length })
-      const merged = cacheCentralExpenses(expenses)
+      const merged = cacheCentralExpenses(dedupeExpensesById(expenses))
       callback?.(merged, {
         centralCount: expenses.length,
         centralExpenses: expenses,
