@@ -165,12 +165,6 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const diagnostic = readHeaderPendingDiagnostic({ orders, openOrderCount: openOrdersCount })
-    window.__POS101_HEADER_PENDING_DIAGNOSTIC__ = diagnostic
-    console.info('HEADER_PENDING_DIAGNOSTIC', diagnostic)
-  }, [orders, openOrdersCount, saleSyncStatus.activePendingQueueCount, saleSyncStatus.pendingVoidCount])
-
-  useEffect(() => {
     if (!centralAuthUser?.uid) return undefined
     let active = true
     const bindReadOnlyCashboxState = async () => {
@@ -243,6 +237,12 @@ export default function App() {
   const total = Math.max(0, subtotal - activeDiscount)
 
   const openOrdersCount = getOpenOrders(orders).length
+
+  useEffect(() => {
+    const diagnostic = readHeaderPendingDiagnostic({ orders, openOrderCount: openOrdersCount })
+    window.__POS101_HEADER_PENDING_DIAGNOSTIC__ = diagnostic
+    console.info('HEADER_PENDING_DIAGNOSTIC', diagnostic)
+  }, [orders, openOrdersCount, saleSyncStatus.activePendingQueueCount, saleSyncStatus.pendingVoidCount])
 
   const versionBlocked = Boolean(activeOrder?.items?.length || dirtyFinancialForm)
   const versionBlockedRef = useRef(versionBlocked)
