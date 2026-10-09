@@ -8,7 +8,14 @@ export const normalizeFundingSource = value => ['management'].includes(String(va
 export const fundingSourceLabel = value => normalizeFundingSource(value) === 'management' ? 'من الإدارة' : 'من الصندوق'
 export const isCashboxExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'cashbox'
 export const isManagementExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'management'
-export const isDeletedExpense = expense => ['deleted', 'voided'].includes(String(expense?.status || '').toLowerCase()) || expense?.deleted === true || expense?.voided === true
+// The management list is the source ledger.  Report-only withdrawal
+// classification, and legacy boolean markers without an explicit deletion
+// audit, must not hide a row from that list.
+export const isDeletedExpense = expense => {
+  const status = String(expense?.status || '').toLowerCase()
+  const hasDeletedAt = expense?.deletedAt !== undefined && expense?.deletedAt !== null && expense?.deletedAt !== ''
+  return ['deleted', 'voided'].includes(status) || hasDeletedAt
+}
 export const isActiveExpense = expense => !isDeletedExpense(expense)
 
 const text = value => String(value ?? '').trim()

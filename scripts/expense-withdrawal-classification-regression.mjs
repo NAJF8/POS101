@@ -19,6 +19,13 @@ assert.equal(isWithdrawalExpense(derived), true)
 assert.equal(isRegularExpense(derived), false)
 console.log('OLD_EXPENSE_WITH_CATEGORY_WITHDRAWAL_DERIVED_AS_WITHDRAWAL=PASS')
 assert.equal(isActiveExpense(derived), true)
+assert.equal(isActiveExpense({ ...derived, status: 'active', voided: true }), true)
+assert.equal(isActiveExpense({ ...derived, status: 'active', deleted: true }), true)
+assert.equal(isActiveExpense({ ...derived, status: 'active', deletedAt: 0 }), false)
+assert.equal(isActiveExpense({ ...derived, status: 'deleted' }), false)
+assert.equal(isActiveExpense({ ...derived, status: 'voided' }), false)
+assert.equal(isActiveExpense({ ...derived, status: 'active', deletedAt: Date.now() }), false)
+console.log('EXPENSE_LIST_HIDES_ONLY_EXPLICIT_DELETE_VOID=PASS')
 
 const withdrawalTransaction = {
   id: 'expense-new-withdrawal', type: 'withdrawal', transactionType: 'withdrawal', amount: 30000, linkedExpenseId: 'new-withdrawal',
