@@ -5,9 +5,9 @@ import { logoDataUri } from '../assets/logo'
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
-import { isCashboxExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
+import { isActiveExpense, isCashboxExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
-import { readCentralExpensesForReports, readLocalExpenses } from '../services/posCentralSync.js'
+import { readCentralExpensesForReports, readLocalExpenses, subscribeCentralExpenses } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
 import { buildEmployeeReport, filterEmployeeSummaries } from '../services/employeeReport.js'
@@ -15,6 +15,7 @@ import { buildCaptainReport, filterCaptainCandidates } from '../services/captain
 import { filterCashOutflowReport, normalizeCashOutflowReport, sumCashOutflowReport } from '../services/cashOutflowReport.js'
 import { buildManagementPaymentsReport } from '../services/managementPaymentsReport.js'
 import { buildDeliveryDiscountReport, deliverySourceLabel } from '../services/deliveryDiscountReport.js'
+import { buildEndDayShiftReport, buildShiftReport } from '../services/shiftReports.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -196,6 +197,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const [expenseTypeFilter, setExpenseTypeFilter] = useState('all')
   const [managementTypeFilter, setManagementTypeFilter] = useState('all')
   const [deliverySourceFilter, setDeliverySourceFilter] = useState('all')
+  const [expenseRealtimeMeta, setExpenseRealtimeMeta] = useState({ firebaseExpenseCount: null, lastUpdatedExpenseId: '', lastRealtimeUpdateAt: null })
 
   // Reports always open on the active business date and use one shared range.
   useEffect(() => {
@@ -258,11 +260,16 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       }
     }
     window.addEventListener('pos101-expenses-updated', scheduleRefresh)
+    const stopRealtime = subscribeCentralExpenses((merged, meta = {}) => {
+      if (active) setExpenseRealtimeMeta({ firebaseExpenseCount: meta.centralCount ?? null, lastUpdatedExpenseId: meta.centralExpenses?.slice?.(-1)?.[0]?.id || '', lastRealtimeUpdateAt: Date.now() })
+      scheduleRefresh()
+    })
     void refreshCentral()
     return () => {
       active = false
       if (refreshTimer) window.clearTimeout(refreshTimer)
       window.removeEventListener('pos101-expenses-updated', scheduleRefresh)
+      stopRealtime?.()
     }
   }, [])
 
@@ -274,11 +281,12 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const storedSettlement = useMemo(() => selectedClosedDay ? (Array.isArray(settlements) ? settlements : []).find(row => String(row?.operationalDayId || '') === String(selectedClosedDay.id || selectedClosedDay.operationalDayId || '') || String(row?.businessDate || '') === periodFrom) : null, [selectedClosedDay, settlements, periodFrom])
   const postCloseDrift = Boolean(storedSettlement && (Number(storedSettlement.orderCount || 0) !== filteredSales.length || Number(storedSettlement.sales || 0) !== filteredSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)))
   const reportSource = selectedClosedDay ? 'firebase-central' : 'merged-safe'
-  const filteredExpenses = useMemo(() => filterRowsByBusinessDate(
-    (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })),
-    periodFrom,
-    periodTo,
-  ), [expenses, periodFrom, periodTo, expenseOperationalDayDates])
+  const filteredExpenses = useMemo(() => {
+    const normalized = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })).filter(isActiveExpense)
+    const currentDayId = periodFrom === periodTo && String((selectedClosedDay || operationalDay)?.id || '')
+    const dayScoped = currentDayId ? normalized.filter(row => String(row.operationalDayId || '') === currentDayId) : normalized
+    return filterRowsByBusinessDate(dayScoped, periodFrom, periodTo)
+  }, [expenses, periodFrom, periodTo, expenseOperationalDayDates, selectedClosedDay, operationalDay?.id])
   const filteredTransactions = useMemo(() => filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo), [cashboxTransactions, periodFrom, periodTo])
   const endDayReport = useMemo(() => {
     if (periodFrom !== periodTo) return null
@@ -298,13 +306,18 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
   const managementReport = useMemo(() => buildManagementPaymentsReport({ expenses, transactions: cashboxTransactions, staff, from: periodFrom, to: periodTo, type: managementTypeFilter }), [expenses, cashboxTransactions, staff, periodFrom, periodTo, managementTypeFilter])
   const deliveryDiscountReport = useMemo(() => buildDeliveryDiscountReport(filteredSales, { from: periodFrom, to: periodTo, source: deliverySourceFilter }), [filteredSales, periodFrom, periodTo, deliverySourceFilter])
+  const shiftReports = useMemo(() => ({
+    morning: buildShiftReport({ sales: filteredSales, expenses: filteredExpenses, transactions: filteredTransactions, businessDate: periodFrom, operationalDayId: (selectedClosedDay || operationalDay)?.id || '', shiftType: 'morning' }),
+    evening: buildShiftReport({ sales: filteredSales, expenses: filteredExpenses, transactions: filteredTransactions, businessDate: periodFrom, operationalDayId: (selectedClosedDay || operationalDay)?.id || '', shiftType: 'evening' }),
+    endDay: buildEndDayShiftReport({ sales: filteredSales, expenses: filteredExpenses, transactions: filteredTransactions, businessDate: periodFrom, operationalDayId: (selectedClosedDay || operationalDay)?.id || '', openingCashBalance: (selectedClosedDay || operationalDay)?.openingCashBalance ?? (selectedClosedDay || operationalDay)?.openingBalance ?? null }),
+  }), [filteredSales, filteredExpenses, filteredTransactions, periodFrom, selectedClosedDay, operationalDay?.id, operationalDay?.openingCashBalance])
 
-  const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales: reportSales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, reportSales, expenses, cashboxTransactions, periodFrom, periodTo])
+  const employeeDataset = useMemo(() => buildEmployeeReport({ staff, sales: reportSales, expenses: filteredExpenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo }), [staff, reportSales, filteredExpenses, cashboxTransactions, periodFrom, periodTo])
   const visibleEmployeeSummaries = useMemo(() => filterEmployeeSummaries(employeeDataset.summaries, employeeQuery), [employeeDataset.summaries, employeeQuery])
   const selectedEmployee = useMemo(() => employeeDataset.summaries.find(row => String(row.employee?.id) === String(selectedEmployeeId)) || null, [employeeDataset.summaries, selectedEmployeeId])
   const captainCandidates = useMemo(() => filterCaptainCandidates(staff, captainQuery), [staff, captainQuery])
   const selectedCaptain = useMemo(() => (Array.isArray(staff) ? staff : []).find(row => String(row.id) === String(selectedCaptainId)) || null, [staff, selectedCaptainId])
-  const captainDataset = useMemo(() => buildCaptainReport({ captain: selectedCaptain, staff, sales: reportSales, expenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo, sections: captainSections }), [selectedCaptain, staff, reportSales, expenses, cashboxTransactions, periodFrom, periodTo, captainSections])
+  const captainDataset = useMemo(() => buildCaptainReport({ captain: selectedCaptain, staff, sales: reportSales, expenses: filteredExpenses, transactions: cashboxTransactions, from: periodFrom, to: periodTo, sections: captainSections }), [selectedCaptain, staff, reportSales, filteredExpenses, cashboxTransactions, periodFrom, periodTo, captainSections])
 
   const periodDataset = useMemo(() => {
     if (reportType !== 'period') return EMPTY_PERIOD_DATASET
@@ -415,6 +428,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     <div className="reports-container" dir="rtl">
       <div className="reports-main">
         {expenseReadError && <div className="settings-notice" role="alert">{expenseReadError}</div>}
+        {(session?.status === 'admin-readonly' || ['admin', 'manager', 'super_admin'].includes(session?.role)) && <details className="report-card expense-diagnostic" data-testid="expense-report-diagnostic"><summary>EXPENSE_REPORT_DIAGNOSTIC</summary><pre>{JSON.stringify({ businessDate: periodFrom, operationalDayId: operationalDay?.id || '', shiftType: 'all', cashierId: session?.cashierId || session?.shiftId || '', firebaseExpenseCount: expenseRealtimeMeta.firebaseExpenseCount, localExpenseCount: expenses.length, activeExpenseCount: expenses.filter(isActiveExpense).length, deletedExpenseCount: expenses.filter(row => !isActiveExpense(row)).length, drawerExpenseTotal: sumExpenses(filteredExpenses.filter(isCashboxExpense)), adminExpenseTotal: sumExpenses(filteredExpenses.filter(row => !isCashboxExpense(row))), reportExpenseTotal: sumExpenses(filteredExpenses), lastUpdatedExpenseId: expenseRealtimeMeta.lastUpdatedExpenseId, lastRealtimeUpdateAt: expenseRealtimeMeta.lastRealtimeUpdateAt, REPORT_RECALCULATED: 'YES' }, null, 2)}</pre></details>}
         <div className="reports-header">
           <div><h2>التقارير</h2><p>اختر فترة واحدة لتطبيقها على جميع التقارير.</p></div>
           <button className="outline-btn" onClick={() => onNavigate('dashboard')}>العودة للرئيسية</button>
@@ -438,6 +452,21 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <Icon name="file-text" size={40} />
             <b>تقرير شامل (صباحي ومسائي)</b>
             <small>كل البيانات ضمن الفترة المختارة</small>
+          </button>
+          <button className="report-card-btn" onClick={() => setReportType('morning')} data-testid="morning-shift-report-card">
+            <Icon name="clock" size={40} />
+            <b>تقرير الشفت الصباحي</b>
+            <small>مبيعات ومصاريف وردية الصباح</small>
+          </button>
+          <button className="report-card-btn" onClick={() => setReportType('evening')} data-testid="evening-shift-report-card">
+            <Icon name="clock" size={40} />
+            <b>تقرير الشفت المسائي</b>
+            <small>مبيعات ومصاريف وردية المساء</small>
+          </button>
+          <button className="report-card-btn" onClick={() => setReportType('end-day')} data-testid="end-day-report-card">
+            <Icon name="chart" size={40} />
+            <b>تقرير نهاية اليوم</b>
+            <small>دمج الشفتين وتسوية الصندوق</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('sales')}>
             <Icon name="receipt" size={40} />
@@ -635,7 +664,32 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       </section>
     }
 
-    if (reportType === 'delivery-discounts') {
+    if (reportType === 'morning' || reportType === 'evening' || reportType === 'end-day') {
+      const isEndDay = reportType === 'end-day'
+      const selectedShift = reportType === 'morning' ? shiftReports.morning : shiftReports.evening
+      const report = isEndDay ? shiftReports.endDay : selectedShift
+      title = isEndDay ? 'تقرير نهاية اليوم' : `تقرير الشفت ${selectedShift.shiftLabel}`
+      const shiftRows = shift => <table className="print-table report-summary"><tbody>
+        <tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(shift.ordersCount)}</td></tr>
+        <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(shift.totalSales)}</td></tr>
+        <tr><td>مبيعات الكاش</td><td className="number-cell">{format(shift.cashSales)}</td></tr>
+        <tr><td>المبيعات الإلكترونية</td><td className="number-cell">{format(shift.electronicSales)}</td></tr>
+        <tr><td>الخصومات</td><td className="number-cell">{format(shift.discounts)}</td></tr>
+        <tr><td>مصاريف من الصندوق</td><td className="number-cell">{format(shift.drawerExpenses)}</td></tr>
+        <tr className="summary-highlight"><td>صافي الكاش للشفت</td><td className="number-cell">{format(shift.netCash)}</td></tr>
+        <tr><td>المبيعات الملغاة / المبطلة</td><td className="number-cell">{formatNumber(shift.voidedCount)}</td></tr>
+        <tr><td>الكاشير</td><td>{shift.cashierNames.join('، ') || 'غير محدد'}</td></tr>
+        <tr><td>النطاق الزمني</td><td>{shift.timeRange.from ? `${formatDateTime(shift.timeRange.from)} — ${formatDateTime(shift.timeRange.to)}` : 'لا توجد حركات'}</td></tr>
+      </tbody></table>
+      content = isEndDay ? <>
+        <h3>ملخص الشفت الصباحي</h3>{shiftRows(report.morning)}
+        <h3>ملخص الشفت المسائي</h3>{shiftRows(report.evening)}
+        <h3>إجمالي اليوم</h3><table className="print-table report-summary"><tbody>
+          <tr><td>إجمالي المبيعات</td><td className="number-cell">{format(report.totalSales)}</td></tr><tr><td>النقدي</td><td className="number-cell">{format(report.cashSales)}</td></tr><tr><td>الإلكتروني</td><td className="number-cell">{format(report.electronicSales)}</td></tr><tr><td>الخصومات</td><td className="number-cell">{format(report.discounts)}</td></tr><tr><td>المصاريف</td><td className="number-cell">{format(report.expenses)}</td></tr><tr><td>السحوبات</td><td className="number-cell">{format(report.withdrawals)}</td></tr><tr><td>الإيداعات</td><td className="number-cell">{format(report.deposits)}</td></tr>
+          <tr className="summary-highlight"><td>مبلغ الصندوق المتوقع بنهاية اليوم</td><td className="number-cell">{report.expectedFinalDrawer == null ? 'غير متوفر' : format(report.expectedFinalDrawer)}</td></tr>
+        </tbody></table>
+      </> : shiftRows(report)
+    } else if (reportType === 'delivery-discounts') {
       title = 'تقرير خصومات بلي وتوترز'
       const total = deliveryDiscountReport.totals.overall
       const summary = source => deliveryDiscountReport.totals[source]

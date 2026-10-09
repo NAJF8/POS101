@@ -656,12 +656,23 @@ export function SellerSelection({ staff = [], staffStatus = { state: 'empty', er
 }
 
 /* ── Cashier Menu ── */
-export function CashierMenu({ session, onClose, onLogout }) {
+export function CashierMenu({ session, onClose, onLogout, settlementPreview = null }) {
+  const [actualCash, setActualCash] = React.useState('')
+  const expectedCash = Number(settlementPreview?.expectedClosingCash ?? settlementPreview?.expectedCash)
+  const actual = actualCash === '' ? null : Number(actualCash)
+  const difference = actual == null || !Number.isFinite(expectedCash) ? null : actual - expectedCash
   return (
     <Dialog onClose={onClose} className="cashier-menu">
       <h2>{session.shiftName}</h2>
       <p>الوردية مفتوحة منذ {formatTime(session.openedAt, { hour: '2-digit', minute: '2-digit' })}</p>
-      <button className="primary-action" onClick={onLogout}>إغلاق الوردية وتسجيل الخروج</button>
+      {session.shiftType === 'evening' && <div className="report-card" role="status">
+        <strong>تسوية الشفت المسائي</strong>
+        <p>مبلغ الصندوق المتوقع بنهاية الشفت المسائي: <b>{Number.isFinite(expectedCash) ? formatMoney(expectedCash) : 'غير متوفر'}</b></p>
+        <label>الكاش الفعلي بالصندوق<input inputMode="numeric" type="number" min="0" value={actualCash} onChange={event => setActualCash(event.target.value)} /></label>
+        {difference !== null && <p><b>{difference === 0 ? 'مطابق' : difference < 0 ? `نقص ${formatMoney(Math.abs(difference))}` : `زيادة ${formatMoney(difference)}`}</b></p>}
+      </div>}
+      {session.shiftType === 'evening' && actualCash === '' && <small role="note">أدخل الكاش الفعلي قبل إغلاق الشفت المسائي.</small>}
+      <button className="primary-action" disabled={session.shiftType === 'evening' && actualCash === ''} onClick={() => onLogout(actualCash)}>إغلاق الوردية وتسجيل الخروج</button>
     </Dialog>
   )
 }

@@ -1,3 +1,4 @@
+import { isActiveExpense } from './expenseReporting.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
 
 const text = value => String(value ?? '').trim()
@@ -62,7 +63,7 @@ export const buildEmployeeReport = ({ staff = [], sales = [], expenses = [], tra
   const people = (Array.isArray(staff) ? staff : []).filter(row => row?.id && row?.name)
   const rows = new Map(people.map(person => [String(person.id), { employee: person, expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, expenses: [], salary: [], withdrawals: [] }]))
   const add = (record, kind, value) => {
-    if (isVoided(record) || !inRange(record, from, to)) return
+    if (isVoided(record) || (kind === 'expense' && !isActiveExpense(record)) || !inRange(record, from, to)) return
     const person = employeeForRecord(record, people)
     if (!person) return
     const summary = addSummary(rows, person)

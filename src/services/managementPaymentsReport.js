@@ -1,4 +1,4 @@
-import { isManagementExpense, normalizeExpense, normalizeTimestamp } from './expenseReporting.js'
+import { isActiveExpense, isManagementExpense, normalizeExpense, normalizeTimestamp } from './expenseReporting.js'
 import { resolveFinancialBusinessDate } from './financialCenter.js'
 
 const amount = value => Number.isFinite(Number(value)) ? Number(value) : 0
@@ -14,7 +14,7 @@ export const buildManagementPaymentsReport = ({ expenses = [], transactions = []
   const rows = []
   for (const raw of expenses) {
     const expense = normalizeExpense(raw)
-    if (voided(expense) || !isManagementExpense(expense) || type === 'withdrawals') continue
+    if (!isActiveExpense(expense) || voided(expense) || !isManagementExpense(expense) || type === 'withdrawals') continue
     rows.push({ id: `expense:${expense.id}`, businessDate: dateOf(expense), createdAt: timeOf(expense), type: 'expense', typeLabel: 'مصروف من الإدارة', employeeId: text(expense.employeeId || expense.staffId || expense.cashierId), employeeName: text(expense.employeeNameSnapshot || expense.person || expense.cashierName || 'غير محدد'), category: text(expense.category || expense.expenseCategory || 'أخرى'), description: text(expense.description || expense.notes), amount: amount(expense.amount), operationalDay: text(expense.operationalDayId || expense.operational_day_id || expense.businessDate) })
   }
   for (const transaction of transactions) {

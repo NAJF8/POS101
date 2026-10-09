@@ -220,6 +220,7 @@ const centralExpensePayload = (expense, user, { preserveCreatedAt = false } = {}
     createdAt,
     updatedAt: now,
     createdBy: normalized.createdBy || user?.uid || '',
+    updatedBy: user?.uid || normalized.updatedBy || '',
     deviceId: normalized.deviceId || getDeviceId(),
     fundingSource: normalized.fundingSource,
     paymentSource: normalized.fundingSource,
@@ -2254,6 +2255,7 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف.')
   const savedValue = readBack.val()
   if (existing && (
+     String(savedValue.id || id) !== id ||
     Number(savedValue.amount) !== Number(payload.amount) ||
     String(savedValue.description || '') !== String(payload.description || '') ||
     String(savedValue.category || '') !== String(payload.category || '') ||
@@ -2263,7 +2265,10 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
     String(savedValue.businessDate || '') !== String(payload.businessDate || '') ||
     String(savedValue.operationalDayId || '') !== String(payload.operationalDayId || '') ||
     String(savedValue.entryType || '') !== String(payload.entryType || '') ||
-    String(savedValue.fundingSource || '') !== String(payload.fundingSource || '')
+     String(savedValue.fundingSource || '') !== String(payload.fundingSource || '') ||
+     String(savedValue.paymentSource || '') !== String(payload.paymentSource || '') ||
+     Number(savedValue.createdAt) !== Number(payload.createdAt) ||
+     String(savedValue.updatedBy || '') !== String(payload.updatedBy || '')
   )) throw Object.assign(new Error('تعذر التحقق من تعديل المصروف بعد الحفظ.'), { code: 'EXPENSE_EDIT_READBACK_FAILED' })
   const saved = normalizeExpense({ ...readBack.val(), id })
   await syncAccExpenseBestEffort(saved, existing ? 'upsert' : 'upsert')
@@ -2287,22 +2292,20 @@ export const deleteCentralExpense = async expense => {
   if (!validExpenseId(id)) throw new Error('معرف المصروف غير صالح.')
   const currentSnapshot = await get(ref(db, `pos101_expenses/${id}`))
   const current = currentSnapshot.exists() ? normalizeExpense({ ...currentSnapshot.val(), id }) : normalizeExpense(expense)
-  // Read-back contract: const check = await get(ref(db, `pos101_expenses/${id}`))
-  // DELETE_READBACK_FAILED is raised if the post-update check still exists.
-  // Local cache contract: writeLocalExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
-  // The expense deletion remains the canonical set(ref(db, `pos101_expenses/${id}`), null) operation, grouped with the linked transaction void below.
-  const updates = { [`pos101_expenses/${id}`]: null }
+  const now = Date.now()
+  const softDeleted = { ...current, id, status: 'deleted', deletedAt: now, deletedBy: user.uid, updatedAt: now, updatedBy: user.uid, createdAt: current.createdAt, businessDate: current.businessDate, operationalDayId: current.operationalDayId || '' }
+  const updates = { [`pos101_expenses/${id}`]: softDeleted }
   if (current.fundingSource === 'cashbox' && current.linkedTransactionId) {
     const transactionSnapshot = await get(financialPath(`${cashboxTransactionsPath}/${current.linkedTransactionId}`))
     if (transactionSnapshot.exists()) updates[`${cashboxTransactionsPath}/${current.linkedTransactionId}`] = { ...transactionSnapshot.val(), status: 'voided', voidedAt: Date.now(), voidedBy: user.uid, voidReason: 'حذف المصروف المرتبط' }
   }
   await update(ref(db), updates)
   const check = await get(ref(db, `pos101_expenses/${id}`))
-  if (check.exists()) throw Object.assign(new Error('تعذر التحقق من حذف المصروف.'), { code: 'DELETE_READBACK_FAILED' })
-  await syncAccExpenseBestEffort({ ...expense, id, status: 'voided', updatedAt: Date.now() }, 'void')
-  writeLocalExpenses(readCachedExpenses().filter(row => expenseIdOf(row) !== id))
+  if (!check.exists() || String(check.val()?.id || id) !== id || check.val()?.status !== 'deleted' || Number(check.val()?.amount) !== Number(current.amount) || String(check.val()?.businessDate || '') !== String(current.businessDate || '') || String(check.val()?.operationalDayId || '') !== String(current.operationalDayId || '')) throw Object.assign(new Error('تعذر التحقق من حذف المصروف.'), { code: 'DELETE_READBACK_FAILED' })
+  await syncAccExpenseBestEffort({ ...current, id, status: 'voided', updatedAt: now, updatedBy: user.uid }, 'void')
+  cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), normalizeExpense(check.val())])
   dispatchExpensesUpdated()
-  return { id, deletedBy: user.uid }
+  return normalizeExpense(check.val())
 }
 
 // Product management is deliberately isolated from pos101_sales. Existing

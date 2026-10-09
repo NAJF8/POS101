@@ -8,6 +8,8 @@ export const normalizeFundingSource = value => value === 'management' ? 'managem
 export const fundingSourceLabel = value => normalizeFundingSource(value) === 'management' ? 'من الإدارة' : 'من الصندوق'
 export const isCashboxExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'cashbox'
 export const isManagementExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'management'
+export const isDeletedExpense = expense => ['deleted', 'voided'].includes(String(expense?.status || '').toLowerCase()) || expense?.deleted === true || expense?.voided === true
+export const isActiveExpense = expense => !isDeletedExpense(expense)
 
 const normalizeDigits = value => String(value ?? '').replace(/[٠-٩۰-۹]/g, digit => {
   const digits = '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'
@@ -87,6 +89,7 @@ export const normalizeExpense = (expense, options = {}) => {
     timestamp,
     businessDate: resolveExpenseBusinessDate(raw, options),
     fundingSource: normalizeFundingSource(firstValue(raw.fundingSource, raw.paymentSource)),
+    paymentSource: normalizeFundingSource(firstValue(raw.paymentSource, raw.fundingSource)),
     shift: firstValue(raw.shift, raw.shiftName, raw.shift_id, raw.shiftId, ''),
     shiftId: firstValue(raw.shiftId, raw.shift_id, ''),
   }
@@ -140,7 +143,7 @@ export const getExpensesForBusinessDate = (expenses = [], dateKey, options = {})
   if (!selectedDateKey) return []
   return (Array.isArray(expenses) ? expenses : [])
     .map(expense => normalizeExpense(expense, options))
-    .filter(expense => expense.businessDate === selectedDateKey)
+    .filter(expense => expense.businessDate === selectedDateKey && isActiveExpense(expense))
 }
 
 export const sumExpenses = (expenses = []) => (Array.isArray(expenses) ? expenses : [])
@@ -152,7 +155,7 @@ export const sumExpenses = (expenses = []) => (Array.isArray(expenses) ? expense
 export const filterExpensesByOperationalDay = (expenses = [], operationalDayId) =>
   (Array.isArray(expenses) ? expenses : [])
     .map(expense => normalizeExpense(expense))
-    .filter(expense => String(expense.operationalDayId || '') === String(operationalDayId || ''))
+    .filter(expense => String(expense.operationalDayId || '') === String(operationalDayId || '') && isActiveExpense(expense))
 
 // Historical entry must only inherit an operational day when the business
 // date identifies exactly one day. Empty and duplicate matches are deliberate

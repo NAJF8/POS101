@@ -1,3 +1,4 @@
+import { isActiveExpense } from './expenseReporting.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from './periodReport.js'
 import { sellerEligibleStaff } from './staffEligibility.js'
 
@@ -45,7 +46,7 @@ export const buildCaptainReport = ({ captain = null, staff = [], sales = [], exp
   const valid = Boolean(captain) && isValidDateRange(from, to)
   const inRange = row => !isVoided(row) && valid && businessDateOf(row) >= from && businessDateOf(row) <= to && matchCaptainRecord(row, captain, staff)
   const captainSales = filterRowsByBusinessDate(sales, from, to).filter(inRange)
-  const captainExpenses = filterRowsByBusinessDate(expenses, from, to).filter(inRange)
+  const captainExpenses = filterRowsByBusinessDate(expenses, from, to).filter(row => isActiveExpense(row) && inRange(row))
   const captainTransactions = filterRowsByBusinessDate(transactions, from, to).filter(inRange)
   const salesRows = selected.has('sales') ? captainSales : []
   const expenseRows = selected.has('expenses') ? captainExpenses.filter(row => canonical(row.category) !== canonical(salaryCategory)) : []

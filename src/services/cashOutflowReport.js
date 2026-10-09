@@ -1,4 +1,4 @@
-import { isManagementExpense, normalizeExpense, fundingSourceLabel } from './expenseReporting.js'
+import { isActiveExpense, isManagementExpense, normalizeExpense, fundingSourceLabel } from './expenseReporting.js'
 import { resolveFinancialBusinessDate } from './financialCenter.js'
 import { employeeCodeOf, employeeNameOf, matchEmployeeRecord } from './employeeReport.js'
 
@@ -32,7 +32,7 @@ const isCashOutflowTransaction = row => {
 }
 
 export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], staff = [], operationalDayDates = {} } = {}) => {
-  const normalizedExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates })).filter(row => !isVoided(row) && amount(row.amount) > 0)
+  const normalizedExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates })).filter(row => isActiveExpense(row) && !isVoided(row) && amount(row.amount) > 0)
   const expenseRows = normalizedExpenses.filter(row => isCashExpense(row) || isManagementExpense(row))
   const expenseRefs = new Set(expenseRows.flatMap(refsOf))
   const expenseMirrorKeys = new Set(expenseRows.map(mirrorKeyOf))

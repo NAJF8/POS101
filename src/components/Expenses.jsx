@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatMoney, formatDateTime } from '../utils.js'
-import { getLocalDateKey, normalizeDateKey } from '../services/expenseReporting.js'
+import { getLocalDateKey, isActiveExpense, normalizeDateKey } from '../services/expenseReporting.js'
 import { deleteCentralExpense, findOperationalDayByBusinessDate, readLocalExpenses, readLocalOperationalDay, saveCentralExpense, saveCentralExpenseWithCashbox, subscribeCentralExpenses } from '../services/posCentralSync.js'
 
 const format = formatMoney
@@ -8,6 +8,10 @@ const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `expense-${Date.n
 const categories = ['مشتريات', 'صيانة', 'نقل', 'أدوات تنظيف', 'راتب', 'سحوبات', 'أخرى']
 const people = ['علي', 'روان', 'محمد', 'ميس']
 const centralExpensesLabel = 'بيانات المصاريف المركزية'
+const shiftForNow = () => {
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Baghdad', hour: '2-digit', hour12: false }).format(new Date()))
+  return hour < 15 ? { shiftType: 'morning', shiftLabel: 'صباحي' } : { shiftType: 'evening', shiftLabel: 'مسائي' }
+}
 
 export function Expenses({ onNavigate, onBack, session, operationalDay = null, staff = [] }) {
   const effectiveOperationalDay = operationalDay?.status === 'open' ? operationalDay : readLocalOperationalDay()
@@ -65,16 +69,9 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     if (editingId) {
       const current = expenses.find(row => row.id === editingId)
       let edited = current ? { ...current, amount: numericAmount, category, person, employeeId: personId || current.employeeId || '', employeeNameSnapshot: person, notes: cleanNotes, description: cleanDescription, entryType, fundingSource, paymentSource: fundingSource, updatedAt: Date.now() } : null
-      if (edited && entryType === 'historical') {
-        try {
-          const match = await findOperationalDayByBusinessDate(historicalDate)
-          edited = { ...edited, businessDate: historicalDate, operationalDayId: match.operationalDayId, entryType: 'historical', source: 'manual' }
-          if (match.ambiguous) console.warn('HISTORICAL_OPERATIONAL_DAY_AMBIGUOUS', { businessDate: historicalDate, matchCount: match.matches.length })
-        } catch (error) {
-          if (!['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) { setSyncMessage(error?.message || 'تعذر مطابقة اليوم التشغيلي التاريخي.'); return }
-          edited = { ...edited, businessDate: historicalDate, operationalDayId: '', entryType: 'historical', source: 'manual' }
-        }
-      } else if (edited) edited = { ...edited, entryType: 'current', businessDate: current?.businessDate || effectiveOperationalDay?.businessDate || '', operationalDayId: current?.operationalDayId || effectiveOperationalDay?.id || '' }
+      // Historical identity is immutable. An edit changes financial attributes only;
+      // moving a row to another business day would rewrite historical accounting.
+      if (edited) edited = { ...edited, entryType: current?.entryType || edited.entryType, businessDate: current?.businessDate || '', operationalDayId: current?.operationalDayId || '', shiftId: current?.shiftId || session?.shiftId || session?.cashierId || '', shiftType: current?.shiftType || shiftForNow().shiftType, shiftLabel: current?.shiftLabel || shiftForNow().shiftLabel }
       try {
         const saved = await saveCentralExpense(edited, { existing: true })
         setExpenses(currentRows => currentRows.map(row => row.id === saved.id ? saved : row))
@@ -110,7 +107,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
     const row = {
       id: makeId(), amount: numericAmount, category, date: createdAt, createdAt,
       employeeId: personId || '',
-      shift: session?.name || 'وردية غير محددة', shiftId: session?.shiftId || session?.cashierId || '', cashierId: session?.cashierId || session?.shiftId || '', person,
+      shift: session?.name || 'وردية غير محددة', shiftId: session?.shiftId || session?.cashierId || '', shiftType: session?.shiftType || shiftForNow().shiftType, shiftLabel: session?.shiftLabel || shiftForNow().shiftLabel, cashierId: session?.cashierId || session?.shiftId || '', cashierNameSnapshot: session?.name || session?.shiftName || person, person,
       notes: cleanNotes, description: cleanDescription, status: 'disabled', recordType: 'expense', type: 'expense',
       operationalDayId, businessDate,
       entryType, source: 'manual',
@@ -142,19 +139,20 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       setSyncMessage(error?.message || 'تعذر مزامنة حذف المصروف.')
     } finally { setDeleting(null) }
   }
-  const total = useMemo(() => expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0), [expenses])
+  const activeExpenses = useMemo(() => expenses.filter(isActiveExpense), [expenses])
+  const total = useMemo(() => activeExpenses.reduce((sum, row) => sum + Number(row.amount || 0), 0), [activeExpenses])
   const allExpenseDiagnostic = useMemo(() => {
     const grouped = expenses.reduce((result, row) => {
       const key = row.businessDate || 'غير محدد'
       result[key] = (result[key] || 0) + Number(row.amount || 0)
       return result
     }, {})
-    return { pending: expenses.filter(row => row.syncStatus === 'pending').length, grouped }
+    return { pending: expenses.filter(row => row.syncStatus === 'pending').length, grouped, deleted: expenses.filter(row => !isActiveExpense(row)).length }
   }, [expenses])
-  const displayedExpenses = useMemo(() => expenses
+  const displayedExpenses = useMemo(() => activeExpenses
     .filter(row => (!dateFrom || row.businessDate >= dateFrom) && (!dateTo || row.businessDate <= dateTo))
     .slice()
-    .sort((a, b) => String(b.businessDate || '').localeCompare(String(a.businessDate || '')) || Number(b.createdAt || b.date || 0) - Number(a.createdAt || a.date || 0)), [expenses, dateFrom, dateTo])
+    .sort((a, b) => String(b.businessDate || '').localeCompare(String(a.businessDate || '')) || Number(b.createdAt || b.date || 0) - Number(a.createdAt || a.date || 0)), [activeExpenses, dateFrom, dateTo])
   const setQuickFilter = days => { const today = getLocalDateKey(Date.now()); const from = days === 0 ? today : getLocalDateKey(Date.now() - days * 86400000); setDateFrom(from); setDateTo(today) }
   const goBack = onNavigate || onBack
   const selectedPerson = person || staff.find(row => row.active)?.name || 'غير محدد'
