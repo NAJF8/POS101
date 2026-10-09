@@ -165,6 +165,15 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!centralAuthUser?.uid) return undefined
+    let active = true
+    void readCentralSalesForReports().then(rows => {
+      if (active && rows.length) setCentralSales(rows)
+    }).catch(error => console.error('CENTRAL_SALES_STATE_BINDING_ERROR', error))
+    return () => { active = false }
+  }, [centralAuthUser?.uid])
+
+  useEffect(() => {
     const showToast = event => {
       setCashierToast(String(event.detail || ''))
       window.setTimeout(() => setCashierToast(''), 2200)
