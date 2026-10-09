@@ -1745,17 +1745,15 @@ export const runAdminCentralRefresh = readAndMergeAdminSales
 export const subscribeCentralSales = callback => {
   let active = true
   let stop = () => {}
-  void (async () => {
-    if (!configured || !db) return
-    await authReady
-    const user = auth?.currentUser
-    if (!active || !user) return
-    stop = onValue(salesRef(), snapshot => {
-      const centralSales = centralValues(snapshot)
-      const merged = mergeCentralSalesLocally(centralSales)
-      callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
-    }, () => {})
-  })()
+  if (!configured || !db || !auth?.currentUser || !active) return () => { active = false }
+  // subscribeCentralAuth invokes this after Firebase has delivered the user;
+  // waiting on the module-level restore promise here can strand the read
+  // listener even though auth.currentUser and the RTDB token are ready.
+  stop = onValue(salesRef(), snapshot => {
+    const centralSales = centralValues(snapshot)
+    const merged = mergeCentralSalesLocally(centralSales)
+    callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
+  }, error => console.error('CENTRAL_SALES_SUBSCRIBE_ERROR', error))
   return () => { active = false; stop() }
 }
 
