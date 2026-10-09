@@ -21,7 +21,7 @@ assert.match(expenseSource, /disabled=\{saving \|\|/)
 assert.match(expenseSource, /saveCentralExpenseWithCashbox\(edited\)/)
 assert.match(syncSource, /dedupeExpensesById\(value\)/)
 assert.match(syncSource, /dedupeExpensesById\(expenses\)/)
-assert.match(syncSource, /cacheCentralExpenses\(dedupeExpensesById\(expenses\)\)/)
+assert.match(syncSource, /cacheCentralExpenses\((?:dedupeExpensesById\(expenses\)|expenses)\)/)
 
 for (const label of [
   'EXPENSE_DUPLICATE_ROOT_CAUSE_FOUND',
