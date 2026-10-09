@@ -2323,7 +2323,7 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
   const readBack = await get(ref(db, `pos101_expenses/${id}`))
   if (!readBack.exists()) throw new Error('تعذر التحقق من حفظ المصروف.')
   const savedValue = readBack.val()
-  if (existing && (
+  if (
      String(savedValue.id || id) !== id ||
     Number(savedValue.amount) !== Number(payload.amount) ||
     String(savedValue.description || '') !== String(payload.description || '') ||
@@ -2342,7 +2342,7 @@ export const saveCentralExpense = async (expense, { existing = false } = {}) => 
      String(savedValue.paymentSource || '') !== String(payload.paymentSource || '') ||
      Number(savedValue.createdAt) !== Number(payload.createdAt) ||
      String(savedValue.updatedBy || '') !== String(payload.updatedBy || '')
-  )) throw Object.assign(new Error('تعذر التحقق من تعديل المصروف بعد الحفظ.'), { code: 'EXPENSE_EDIT_READBACK_FAILED' })
+   ) throw Object.assign(new Error(existing ? 'تعذر التحقق من تعديل المصروف بعد الحفظ.' : 'تعذر التحقق من حفظ المصروف.'), { code: existing ? 'EXPENSE_EDIT_READBACK_FAILED' : 'EXPENSE_READBACK_FAILED' })
   const saved = normalizeExpense({ ...readBack.val(), id })
   await syncAccExpenseBestEffort(saved, existing ? 'upsert' : 'upsert')
   cacheCentralExpenses([...readCachedExpenses().filter(row => expenseIdOf(row) !== id), saved])
@@ -2823,6 +2823,9 @@ export const saveCentralExpenseWithCashbox = async expense => {
   const savedTransaction = transactionReadBack.exists() ? transactionReadBack.val() : null
   if (!savedTransaction
     || savedExpense.fundingSource !== 'cashbox'
+    || String(savedExpense.category || '') !== String(normalized.category || '')
+    || String(savedExpense.description || '') !== String(expensePayload.description || '')
+    || String(savedExpense.paymentSource || '') !== String(expensePayloadWithSource.paymentSource || '')
     || String(savedExpense.transactionType || '') !== String(normalized.transactionType || '')
     || String(savedExpense.type || '') !== String(normalized.type || '')
     || String(savedExpense.derivedTransactionType || '') !== String(normalized.derivedTransactionType || '')

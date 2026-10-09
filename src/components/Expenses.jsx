@@ -52,6 +52,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const [expenseListOpen, setExpenseListOpen] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(null)
 
   const announceSuccess = message => {
     setSuccessMessage(message)
@@ -62,6 +63,7 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
   const submit = async e => {
     e.preventDefault()
     if (saving) return
+    setSyncMessage('')
     setSaving(true)
     try {
     const numericAmount = Number(amount)
@@ -82,13 +84,9 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       try {
         const saved = await (fundingSource === 'cashbox' ? saveCentralExpenseWithCashbox(edited) : saveCentralExpense(edited, { existing: true }))
         setExpenses(currentRows => currentRows.map(row => row.id === saved.id ? saved : row))
-        resetForm(); setFormOpen(false); announceSuccess('تم تعديل المصروف بنجاح')
+        resetForm(); setFormOpen(false); announceSuccess(isWithdrawal ? 'تم تحديث السحب' : 'تم تحديث المصروف')
       } catch (error) {
-        if (error?.code === 'AUTH_REQUIRED' && edited) {
-          const pending = saveLocalExpensePending(edited)
-          setExpenses(currentRows => currentRows.map(row => row.id === pending.id ? pending : row))
-          setSyncMessage('تم الاحتفاظ بالتعديل محليًا فقط — Pending Sync. لم يثبت الحفظ المركزي بعد.')
-        } else setSyncMessage(error?.message || 'تعذر مزامنة تعديل المصروف.')
+        setSyncMessage('تعذر التحديث، لم يتم تأكيد العملية')
       }
       return
     }
@@ -129,27 +127,27 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
       source: isWithdrawal ? 'drawer' : 'manual',
     }
     try {
-      await (fundingSource === 'cashbox' ? saveCentralExpenseWithCashbox(row) : saveCentralExpense(row))
-      resetForm(); setFormOpen(false); announceSuccess('تم حفظ المصروف بنجاح')
+      const saved = await (fundingSource === 'cashbox' ? saveCentralExpenseWithCashbox(row) : saveCentralExpense(row))
+      setExpenses(currentRows => [...currentRows.filter(current => current.id !== saved.id), saved])
+      resetForm(); setFormOpen(false); announceSuccess(isWithdrawal ? 'تم حفظ السحب' : 'تم حفظ المصروف')
     } catch (error) {
-      if (['AUTH_REQUIRED', 'NOT_CONFIGURED', 'NETWORK_ERROR', 'NETWORK_REQUEST_FAILED'].includes(error?.code)) {
-        saveLocalExpensePending(row)
-        setSyncMessage('تم الاحتفاظ بالمصروف محليًا فقط — Pending Sync. لم يثبت الحفظ المركزي بعد.')
-      } else setSyncMessage(error?.message || 'تعذر مزامنة المصروف.')
+      setSyncMessage(isWithdrawal ? 'تعذر حفظ السحب، حاول مرة أخرى' : 'تعذر الحفظ، حاول مرة أخرى')
     }
     } finally { setSaving(false) }
   }
   const beginEdit = expense => { const matchedPerson = staff.find(row => String(row.id) === String(expense.employeeId || expense.staffId || expense.cashierId) || row.name === (expense.person || expense.employeeNameSnapshot || '')); setEditingId(expense.id); setAmount(String(expense.amount)); setCategory(expense.category || 'أخرى'); setPerson(matchedPerson?.name || expense.person || expense.employeeNameSnapshot || 'علي'); setPersonId(matchedPerson?.id || expense.employeeId || expense.staffId || expense.cashierId || ''); setDescription(expense.description || expense.notes || ''); setNotes(expense.notes && expense.notes !== expense.description ? expense.notes : ''); setEntryType(expense.entryType === 'historical' ? 'historical' : 'current'); setHistoricalDate(expense.businessDate || ''); setFundingSource(expense.fundingSource || expense.paymentSource || 'cashbox'); setFormOpen(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const deleteExpense = async expense => {
     if (!expense || deleting) return
+    setSyncMessage('')
     setDeleting(expense.id)
     try {
       await deleteCentralExpense(expense)
       setExpenses(currentRows => currentRows.filter(row => row.id !== expense.id))
       setCentralExpenses(currentRows => currentRows.filter(row => row.id !== expense.id))
-      announceSuccess('تم حذف المصروف والتحقق من اختفائه')
+      setDeleteConfirm(null)
+      announceSuccess(isWithdrawalExpense(expense) ? 'تم حذف السحب' : 'تم حذف المصروف')
     } catch (error) {
-      setSyncMessage(error?.message || 'تعذر مزامنة حذف المصروف.')
+      setSyncMessage(isWithdrawalExpense(expense) ? 'تعذر حذف السحب، حاول مرة أخرى' : 'تعذر الحذف، لم يتم تأكيد العملية')
     } finally { setDeleting(null) }
   }
   // The management list is the source list for the expenses form. Withdrawal
@@ -207,14 +205,15 @@ export function Expenses({ onNavigate, onBack, session, operationalDay = null, s
         {entryType === 'current' ? <div className="expense-date-context"><span>تاريخ الأعمال</span><strong>{effectiveOperationalDay?.status === 'open' ? effectiveOperationalDay.businessDate : 'لا يوجد يوم مفتوح'}</strong><small>يرتبط المصروف باليوم التشغيلي المفتوح، حتى بعد منتصف الليل.</small></div> : <label>التاريخ السابق<input type="date" max={getLocalDateKey(Date.now())} value={historicalDate} onChange={e => setHistoricalDate(e.target.value)} required /></label>}
         <label className="expense-notes">ملاحظات (اختياري)<textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="أضف ملاحظة عند الحاجة" rows="3" /></label>
       <fieldset className="expense-cashbox-toggle"><legend>مصدر الدفع</legend><label><input type="radio" name="expenseFundingSource" value="cashbox" checked={fundingSource === 'cashbox'} onChange={() => setFundingSource('cashbox')} required /> من الصندوق</label><label><input type="radio" name="expenseFundingSource" value="management" checked={fundingSource === 'management'} onChange={() => setFundingSource('management')} disabled={category === 'سحوبات'} /> من الإدارة</label><small>{category === 'سحوبات' ? 'سيظهر هذا السجل في قسم السحوبات ويُخصم من الصندوق مرة واحدة.' : 'المصاريف من الإدارة تظهر في التقارير ولا تخصم من صندوق POS.'}</small></fieldset>
-      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={saving || (!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate))}>{saving ? 'جارٍ الحفظ…' : editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm} disabled={saving}>إلغاء التعديل</button>}</div></form>}
+      </div><div className="expense-form-actions"><button className="primary-action" type="submit" disabled={saving || (!editingId && (entryType === 'current' ? !(effectiveOperationalDay?.status === 'open' && effectiveOperationalDay?.id && effectiveOperationalDay?.businessDate) : !historicalDate))}>{saving ? (editingId ? 'جاري التحديث...' : 'جاري الحفظ...') : editingId ? 'حفظ التعديل' : 'حفظ المصروف'}</button>{editingId && <button className="outline-btn" type="button" onClick={resetForm} disabled={saving}>إلغاء التعديل</button>}</div></form>}
       </section>
       <div className="report-card expense-total"><h3>مصاريف المحل: {format(normalExpenseTotal)}</h3><p>السحوبات: {format(withdrawalTotal)} · إجمالي الخارج من الصندوق: {format(total)}</p><small>{centralExpensesLabel}</small></div>
       <section className="report-card expense-diagnostic" aria-label="كل المصاريف"><h3>كل المصاريف</h3><p>المصدر المركزي للتقارير هو Firebase RTDB؛ المحلي وPending يُدمجان محافظًا ولا يستبدلان المركزي.</p><div className="recovery-stats"><span>Firebase: <b>{centralCount === null ? 'غير متاح' : centralCount}</b> سجل</span><span>Local: <b>{localCount}</b></span><span>Pending: <b>{allExpenseDiagnostic.pending}</b></span><span>Merged: <b>{expenses.length}</b></span><span>مصاريف المحل: <b>{format(normalExpenseTotal)}</b></span><span>السحوبات: <b>{format(withdrawalTotal)}</b></span></div><div className="diagnostic-groups">{Object.entries(allExpenseDiagnostic.grouped).sort(([a], [b]) => b.localeCompare(a)).map(([date, amount]) => <span key={date}>{date}: <b>{format(amount)}</b></span>)}</div>{centralCount !== null && !centralExpenses.some(expense => expense.businessDate === '2026-09-27') && <small>لا يوجد سجل مركزي بتاريخ 2026-09-27؛ السجل موجود محليًا على جهاز آخر أو غير موجود في Firebase.</small>}</section>
       <section className={`expense-list-card collapsible-card${expenseListOpen ? ' is-open' : ''}`}><div className="expense-list-heading collapsible-card-heading"><div><h3>قائمة المصاريف</h3><p>عدد السجلات: {displayedExpenses.length} · مصاريف المحل: {format(normalExpenseTotal)} · السحوبات: {format(withdrawalTotal)}</p></div><button type="button" className="collapsible-toggle" aria-expanded={expenseListOpen} aria-controls="expense-list-content" onClick={() => setExpenseListOpen(open => !open)}><span>{expenseListOpen ? 'إخفاء' : 'عرض'}</span><span className="collapsible-chevron" aria-hidden="true">{expenseListOpen ? '⌃' : '⌄'}</span></button></div>{expenseListOpen && <div id="expense-list-content"><div className="expense-date-filters"><label>من تاريخ<input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} /></label><label>إلى تاريخ<input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} /></label><div className="quick-filters"><button type="button" onClick={() => setQuickFilter(0)}>اليوم</button><button type="button" onClick={() => setQuickFilter(1)}>أمس</button><button type="button" onClick={() => setQuickFilter(7)}>آخر 7 أيام</button><button type="button" onClick={() => { setDateFrom(''); setDateTo('') }}>الكل</button></div></div><div className="expenses-table-wrap"><table className="expenses-table"><thead><tr><th>التاريخ</th><th>الوصف</th><th>المبلغ</th><th>الموظف</th><th>الحالة / المصدر</th><th>إجراءات</th></tr></thead><tbody>
-        {displayedExpenses.length === 0 ? <tr><td colSpan="6" className="empty-cell">لا توجد مصاريف ضمن الفترة المختارة</td></tr> : displayedExpenses.map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td><strong>{expense.description || expense.notes || '—'}</strong>{expense.notes && expense.notes !== expense.description && <small className="expense-row-note">{expense.notes}</small>}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.person || expense.employeeNameSnapshot || '—'}</td><td><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'محفوظ مركزيًا'}</span><small className="expense-entry-type">{isWithdrawalExpense(expense) ? 'سحب موظف / كاشير من الصندوق' : expense.category === 'مشتريات' ? 'مشتريات' : 'مصروف محل'}</small></td><td className="expense-actions"><button type="button" className="edit-expense" onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" disabled={deleting === expense.id} onClick={() => deleteExpense(expense)}>{deleting === expense.id ? 'جارٍ الحذف…' : 'حذف'}</button></td></tr>)}
+        {displayedExpenses.length === 0 ? <tr><td colSpan="6" className="empty-cell">لا توجد مصاريف ضمن الفترة المختارة</td></tr> : displayedExpenses.map(expense => <tr key={expense.id}><td><b>{expense.businessDate || '—'}</b><br/><small>{formatDateTime(expense.createdAt ?? expense.date)}</small></td><td><strong>{expense.description || expense.notes || '—'}</strong>{expense.notes && expense.notes !== expense.description && <small className="expense-row-note">{expense.notes}</small>}</td><td className="expense-amount">{format(expense.amount)}</td><td>{expense.person || expense.employeeNameSnapshot || '—'}</td><td><span className={`sync-state ${expense.syncStatus === 'pending' ? 'pending' : ''}`}>{expense.syncStatus === 'pending' ? 'Pending Sync' : 'محفوظ مركزيًا'}</span><small className="expense-entry-type">{isWithdrawalExpense(expense) ? 'سحب موظف / كاشير من الصندوق' : expense.category === 'مشتريات' ? 'مشتريات' : 'مصروف محل'}</small></td><td className="expense-actions"><button type="button" className="edit-expense" disabled={saving || deleting !== null} onClick={() => beginEdit(expense)}>تعديل</button><button type="button" className="delete-expense" disabled={saving || deleting !== null} onClick={() => setDeleteConfirm(expense)}>{deleting === expense.id ? 'جارٍ الحذف…' : 'حذف'}</button></td></tr>)}
       </tbody></table></div></div>}
       </section>
+      {deleteConfirm && <div className="overlay"><div className="dialog expense-delete-dialog" dir="rtl" role="alertdialog" aria-modal="true" aria-labelledby="expense-delete-title"><h2 id="expense-delete-title">تأكيد الحذف</h2><p>هل تريد حذف هذا المصروف؟</p><dl><div><dt>الوصف</dt><dd>{deleteConfirm.description || deleteConfirm.notes || '—'}</dd></div><div><dt>المبلغ</dt><dd>{format(deleteConfirm.amount)}</dd></div></dl>{syncMessage && <p className="expense-error" role="alert">{syncMessage}</p>}<div className="dialog-actions"><button type="button" className="secondary-action" disabled={deleting !== null} onClick={() => setDeleteConfirm(null)}>إلغاء</button><button type="button" className="delete-expense" disabled={deleting !== null} onClick={() => deleteExpense(deleteConfirm)}>{deleting !== null ? 'جارٍ الحذف…' : 'تأكيد الحذف'}</button></div></div></div>}
     </div>
   )
 }

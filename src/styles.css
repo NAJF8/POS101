@@ -1704,6 +1704,8 @@ input, textarea, select { cursor: text; }
 .expense-delete-dialog dt { color: var(--muted); }
 .expense-delete-dialog dd { margin: 0; color: var(--coffee); font-weight: 700; overflow-wrap: anywhere; }
 .expense-success { margin-bottom: 12px; padding: 10px 14px; border: 1px solid #cfe4cf; border-radius: 10px; background: #eef8ee; color: #236248; font-weight: 700; }
+.expense-success::before { content: '✓ '; color: #1d7a42; font-weight: 900; }
+.expense-error { margin: 10px 0; padding: 10px 14px; border: 1px solid #e5bcbc; border-radius: 10px; background: #fff0f0; color: #9d1f1f; font-weight: 700; }
 
 @media (max-width: 700px) {
   .expenses-container { width: min(100% - 24px, 1100px); padding-top: 18px; }

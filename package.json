@@ -71,6 +71,7 @@
     ,"test:money-out-classifier": "node scripts/money-out-classifier-regression.mjs"
     ,"test:expense-duplication": "node scripts/expense-duplication-regression.mjs"
     ,"test:auto-close-protection": "node scripts/auto-close-protection-regression.mjs"
+    ,"test:expense-success-feedback": "node scripts/expense-success-feedback-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
