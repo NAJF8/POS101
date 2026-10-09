@@ -140,7 +140,28 @@ export const buildCashboxReportRows = ({ operationalDays = [], settlements = [],
     const opening = isKnownMoney(dayOpening) ? Number(dayOpening) : isKnownMoney(settlementOpening) ? Number(settlementOpening) : null
     const daySales = rowsForDay(sales, day)
     const summary = calculateCashboxDay({ openingCashBalance: opening, actualCash: effective?.effectiveActualCash, sales: daySales, expenses: rowsForDay(expenses, day), transactions: rowsForDay(transactions, day) })
-    return { day, settlement, effective, ...summary, salesRecordsMatched: summary.orderCount, salesCashTotal: summary.cashSales, salesElectronicTotal: summary.electronicSales, drawerExpenses: summary.cashboxExpenses, drawerWithdrawals: summary.cashboxWithdrawals, excludedVoidedSalesCount: daySales.filter(isExplicitVoidedSale).length, excludedCancelledSalesCount: daySales.filter(isExplicitCancelledSale).length, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
+    const settledExpectedCash = settlement?.expectedCash ?? effective?.expectedCash
+    const hasSettledExpectedCash = summary.openingCashKnown && Number.isFinite(Number(settledExpectedCash)) && Number(settledExpectedCash) >= 0
+    const settledSummary = hasSettledExpectedCash && Number(summary.expectedClosingCash) !== Number(settledExpectedCash)
+      ? (() => {
+          const expected = Number(settledExpectedCash)
+          const adjustedCashboxWithdrawals = Math.max(0, Number(summary.cashboxWithdrawals || 0) + Number(summary.expectedClosingCash || 0) - expected)
+          const adjustedWithdrawals = adjustedCashboxWithdrawals + Number(summary.managementWithdrawals || 0)
+          const adjustedMovement = expected - Number(summary.openingCashBalance || 0)
+          return {
+            ...summary,
+            cashboxWithdrawals: adjustedCashboxWithdrawals,
+            drawerWithdrawals: adjustedCashboxWithdrawals,
+            withdrawals: adjustedWithdrawals,
+            dailyCashMovement: adjustedMovement,
+            expectedCash: expected,
+            expectedClosingCash: expected,
+            finalAfterAllSettlements: expected,
+            ...calculateEndDayCashAnalysis({ openingCashBalance: summary.openingCashBalance, cashSales: summary.cashSales, expenses: summary.expenses, withdrawals: adjustedWithdrawals, expectedCash: expected, actualCash: effective?.effectiveActualCash }),
+          }
+        })()
+      : summary
+    return { day, settlement, effective, ...settledSummary, salesRecordsMatched: settledSummary.orderCount, salesCashTotal: settledSummary.cashSales, salesElectronicTotal: settledSummary.electronicSales, drawerExpenses: settledSummary.cashboxExpenses, drawerWithdrawals: settledSummary.cashboxWithdrawals, excludedVoidedSalesCount: daySales.filter(isExplicitVoidedSale).length, excludedCancelledSalesCount: daySales.filter(isExplicitCancelledSale).length, rolloverCash: effective ? effective.effectiveActualCash : null, hasSettlement: Boolean(settlement) }
   })
 }
 
