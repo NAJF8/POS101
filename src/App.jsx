@@ -176,6 +176,17 @@ export default function App() {
         readCentralSettlementCorrections(),
       ])
       if (!active) return
+      window.__POS101_CASHBOX_PIPELINE = {
+        rawSalesCount: salesResult.status === 'fulfilled' ? salesResult.value.length : null,
+        normalizedSalesCount: salesResult.status === 'fulfilled' ? salesResult.value.length : null,
+        operationalDaysCount: daysResult.status === 'fulfilled' ? daysResult.value.length : null,
+        transactionsCount: transactionsResult.status === 'fulfilled' ? transactionsResult.value.length : null,
+        settlementsCount: settlementsResult.status === 'fulfilled' ? settlementsResult.value.length : null,
+        correctionsCount: correctionsResult.status === 'fulfilled' ? correctionsResult.value.length : null,
+        errors: [salesResult, daysResult, transactionsResult, settlementsResult, correctionsResult]
+          .map(result => result.status === 'rejected' ? result.reason?.code || result.reason?.message || 'READ_FAILED' : null)
+          .filter(Boolean),
+      }
       if (salesResult.status === 'fulfilled') setCentralSales(salesResult.value)
       else console.error('CENTRAL_SALES_STATE_BINDING_ERROR', salesResult.reason)
       if (daysResult.status === 'fulfilled') setCentralOperationalDays(Array.isArray(daysResult.value) ? daysResult.value : [])
@@ -188,7 +199,8 @@ export default function App() {
       else console.error('CENTRAL_CORRECTIONS_STATE_BINDING_ERROR', correctionsResult.reason)
     }
     void bindReadOnlyCashboxState()
-    return () => { active = false }
+    const retry = window.setTimeout(() => { void bindReadOnlyCashboxState() }, 1500)
+    return () => { active = false; window.clearTimeout(retry) }
   }, [centralAuthUser?.uid])
 
   useEffect(() => {
