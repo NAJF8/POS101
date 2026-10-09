@@ -9,13 +9,18 @@ import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { BUILD_SHA } from '../services/versionUpdate.js'
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date())
+const debugDate = () => {
+  const value = new URLSearchParams(window.location.search).get('cashbox-debug-date') || ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''
+}
 const safeMoney = value => formatMoney(toMoneyNumber(value, 0))
 const actualCashMissingLabel = row => row?.day?.status === 'closed' ? 'غير مسجل في هذا التقرير القديم' : 'بانتظار إدخال الكاش الفعلي'
 const optionalMoney = (value, missingLabel = 'بانتظار إدخال الكاش الفعلي') => hasActualCash(value) ? safeMoney(value) : missingLabel
 
 export default function FinancialCenter({ transactions = [], centralSales = [], cashboxSales = [], operationalDays = [], operationalDay = null, settlements = [], settlementCorrections = [], onSaveTransaction, onUpdateTransaction, onVoidTransaction, onSaveCashCount, onSaveSettlementCorrection, onNavigate, adminDiagnostic = false }) {
-  const [from, setFrom] = useState(today())
-  const [to, setTo] = useState(today())
+  const initialDate = debugDate() || today()
+  const [from, setFrom] = useState(initialDate)
+  const [to, setTo] = useState(initialDate)
   const [txType, setTxType] = useState('deposit')
   const [txAmount, setTxAmount] = useState('')
   const [txReason, setTxReason] = useState('')
