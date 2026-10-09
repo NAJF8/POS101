@@ -391,17 +391,19 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   }
 
   const printReport = async (format) => {
-    try { await onBeforePrint?.() } catch (error) { console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
-    const paper = document.querySelector('.captain-report-view .report-paper, .report-view-container .report-paper')
-    if (!paper) return
-
-    // Opening the window in the click handler avoids popup blocking.  Copying
-    // already-rendered markup preserves React's escaped local data safely.
+    // Open synchronously in the click handler so a later authenticated sync
+    // cannot make the browser classify the print window as a popup.
     const printWindow = window.open('', '_blank')
     if (!printWindow) {
       window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
       return
     }
+    try { await onBeforePrint?.() } catch (error) { printWindow.close(); console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
+    const paper = document.querySelector('.captain-report-view .report-paper, .report-view-container .report-paper')
+    if (!paper) { printWindow.close(); return }
+
+    // Copy already-rendered markup after sync; React has escaped the local
+    // data safely and the isolated document excludes the POS shell.
     const writePrintDocument = () => {
       printWindow.document.open()
       const isA4 = format === 'a4'
