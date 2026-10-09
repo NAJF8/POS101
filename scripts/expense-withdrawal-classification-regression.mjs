@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { buildEndDayShiftReport, buildShiftReport } from '../src/services/shiftReports.js'
-import { normalizeCashOutflowReport } from '../src/services/cashOutflowReport.js'
+import { normalizeCashOutflowReport, summarizeCashOutflowReport } from '../src/services/cashOutflowReport.js'
 import { calculateSettlement } from '../src/services/financialCenter.js'
-import { isRegularExpense, isWithdrawalExpense, normalizeExpense } from '../src/services/expenseReporting.js'
+import { isActiveExpense, isRegularExpense, isWithdrawalExpense, normalizeExpense } from '../src/services/expenseReporting.js'
 
 const expenseSource = fs.readFileSync(new URL('../src/components/Expenses.jsx', import.meta.url), 'utf8')
 const syncSource = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
@@ -18,6 +18,7 @@ assert.equal(derived.inferredWithdrawal, true)
 assert.equal(isWithdrawalExpense(derived), true)
 assert.equal(isRegularExpense(derived), false)
 console.log('OLD_EXPENSE_WITH_CATEGORY_WITHDRAWAL_DERIVED_AS_WITHDRAWAL=PASS')
+assert.equal(isActiveExpense(derived), true)
 
 const withdrawalTransaction = {
   id: 'expense-new-withdrawal', type: 'withdrawal', transactionType: 'withdrawal', amount: 30000, linkedExpenseId: 'new-withdrawal',
@@ -42,6 +43,18 @@ assert.equal(outflows[0].employeeName, 'علي')
 console.log('EMPLOYEE_WITHDRAWAL_APPEARS_IN_WITHDRAWALS_REPORT=PASS')
 console.log('WITHDRAWALS_SECTION_NO_LONGER_EMPTY_WHEN_WITHDRAWALS_EXIST=PASS')
 
+const normalExpense = { id: 'shop-expense', amount: 12000, category: 'مواد', type: 'expense', description: 'مواد تنظيف', fundingSource: 'cashbox', businessDate: legacy.businessDate, status: 'active' }
+const splitSummary = summarizeCashOutflowReport(normalizeCashOutflowReport({ expenses: [normalExpense, legacy], transactions: [] }))
+assert.equal(splitSummary.expenses.length, 1)
+assert.equal(splitSummary.withdrawals.length, 1)
+assert.equal(splitSummary.normalBusinessExpensesTotal, 12000)
+assert.equal(splitSummary.withdrawalsTotal, 50000)
+assert.equal(splitSummary.cashOutTotal, 62000)
+console.log('WITHDRAWALS_SPLIT_IN_REPORTS=PASS')
+console.log('SHOP_EXPENSES_REPORT_EXCLUDES_WITHDRAWALS=PASS')
+console.log('WITHDRAWALS_REPORT_INCLUDES_EMPLOYEE_WITHDRAWALS=PASS')
+console.log('CASH_OUT_TOTAL_EQUALS_EXPENSES_PLUS_WITHDRAWALS=PASS')
+
 const morning = buildShiftReport({ expenses: [legacy], businessDate: legacy.businessDate, operationalDayId: 'day-1', shiftType: 'morning' })
 const evening = buildShiftReport({ expenses: [newWithdrawal], transactions: [withdrawalTransaction], businessDate: legacy.businessDate, operationalDayId: 'day-1', shiftType: 'evening' })
 assert.equal(morning.withdrawalsTotal, 50000)
@@ -59,6 +72,14 @@ console.log('END_DAY_WITHDRAWALS_TOTAL=PASS')
 
 assert.match(expenseSource, /سحب موظف \/ كاشير من الصندوق/)
 assert.match(expenseSource, /transactionType: isWithdrawal \? 'withdrawal' : 'expense'/)
+assert.match(expenseSource, /expenses\.filter\(isActiveExpense\)/)
+assert.match(expenseSource, /isWithdrawalExpense\(expense\) \? 'سحب موظف \/ كاشير من الصندوق'/)
+assert.match(expenseSource, /className="edit-expense"/)
+assert.match(expenseSource, /className="delete-expense"/)
+assert.match(fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8'), /مصاريف المحل/)
+assert.match(fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8'), /السحوبات/)
+console.log('WITHDRAWALS_VISIBLE_IN_EXPENSES_LIST=PASS')
+console.log('WITHDRAWALS_EDITABLE_FROM_EXPENSES_LIST=PASS')
 assert.match(expenseSource, /pos101-expenses-updated/)
 assert.match(syncSource, /type: desiredTransactionType/)
 assert.match(syncSource, /CASHBOX_EXPENSE_READBACK_FAILED/)

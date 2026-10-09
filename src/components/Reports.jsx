@@ -12,7 +12,7 @@ import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../s
 import { buildMaterialsReport } from '../services/materialsReport.js'
 import { buildEmployeeReport, filterEmployeeSummaries } from '../services/employeeReport.js'
 import { buildCaptainReport, filterCaptainCandidates } from '../services/captainReport.js'
-import { filterCashOutflowReport, normalizeCashOutflowReport, sumCashOutflowReport } from '../services/cashOutflowReport.js'
+import { filterCashOutflowReport, normalizeCashOutflowReport, summarizeCashOutflowReport, sumCashOutflowReport } from '../services/cashOutflowReport.js'
 import { buildManagementPaymentsReport } from '../services/managementPaymentsReport.js'
 import { buildDeliveryDiscountReport, deliverySourceLabel } from '../services/deliveryDiscountReport.js'
 import { buildEndDayShiftReport, buildShiftReport } from '../services/shiftReports.js'
@@ -890,27 +890,22 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         <table className="print-table report-summary materials-grand-total" data-testid="materials-grand-total"><tbody><tr className="summary-highlight"><td>الإجمالي العام</td><td>{formatNumber(materials.grandQuantity)}</td><td>{format(materials.grandTotal)}</td></tr></tbody></table>
       </>
     } else if (reportType === 'expenses') {
-      title = 'تقرير المصاريف'
+      title = 'تقرير المصاريف والسحوبات'
+      const cashOutflowSummary = summarizeCashOutflowReport(filteredCashOutflows)
+      const renderRows = rows => rows.map((row, idx) => (
+        <tr key={`${row.source}:${row.id}:${idx}`}>
+          <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || 'غير محدد'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.sourceLabel || (row.source === 'expense' ? 'المصاريف' : row.source || '—')}</td><td>{row.shiftLabel || (row.shiftType === 'morning' ? 'صباحي' : row.shiftType === 'evening' ? 'مسائي' : 'غير محدد')}</td>
+        </tr>
+      ))
+      const renderSection = (heading, rows, emptyLabel) => <section className="report-subsection"><h3>{heading}</h3><table className="print-table" data-testid={heading === 'السحوبات' ? 'withdrawals-report' : 'shop-expenses-report'}><thead><tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>الموظف / الكاشير</th><th>الكود</th><th>المبلغ</th><th>المصدر</th><th>الشفت</th></tr></thead><tbody>{rows.length ? renderRows(rows) : <tr><td colSpan="8">{emptyLabel}</td></tr>}<tr style={{ fontWeight: 'bold' }}><td colSpan="6">إجمالي {heading}</td><td>{format(sumCashOutflowReport(rows))}</td><td>—</td></tr></tbody></table></section>
       content = (
         <>
         <div className="reports-range-toolbar non-printable" aria-label="فلتر نوع حركة المصاريف">
           <label>نوع الحركة<select aria-label="نوع الحركة" value={expenseTypeFilter} onChange={event => setExpenseTypeFilter(event.target.value)}><option value="all">الكل</option><option value="expenses">مصاريف</option><option value="salary">رواتب</option><option value="withdrawals">سحوبات</option><option value="other">أخرى</option></select></label>
         </div>
-        <table className="print-table" data-testid="cash-outflow-report">
-          <thead><tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>الموظف / الكاشير</th><th>الكود</th><th>المبلغ</th><th>المصدر</th><th>الشفت</th></tr></thead>
-          <tbody>
-            {filteredCashOutflows.map((row, idx) => (
-              <tr key={`${row.source}:${row.id}`}>
-                <td>{row.businessDate || '—'}</td><td>{row.typeLabel}</td><td>{row.description || row.notes || '—'}</td><td>{row.employeeName || 'غير محدد'}</td><td>{row.employeeCode || '—'}</td><td>{format(row.amount)}</td><td>{row.sourceLabel || (row.source === 'expense' ? 'المصاريف' : row.source || '—')}</td><td>{row.shiftLabel || (row.shiftType === 'morning' ? 'صباحي' : row.shiftType === 'evening' ? 'مسائي' : 'غير محدد')}</td>
-              </tr>
-            ))}
-            {filteredCashOutflows.length === 0 && <tr><td colSpan="8">لا توجد مصاريف أو سحوبات نقدية مسجلة</td></tr>}
-            <tr style={{ fontWeight: 'bold' }}>
-              <td colSpan="6">إجمالي التدفقات النقدية الخارجة</td>
-              <td>{format(sumCashOutflowReport(filteredCashOutflows))}</td><td>—</td>
-            </tr>
-          </tbody>
-        </table>
+        {expenseTypeFilter !== 'withdrawals' && renderSection('مصاريف المحل', cashOutflowSummary.expenses, 'لا توجد مصاريف محل ضمن الفترة المحددة')}
+        {expenseTypeFilter === 'all' || expenseTypeFilter === 'withdrawals' ? renderSection('السحوبات', cashOutflowSummary.withdrawals, 'لا توجد سحوبات ضمن الفترة المحددة') : null}
+        <table className="print-table report-summary" data-testid="cash-outflow-summary"><tbody><tr><td>مصاريف المحل</td><td>{format(cashOutflowSummary.normalBusinessExpensesTotal)}</td></tr><tr><td>السحوبات</td><td>{format(cashOutflowSummary.withdrawalsTotal)}</td></tr><tr className="summary-highlight"><td>إجمالي الخارج من الصندوق = المصاريف + السحوبات</td><td>{format(cashOutflowSummary.cashOutTotal)}</td></tr></tbody></table>
         </>
       )
     } else if (reportType === 'management') {

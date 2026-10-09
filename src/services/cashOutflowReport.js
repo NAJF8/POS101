@@ -64,3 +64,16 @@ export const filterCashOutflowReport = (rows, from, to, type = 'all') => (Array.
   return true
 })
 export const sumCashOutflowReport = rows => (Array.isArray(rows) ? rows : []).reduce((sum, row) => sum + amount(row.amount), 0)
+export const splitCashOutflowReport = rows => {
+  const list = Array.isArray(rows) ? rows : []
+  return {
+    expenses: list.filter(row => !String(row.typeLabel || '').startsWith('سحوبات')),
+    withdrawals: list.filter(row => String(row.typeLabel || '').startsWith('سحوبات')),
+  }
+}
+export const summarizeCashOutflowReport = rows => {
+  const split = splitCashOutflowReport(rows)
+  const normalBusinessExpensesTotal = sumCashOutflowReport(split.expenses)
+  const withdrawalsTotal = sumCashOutflowReport(split.withdrawals)
+  return { ...split, normalBusinessExpensesTotal, withdrawalsTotal, cashOutTotal: normalBusinessExpensesTotal + withdrawalsTotal }
+}
