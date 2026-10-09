@@ -2180,9 +2180,12 @@ export const readCentralExpensesForReports = async ({ includeAllLocal = false, p
     const operationalDayId = String(value?.operationalDayId || value?.operational_day_id || value?.shiftId || value?.shift_id || '').trim()
     const mappedBusinessDate = operationalDayDates[operationalDayId]
     const explicitBusinessDate = normalizeDateKey(value?.businessDate || value?.business_date || value?.shiftBusinessDate)
+    const savedDateFallback = normalizeDateKey(value?.savedDate || value?.localDate || value?.dateKey || value?.reportDate || value?.date)
     const valueWithFallbackDate = explicitBusinessDate
       ? { ...value, businessDate: explicitBusinessDate }
-      : (mappedBusinessDate ? { ...value, businessDate: mappedBusinessDate } : value)
+      : savedDateFallback
+        ? { ...value, businessDate: savedDateFallback }
+        : (mappedBusinessDate ? { ...value, businessDate: mappedBusinessDate } : value)
     return normalizeExpense(valueWithFallbackDate, { operationalDayDates })
   }
   const centralExpenses = expensesSnapshot.exists()
