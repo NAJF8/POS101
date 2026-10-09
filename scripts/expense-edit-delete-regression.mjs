@@ -10,7 +10,7 @@ const withdrawalSource = syncSource.slice(syncSource.indexOf('export const saveC
 
 assert.equal(withdrawalSource.includes('CASHBOX_INSUFFICIENT_BALANCE'), false)
 assert.equal(withdrawalSource.includes('الرصيد غير كافي'), false)
-assert.equal(expenseSource.includes("recordType: 'expense', type: 'expense'"), true)
+assert.equal(expenseSource.includes("recordType: isWithdrawal ? 'withdrawal' : 'expense'"), true)
 assert.equal(expenseSource.includes('saveCentralExpenseWithCashbox'), true)
 assert.equal(expenseSource.includes('saveCashboxTransaction'), false)
 assert.equal(expenseSource.includes('alert('), false)
