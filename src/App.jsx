@@ -663,7 +663,7 @@ export default function App() {
   const handleEndOperationalDay = useCallback(async actualCash => {
     setOperationalDayError('')
     try {
-      const result = await settleAndEndOperationalDay(operationalDay, { actualCash, openOrderCount: openOrdersCount, endedBy: { name: session?.name || session?.shiftName || '' }, explicitUserAction: true, closeSource: 'manual_end_day', closeReason: 'user_confirmed_end_day' })
+      const result = await settleAndEndOperationalDay(operationalDay, { actualCash, openOrderCount: openOrdersCount, endedBy: { name: session?.name || session?.shiftName || '' }, explicitUserAction: true, closeSource: 'manual_end_day', closeReason: 'manual-confirmed' })
       const reopened = await readOpenOperationalDay()
       setOperationalDay(result.day || reopened || { ...operationalDay, status: 'closed' })
       setFreshSettlementPreview(null)

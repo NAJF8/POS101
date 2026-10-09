@@ -1120,8 +1120,12 @@ export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, 
       id,
       operationalDayId: id,
       businessDate: localBusinessDate(now),
-      startedAt: now,
       startedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
+      startSource: 'manual_start_day',
+      startedByUid: user.uid,
+      startedByRole: user?.role || user?.scope || '',
+      startedByDeviceId: getDeviceId(),
+      startedAt: now,
       openedAt: now,
       openedBy: { uid: user.uid, name: startedBy.name || '', email: user.email || '' },
       openingCashBalance: opening,
@@ -1143,8 +1147,11 @@ export const startOperationalDay = async ({ startedBy = {}, openingCashBalance, 
   const day = normalizeOperationalDay(transaction.snapshot.val())
   if (!day) throw Object.assign(new Error('تعذر إنشاء اليوم التشغيلي المركزي.'), { code: 'CENTRAL_DAY_START_FAILED' })
   let legacyBack = null
+  const startAuditId = `audit-start-${safeKey(day.id)}-${now}`
+  const startAudit = financialAuditPayload({ id: startAuditId, user, action: 'start operational day', entityType: 'operational_day', entityId: day.id, after: day, reason: 'manual_start_day', businessDate: day.businessDate })
   try {
     await set(ref(db, `pos101_operational_days/${day.id}`), day)
+    await set(financialPath(`${auditPath}/${startAuditId}`), startAudit)
     legacyBack = await get(ref(db, `pos101_operational_days/${day.id}`))
   } catch (error) {
     if (!isCentralAdminUser(user)) throw error
@@ -2566,7 +2573,11 @@ const settlementCorrectionsPath = 'pos101_settlement_corrections'
 const countsPath = 'pos101_cashbox_counts'
 const safeKey = value => String(value || '').replace(/[.#$\[\]/]/g, '_')
 const settlementKey = operationalDayId => `settlement-${safeKey(operationalDayId)}`
-const financialAuditPayload = ({ id, user, action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => ({ id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', businessDate, timestamp: Date.now(), before, after, reason })
+const financialAuditPayload = ({ id, user, action, entityType, entityId, before = null, after = null, reason = '', businessDate = '' }) => {
+  const createdAt = Date.now()
+  const role = user?.role || user?.scope || user?.claims?.role || user?.claims?.scope || ''
+  return { id, action, entityType, entityId, userUid: user.uid, userName: user.displayName || user.email || '', actor: user.displayName || user.email || user.uid, actorUid: user.uid, role, deviceId: getDeviceId(), businessDate, timestamp: createdAt, createdAt, before, after, reason }
+}
 const endDayLog = (event, details = {}) => { if (typeof console !== 'undefined') console.info(event, details) }
 const assertJsonNumbers = (value, path = 'payload') => {
   if (value === undefined || typeof value === 'function' || typeof value === 'symbol') throw new Error(`${path} يحتوي قيمة غير صالحة.`)
@@ -2658,7 +2669,7 @@ const centralSettlementInputs = async operationalDay => {
 export const readFreshSettlementPreview = async operationalDay => calculateSettlement({ ...(await centralSettlementInputs(operationalDay)), openingCashBalance: operationalDay?.openingCashBalance })
  
 
-export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {}, explicitUserAction = false, closeSource = 'manual_end_day', closeReason = 'user_confirmed_end_day' } = {}) => {
+export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {}, explicitUserAction = false, closeSource = 'manual_end_day', closeReason = 'manual-confirmed' } = {}) => {
   if (explicitUserAction !== true || closeSource !== 'manual_end_day' || !ALLOWED_DAY_CLOSE_SOURCES.has(closeSource)) {
     throw Object.assign(new Error('إغلاق اليوم التشغيلي يتطلب تأكيد المستخدم من شاشة إنهاء اليوم.'), { code: 'EXPLICIT_DAY_CLOSE_REQUIRED' })
   }
@@ -2731,9 +2742,12 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const cashbox = existingCashbox || (expectedCash > 0 ? { id: cashboxId, type: 'settlement', amount: expectedCash, businessDate: remoteDay.businessDate, operationalDayId: id, source: 'settlement', sourceRefId: key, reason: 'تسوية إغلاق اليوم', status: 'active', createdAt: settlement.createdAt || Date.now(), createdByUid: settlement.createdByUid || user.uid, createdByName: settlement.createdByName || endedBy.name || user.displayName || user.email || '', balanceBefore: calculateCashboxBalance(inputs.transactions), balanceAfter: calculateCashboxBalance(inputs.transactions) + expectedCash } : null)
   const audit = existingAudit || financialAuditPayload({ id: auditId, user, action: 'settlement', entityType: 'settlement', entityId: key, after: settlement, businessDate: remoteDay.businessDate })
   const closedAt = settlement.createdAt || Date.now()
-  const closedDay = { ...remoteDay, status: 'closed', endedAt: closedAt, endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closedAt, closedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closeSource, closeReason, closeAutoDetected: false, updatedBy: user.uid, deviceId: getDeviceId(), settlementId: key, closeSummary: { settlementId: key, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status }, updatedAt: closedAt, version: Number(remoteDay.version || 0) + 1 }
+  const closeSnapshot = { businessDate: remoteDay.businessDate, shift: remoteDay.shift || remoteDay.shiftType || '', salesCount: inputs.sales.length, totalSales: Number(settlement.sales || 0), cashSales: Number(settlement.cashSales || 0), electronicSales: Number(settlement.electronicSales || 0), expenses: Number(settlement.expenses || 0), withdrawals: Number(settlement.withdrawals || 0), expectedCash: Number(settlement.expectedCash), actualCash: Number(settlement.actualCash), difference: Number(settlement.difference), pendingSaleWrite: Number(preClose.pendingSaleWriteCount || 0), pendingVoidUpdate: Number(preClose.pendingVoidUpdateCount || 0), activePendingQueue: Number(preClose.pendingQueue || 0), openOrdersCount: Number(openOrderCount) || 0 }
+  const closedDay = { ...remoteDay, status: 'closed', endedAt: closedAt, endedBy: { uid: settlement.createdByUid || user.uid, name: settlement.createdByName || endedBy.name || '', email: user.email || '' }, closedAt, closedBy: { uid: settlement.createdByUid || user.uid, name: endedBy.name || settlement.createdByName || '', email: user.email || '' }, closedByUid: settlement.createdByUid || user.uid, closedByRole: user?.role || user?.scope || '', closedByDeviceId: getDeviceId(), closeSource, closeReason, closeConfirmed: true, closeAutoDetected: false, closeSnapshot, updatedBy: user.uid, deviceId: getDeviceId(), settlementId: key, closeSummary: { settlementId: key, expectedCash: settlement.expectedCash, actualCash: settlement.actualCash, difference: settlement.difference, status: settlement.status }, updatedAt: closedAt, version: Number(remoteDay.version || 0) + 1 }
   audit.closeSource = closeSource
   audit.closeReason = closeReason
+  audit.closeConfirmed = true
+  audit.closeSnapshot = closeSnapshot
   audit.closeAutoDetected = false
   audit.updatedBy = user.uid
   audit.deviceId = closedDay.deviceId

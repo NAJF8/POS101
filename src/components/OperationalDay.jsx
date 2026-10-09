@@ -85,9 +85,8 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
   }
   const end = async () => {
     if (busy) return
-    if (preCloseGuard?.allowed === false) return
+    if (preCloseGuard?.allowed === false || actualCash === '') return
     setBusy(true)
-    if (actualCash === '') return
     try { await onEnd(actualCash); setEndOpen(false); setActualCash('') } finally { setBusy(false) }
   }
   const openEnd = async () => {
@@ -219,7 +218,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
       </div>
       {forgotten
         ? <div className="operational-day-warning" role="status">
-            <span>اليوم السابق ما زال مفتوحاً</span>
+            <span>يوجد يوم تشغيلي مفتوح بتاريخ {day.businessDate} هل تريد الاستمرار عليه أم إنهاءه؟</span>
             <button type="button" disabled={preCloseGuard?.loading || preCloseGuard?.allowed === false} onClick={openEnd}>إنهاء اليوم</button>
             <button type="button" onClick={openOpeningAdjust}>تعديل رصيد الافتتاح</button>
             {canViewDiagnostics && <button type="button" onClick={openDiagnostic}>فحص المزامنة</button>}
@@ -314,7 +313,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
         : <p role="status">لا يوجد رصيد إغلاق فعلي محفوظ لليوم السابق.</p>}
       <label>رصيد بداية اليوم<input autoFocus type="number" min="0" value={openingCash} onChange={event => setOpeningCash(event.target.value)} placeholder="أدخل رصيد البداية" /></label>
       {openingSuggestion?.effectiveActualClosingCash != null && Number(openingCash) !== Number(openingSuggestion.effectiveActualClosingCash) && <label>ملاحظة تعديل الرصيد<textarea value={openingNote} onChange={event => setOpeningNote(event.target.value)} placeholder="اختياري" /></label>}
-      <div className="dialog-actions"><button className="secondary-action" type="button" disabled={startBusy} onClick={() => setStartOpen(false)}>إلغاء</button><button className="primary-action" type="button" disabled={startBusy || openingCash === ''} onClick={confirmStart}>{startBusy ? 'جارٍ الحفظ…' : 'تأكيد رصيد البداية'}</button></div>
+      <div className="dialog-actions"><button className="secondary-action" type="button" disabled={startBusy} onClick={() => setStartOpen(false)}>إلغاء</button><button className="primary-action" type="button" disabled={startBusy || openingCash === ''} onClick={confirmStart}>{startBusy ? 'جارٍ الحفظ…' : 'بدء اليوم'}</button></div>
     </div></div>}
 
     {endOpen && <div className="overlay">
@@ -323,8 +322,8 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           <header className="end-day-modal-header">
             <div>
               <span className="end-day-eyebrow">التسوية المالية</span>
-              <h2 id="end-day-title">إنهاء اليوم التشغيلي</h2>
-              <p>راجع التسوية المالية قبل إغلاق اليوم</p>
+              <h2 id="end-day-title">تأكيد إنهاء اليوم</h2>
+              <p>راجع ملخص اليوم ثم أكد الإغلاق</p>
             </div>
             <div className="end-day-meta" aria-label="بيانات اليوم التشغيلي">
               <span><small>تاريخ اليوم التشغيلي</small><b dir="ltr">{day.businessDate}</b></span>
@@ -387,7 +386,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
         </div>
         <div className="dialog-actions end-day-action-row">
           <button className="secondary-action" type="button" disabled={busy} onClick={() => setEndOpen(false)}>رجوع</button>
-          <button className={`end-day-close-button ${shortageNeedsConfirmation ? 'is-shortage' : ''}`} type="button" disabled={closeDisabled} aria-disabled={closeDisabled || preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد التسوية وإنهاء اليوم'}</button>
+          <button className={`end-day-close-button ${shortageNeedsConfirmation ? 'is-shortage' : ''}`} type="button" disabled={closeDisabled} aria-disabled={closeDisabled || preCloseGuard?.allowed === false} onClick={end}>{busy ? 'جارٍ الإنهاء…' : 'تأكيد إنهاء اليوم'}</button>
         </div>
       </div>
     </div>}

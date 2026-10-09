@@ -72,6 +72,10 @@
     ,"test:expense-duplication": "node scripts/expense-duplication-regression.mjs"
     ,"test:auto-close-protection": "node scripts/auto-close-protection-regression.mjs"
     ,"test:expense-success-feedback": "node scripts/expense-success-feedback-regression.mjs"
+    ,"test:header-pending-diagnostic": "node scripts/header-pending-diagnostic-regression.mjs"
+    ,"test:expense-edit-delete": "node scripts/expense-edit-delete-regression.mjs"
+    ,"test:print-white-screen": "node scripts/print-white-screen-regression.mjs"
+    ,"test:ui-hardening": "node scripts/ui-hardening-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
