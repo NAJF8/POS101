@@ -1759,6 +1759,46 @@ export const subscribeCentralSales = callback => {
   return () => { active = false; stop() }
 }
 
+const maskDiagnosticUid = uid => {
+  const value = String(uid || '')
+  return value.length > 8 ? `${value.slice(0, 4)}…${value.slice(-4)}` : value ? 'present' : ''
+}
+
+const diagnosticRead = async path => {
+  try {
+    const snapshot = await get(ref(db, path))
+    const value = snapshot.val()
+    return { path, ok: true, exists: snapshot.exists(), count: snapshot.exists() && value && typeof value === 'object' ? Object.keys(value).length : snapshot.exists() ? 1 : 0 }
+  } catch (error) {
+    return { path, ok: false, exists: false, count: 0, errorCode: error?.code || 'READ_FAILED', error: error?.message || 'READ_FAILED' }
+  }
+}
+
+export const readCashboxReadDiagnostics = async () => {
+  await authReady
+  const user = auth?.currentUser
+  const permission = await canSyncPosSales(user)
+  const [sales, expenses, operationalDays, operationalCurrent, transactions, settlements, corrections] = await Promise.all([
+    diagnosticRead('pos101_sales'),
+    diagnosticRead('pos101_expenses'),
+    diagnosticRead('pos101_operational_days'),
+    diagnosticRead('pos101_operational_day/current'),
+    diagnosticRead(cashboxTransactionsPath),
+    diagnosticRead(settlementPath),
+    diagnosticRead(settlementCorrectionsPath),
+  ])
+  const result = {
+    authReady: Boolean(user?.uid),
+    uidMasked: maskDiagnosticUid(user?.uid),
+    emailAvailable: Boolean(user?.email),
+    authorized: Boolean(permission.allowed),
+    role: permission.role || 'blocked',
+    paths: { sales, expenses, operationalDays, operationalCurrent, transactions, settlements, corrections },
+  }
+  if (typeof window !== 'undefined') window.__POS101_CASHBOX_DIAGNOSTIC = result
+  return result
+}
+
 export const subscribeCentralSalesReadOnly = callback => {
   if (!configured || !db || !isCentralAdminUser(auth?.currentUser)) return () => {}
   return onValue(salesRef(), snapshot => {
