@@ -147,6 +147,7 @@ export default function App() {
   const [staffStatus, setStaffStatus] = useState({ state: 'idle', error: '' })
   const [cashboxTransactions, setCashboxTransactions] = useState([])
   const [settlements, setSettlements] = useState([])
+  const [cashboxDiagnostic, setCashboxDiagnostic] = useState(null)
   const settlementCorrectionListener = useRef(null)
   const pendingTablesListener = useRef(null)
   const [settlementCorrections, setSettlementCorrections] = useState([])
@@ -340,8 +341,10 @@ export default function App() {
       setProductAuthUser(isCentralProductManager(user) ? user : null)
       setSyncLabel(user && isCentralAdminUser(user) ? 'تحديث المبيعات' : user && isCentralCashierUser(user) ? 'مزامنة' : 'المزامنة جاهزة')
       if (new URLSearchParams(window.location.search).has('cashbox-debug')) {
-        void readCashboxReadDiagnostics().catch(error => {
-          window.__POS101_CASHBOX_DIAGNOSTIC = { authReady: false, error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' }
+        void readCashboxReadDiagnostics().then(result => setCashboxDiagnostic(result)).catch(error => {
+          const result = { authReady: false, error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' }
+          setCashboxDiagnostic(result)
+          window.__POS101_CASHBOX_DIAGNOSTIC = result
           console.error('CASHBOX_READ_DIAGNOSTIC_ERROR', error)
         })
       }
@@ -1225,6 +1228,7 @@ export default function App() {
       {(versionStatus === 'deferred' || versionStatus === 'pending') && versionBlocked && <div className="pos101-update-notice" role="status" aria-live="polite">يتوفر تحديث للنظام وسيتم تطبيقه بعد إكمال الطلب الحالي.</div>}
       {saleSyncWarning && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">{saleSyncWarning}</div>}
       {cashierToast && <div className="cashier-success-toast" role="status" aria-live="polite">{cashierToast}</div>}
+      {new URLSearchParams(window.location.search).has('cashbox-debug') && cashboxDiagnostic && <pre data-testid="cashbox-debug" style={{ whiteSpace: 'pre-wrap', direction: 'ltr', textAlign: 'left' }}>{JSON.stringify(cashboxDiagnostic)}</pre>}
       {session && operationalDay?.status === 'closed' && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive">اليوم التشغيلي مغلق. افتح يومًا جديدًا قبل البيع.</div>}
       {session && (
         <Header
