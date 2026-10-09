@@ -859,6 +859,8 @@ export default function App() {
 
   const [pendingPayment, setPendingPayment] = useState(null)
 
+  const activeShift = Boolean(session?.shiftId && (session?.shiftType === 'morning' || session?.shiftType === 'evening'))
+
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o), discountPresets) : o)), [active, discountPresets])
   const addProduct = useCallback(p => {
@@ -947,16 +949,21 @@ export default function App() {
   }, [session, activeOrder, subtotal, activeDiscount, total, requestSalePrint])
 
   const initiateComplete = useCallback(payment => {
-    if (!session || !session.shiftType || !session.shiftId || !activeOrder.items.length || saleInFlight.current) return false
-    if (operationalDay?.status !== 'open') {
-      setOperationalDayError('اليوم التشغيلي مغلق. افتح يومًا جديدًا قبل البيع.')
+    if (!session || !session.shiftType || !session.shiftId) {
+      setOperationalDayError('ابدأ الشفت أولاً')
+      setModal('operational-day-required')
+      return false
+    }
+    if (!activeOrder.items.length || saleInFlight.current) return false
+    if (!operationalDayCentralReady || operationalDay?.status !== 'open') {
+      setOperationalDayError('اليوم التشغيلي مغلق، ابدأ يوم جديد')
       setModal('operational-day-required')
       return false
     }
     setPendingPayment(payment)
     setModal('seller-selection')
     return true
-  }, [session, activeOrder.items.length, operationalDay])
+  }, [session, activeOrder.items.length, operationalDay, operationalDayCentralReady])
 
   const finalizeSale = useCallback(async (sellerName) => {
     if (!session || !session.shiftType || !session.shiftId || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
@@ -1318,12 +1325,37 @@ export default function App() {
     if (currentView === 'backup-recovery' && !backupRecoveryVisible) setCurrentView('dashboard')
   }, [currentView, backupRecoveryVisible])
 
+  const sellingBlocked = !activeShift || !operationalDayCentralReady || operationalDay?.status !== 'open'
+
+  useEffect(() => {
+    const blockReasons = []
+    if (!centralAuthReady) blockReasons.push('AUTH_NOT_READY')
+    if (!centralAuthUser || !isCentralCashierUser(centralAuthUser)) blockReasons.push('AUTHORIZED_POS_USER_MISSING')
+    if (!operationalDayCentralReady) blockReasons.push('CENTRAL_DAY_NOT_READY')
+    if (operationalDay?.status !== 'open') blockReasons.push('CENTRAL_DAY_NOT_OPEN')
+    if (!activeShift) blockReasons.push('ACTIVE_SHIFT_MISSING')
+    const diagnostics = {
+      AUTH_READY: centralAuthReady ? 'PASS' : 'FAIL',
+      AUTHORIZED_POS_USER: centralAuthUser && isCentralCashierUser(centralAuthUser) ? 'PASS' : 'FAIL',
+      CENTRAL_DAY_STATUS: operationalDay?.status || 'unknown',
+      LOCAL_DAY_STATUS: readLocalOperationalDay()?.status || 'unknown',
+      ACTIVE_SHIFT_STATUS: activeShift ? 'active' : 'inactive',
+      SALE_ALLOWED: sellingBlocked ? 'NO' : 'YES',
+      BLOCK_REASON: blockReasons.join(',') || 'NONE',
+      SYNC_STATUS: cashierSyncState.state,
+      CART_LENGTH: activeOrder.items.length,
+      SELL_BUTTON_DISABLED_REASON: activeOrder.items.length ? 'NONE' : 'CART_EMPTY',
+      PRODUCT_GRID_CLICKABLE: sellingBlocked ? 'FAIL' : 'PASS',
+      CART_PANEL_CLICKABLE: sellingBlocked ? 'FAIL' : 'PASS',
+      SELL_BUTTON_CLICKABLE: activeOrder.items.length ? 'PASS' : 'FAIL',
+    }
+    window.__POS101_CASHIER_DIAGNOSTICS__ = diagnostics
+    console.info('POS101_CASHIER_DIAGNOSTICS', diagnostics)
+  }, [activeOrder.items.length, activeShift, centralAuthReady, centralAuthUser, cashierSyncState.state, operationalDay, operationalDayCentralReady, sellingBlocked])
+
   const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
   if (isCentralConfigured() && !centralAuthReady) return null
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
-
-  const activeShift = Boolean(session?.shiftId && (session?.shiftType === 'morning' || session?.shiftType === 'evening'))
-  const sellingBlocked = !activeShift || !operationalDayCentralReady || operationalDay?.status !== 'open'
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
@@ -1388,7 +1420,7 @@ export default function App() {
             onClear={() => setModal('confirm-clear')}
             onPrintMenu={() => setModal('print-menu')}
             onReturn={() => setModal('openOrders')}
-            disabled={sellingBlocked}
+            disabled={false}
             scrollRequest={cartScrollRequest}
           />
           <ProductGrid
@@ -1404,7 +1436,7 @@ export default function App() {
             setActiveOrderIndex={setActive}
             onNewOrder={newOrder}
             session={session}
-            disabled={sellingBlocked}
+            disabled={false}
           />
           {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} onVoidSale={handleVoidSale} canCorrectSaleItems staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
         </div>
