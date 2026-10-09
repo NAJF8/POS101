@@ -1742,10 +1742,10 @@ const readAndMergeAdminSales = async () => {
 
 export const runAdminCentralRefresh = readAndMergeAdminSales
 
-export const subscribeCentralSales = callback => {
+export const subscribeCentralSales = (callback, authenticatedUser = auth?.currentUser) => {
   let active = true
   let stop = () => {}
-  if (!configured || !db || !auth?.currentUser || !active) return () => { active = false }
+  if (!configured || !db || !authenticatedUser || !active) return () => { active = false }
   // subscribeCentralAuth invokes this after Firebase has delivered the user;
   // waiting on the module-level restore promise here can strand the read
   // listener even though auth.currentUser and the RTDB token are ready.

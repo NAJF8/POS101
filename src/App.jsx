@@ -378,7 +378,7 @@ export default function App() {
          if (receivedSales) setCentralSales(receivedSales)
          if (mergedSales) setAdminCentralSales(mergedSales)
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
-      })
+      }, user)
       if (isCentralCashierUser(user)) {
         window.dispatchEvent(new Event('auth-ready'))
       }
