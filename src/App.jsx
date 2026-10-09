@@ -490,6 +490,23 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('cashbox-debug')) return
+    const stateCounts = {
+      centralSales: centralSales.length,
+      centralOperationalDays: centralOperationalDays.length,
+      cashboxTransactions: cashboxTransactions.length,
+      settlements: settlements.length,
+      settlementCorrections: settlementCorrections.length,
+    }
+    window.__POS101_CASHBOX_STATE_COUNTS = stateCounts
+    setCashboxDiagnostic(previous => {
+      if (!previous) return previous
+      if (JSON.stringify(previous.stateCounts) === JSON.stringify(stateCounts)) return previous
+      return { ...previous, stateCounts }
+    })
+  }, [centralSales.length, centralOperationalDays.length, cashboxTransactions.length, settlements.length, settlementCorrections.length])
+
+  useEffect(() => {
     if (!centralAuthUser || !canManageStaff(centralAuthUser, staffAuthorizationRecord)) {
       setStaffStatus({ state: 'idle', error: '' })
       return
