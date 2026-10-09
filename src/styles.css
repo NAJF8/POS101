@@ -1916,6 +1916,33 @@ input, textarea, select { cursor: text; }
   body .receipt-order-number b { font-size: 11pt !important; font-weight: 900 !important; }
   body .receipt-contact { display: none !important; }
   .print-status { display: none !important; }
+
+  /* Reports print in place. Keep the report paper visible while hiding only
+     the POS shell; this avoids navigating to a blank popup document. */
+  body[data-printing-report="true"] { background: #fff !important; color: #000 !important; }
+  body[data-printing-report="true"] > #root > .app-shell { display: block !important; position: static !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
+  body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .reports-container,
+  body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .reports-container .report-view-container,
+  body[data-printing-report="true"] > #root > .app-shell > .admin-central-readonly { display: block !important; }
+  body[data-printing-report="true"] * { visibility: hidden !important; }
+  body[data-printing-report="true"] .report-view-container,
+  body[data-printing-report="true"] .report-view-container * { visibility: visible !important; }
+  body[data-printing-report="true"] .report-view-container { display: block !important; width: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; background: #fff !important; color: #000 !important; }
+  body[data-printing-report="true"] .report-view-header,
+  body[data-printing-report="true"] .employee-report-controls,
+  body[data-printing-report="true"] .reports-range-toolbar,
+  body[data-printing-report="true"] .non-printable { display: none !important; }
+  body[data-printing-report="true"] .report-paper { display: block !important; width: 100% !important; max-width: none !important; min-width: 0 !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; color: #000 !important; }
+  body[data-printing-report="true"] .report-paper-header,
+  body[data-printing-report="true"] .report-paper h2,
+  body[data-printing-report="true"] .report-paper h3,
+  body[data-printing-report="true"] .report-paper p,
+  body[data-printing-report="true"] .report-paper td,
+  body[data-printing-report="true"] .report-paper th { color: #000 !important; }
+  body[data-printing-report="true"][data-print-format="thermal"] .report-paper { width: 70mm !important; max-width: 70mm !important; margin: 0 auto !important; font-size: 9pt !important; line-height: 1.25 !important; }
+  body[data-printing-report="true"][data-print-format="thermal"] .report-paper .report-logo,
+  body[data-printing-report="true"][data-print-format="thermal"] .report-paper .report-paper-footer { display: none !important; }
+  body[data-printing-report="true"] .report-paper img { visibility: visible !important; max-width: 100% !important; }
 }
 .backup-recovery-route { min-height: 100dvh; padding-bottom: clamp(48px, 8vh, 88px); overscroll-behavior: contain; overflow: visible; }
 .backup-recovery-card { margin-top: 24px; overflow: visible; }

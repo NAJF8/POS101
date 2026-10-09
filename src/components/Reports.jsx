@@ -391,46 +391,48 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   }
 
   const printReport = async (format) => {
-    // Open synchronously in the click handler so a later authenticated sync
-    // cannot make the browser classify the print window as a popup.
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      window.alert('تعذر فتح معاينة التقرير. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.')
+    const paper = document.querySelector('.captain-report-view .report-paper, .report-view-container .report-paper')
+    if (!paper) {
+      console.warn('REPORT_PRINT_CONTENT_MISSING')
       return
     }
-    try { await onBeforePrint?.() } catch (error) { printWindow.close(); console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
-    const paper = document.querySelector('.captain-report-view .report-paper, .report-view-container .report-paper')
-    if (!paper) { printWindow.close(); return }
-
-    // Copy already-rendered markup after sync; React has escaped the local
-    // data safely and the isolated document excludes the POS shell.
-    const writePrintDocument = () => {
-      printWindow.document.open()
-      const isA4 = format === 'a4'
-      const isMaterials = reportType === 'materials'
-      const printStyles = isA4 ? a4PrintStyles : (isMaterials ? thermalMaterialsStyles : thermalComprehensiveStyles)
-      printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title></title><style>${printStyles}</style></head><body class="${isA4 ? 'a4-body' : 'thermal-body'}">${paper.outerHTML}</body></html>`)
-      printWindow.document.close()
-
-      const waitForAssetsAndPrint = async () => {
-        const images = [...printWindow.document.images]
-        await Promise.all(images.map(image => {
-          if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
-          return new Promise(resolve => {
-            image.addEventListener('load', () => resolve(image.decode ? image.decode().catch(() => {}) : undefined), { once: true })
-            image.addEventListener('error', resolve, { once: true })
-          })
-        }))
-        await (printWindow.document.fonts?.ready || Promise.resolve())
-        await new Promise(resolve => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
-        printWindow.focus()
-        printWindow.print()
+    try {
+      await onBeforePrint?.()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const images = [...paper.querySelectorAll('img')]
+      await Promise.all(images.map(image => {
+        if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
+        return new Promise(resolve => {
+          image.addEventListener('load', () => resolve(image.decode ? image.decode().catch(() => {}) : undefined), { once: true })
+          image.addEventListener('error', resolve, { once: true })
+        })
+      }))
+      const previousFormat = document.body.dataset.printFormat || ''
+      const previousPrinting = document.body.dataset.printingReport || ''
+      let cleaned = false
+      const cleanup = () => {
+        if (cleaned) return
+        cleaned = true
+        if (previousFormat) document.body.dataset.printFormat = previousFormat
+        else delete document.body.dataset.printFormat
+        if (previousPrinting) document.body.dataset.printingReport = previousPrinting
+        else delete document.body.dataset.printingReport
+        window.removeEventListener('afterprint', cleanup)
       }
-      void waitForAssetsAndPrint()
+      document.body.dataset.printFormat = format === 'a4' ? 'a4' : 'thermal'
+      document.body.dataset.printingReport = 'true'
+      window.addEventListener('afterprint', cleanup, { once: true })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      window.print()
+      // Chromium normally emits afterprint after the dialog closes. The
+      // timeout only prevents a stale print marker if a headless/browser
+      // environment suppresses the dialog event.
+      window.setTimeout(cleanup, 1500)
+    } catch (error) {
+      delete document.body.dataset.printFormat
+      delete document.body.dataset.printingReport
+      console.error('REPORT_PRINT_ERROR', error)
     }
-    // Keep the popup on a standalone document. Navigating it back to the SPA
-    // before printing could replace the copied report with the app shell.
-    writePrintDocument()
   }
 
   const printReportDirect = async () => {
