@@ -411,12 +411,12 @@ export default function App() {
       setCashboxDiagnostic(value)
       window.__POS101_CASHBOX_DIAGNOSTIC = value
     }
-    const timeout = window.setTimeout(() => publish({ status: 'timeout', reason: 'Cashbox Firebase diagnostic exceeded 10 seconds.' }), 10000)
+    const timeout = window.setTimeout(() => publish({ status: 'timeout', reason: 'Cashbox Firebase diagnostic exceeded 12 seconds.' }), 12000)
     void (async () => {
       try {
         publish({ status: 'auth_wait' })
         let user = centralAuth()?.currentUser || null
-        for (let attempt = 0; !user && attempt < 10; attempt += 1) {
+        for (let attempt = 0; !user && attempt < 3; attempt += 1) {
           await new Promise(resolve => window.setTimeout(resolve, 500))
           user = centralAuth()?.currentUser || null
         }
