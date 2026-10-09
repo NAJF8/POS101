@@ -402,6 +402,7 @@ export default function App() {
   useEffect(() => {
     if (!new URLSearchParams(window.location.search).has('cashbox-debug')) return undefined
     let active = true
+    let timeout
     const maskUid = uid => {
       const value = String(uid || '')
       return value.length > 8 ? `${value.slice(0, 4)}…${value.slice(-4)}` : value ? 'present' : ''
@@ -411,7 +412,8 @@ export default function App() {
       setCashboxDiagnostic(value)
       window.__POS101_CASHBOX_DIAGNOSTIC = value
     }
-    const timeout = window.setTimeout(() => publish({ status: 'timeout', reason: 'Cashbox Firebase diagnostic exceeded 12 seconds.' }), 12000)
+    const finish = value => { window.clearTimeout(timeout); publish(value) }
+    timeout = window.setTimeout(() => finish({ status: 'timeout', reason: 'Cashbox Firebase diagnostic exceeded 12 seconds.' }), 12000)
     void (async () => {
       try {
         publish({ status: 'auth_wait' })
@@ -421,7 +423,7 @@ export default function App() {
           user = centralAuth()?.currentUser || null
         }
         if (!user) {
-          publish({ status: 'auth_failed', authReady: false, uidMasked: '', authorized: false, error: 'AUTH_REQUIRED: Firebase auth.currentUser was not ready.' })
+          finish({ status: 'auth_failed', authReady: false, uidMasked: '', authorized: false, error: 'AUTH_REQUIRED: Firebase auth.currentUser was not ready.' })
           return
         }
         publish({ status: 'auth_ready', authReady: true, uidMasked: maskUid(user.uid), emailAvailable: Boolean(user.email) })
@@ -431,12 +433,12 @@ export default function App() {
           new Promise(resolve => window.setTimeout(() => resolve({ status: 'timeout', authReady: true, uidMasked: maskUid(user.uid), error: 'READ_TEST_TIMEOUT' }), 8000)),
         ])
         if (!active) return
-        if (result.status === 'timeout') { publish(result); return }
+        if (result.status === 'timeout') { finish(result); return }
         const paths = result.paths || {}
         const readsOk = [paths.sales, paths.expenses, paths.operationalDays, paths.operationalCurrent, paths.settlements].every(row => row?.ok)
-        publish({ ...result, status: readsOk ? 'success' : 'permission_denied' })
+        finish({ ...result, status: readsOk ? 'success' : 'permission_denied' })
       } catch (error) {
-        publish({ status: 'error', authReady: Boolean(centralAuth()?.currentUser), uidMasked: maskUid(centralAuth()?.currentUser?.uid), error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' })
+        finish({ status: 'error', authReady: Boolean(centralAuth()?.currentUser), uidMasked: maskUid(centralAuth()?.currentUser?.uid), error: error?.message || 'CASHBOX_READ_DIAGNOSTIC_ERROR' })
       }
     })()
     return () => { active = false; window.clearTimeout(timeout) }

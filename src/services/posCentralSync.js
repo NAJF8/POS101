@@ -1751,7 +1751,8 @@ export const subscribeCentralSales = (callback, authenticatedUser = auth?.curren
   // listener even though auth.currentUser and the RTDB token are ready.
   const publish = snapshot => {
     const centralSales = centralValues(snapshot)
-    const merged = mergeCentralSalesLocally(centralSales)
+    let merged = centralSales
+    try { merged = mergeCentralSalesLocally(centralSales) } catch (error) { console.error('CENTRAL_SALES_MERGE_ERROR', error) }
     callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
   }
   stop = onValue(salesRef(), snapshot => {
