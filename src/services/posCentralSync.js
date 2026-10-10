@@ -419,9 +419,10 @@ export const resolvePendingSaleCentralDiagnostic = async (sale, { resolution = '
   return { updated: true, readbackVerified: true, diagnostic: { ...readBack.val(), diagnosticKey: diagnosticKeyFor(sale) } }
 }
 
-export const readCentralPendingSaleDiagnostics = async () => {
+export const readCentralPendingSaleDiagnostics = async ({ includeResolved = false } = {}) => {
   await requireAdminViewer()
-  return pendingDiagnosticValues(await get(pendingSaleDiagnosticsRef()))
+  const rows = pendingDiagnosticValues(await get(pendingSaleDiagnosticsRef()))
+  return includeResolved ? rows : rows.filter(row => row.status !== RESOLVED_DIAGNOSTIC_STATUS)
 }
 
 export const reconcileCentralPendingSaleDiagnostics = async () => {
