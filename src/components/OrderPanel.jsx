@@ -9,7 +9,8 @@ export default function OrderPanel({
   onPrintMenu, onReturn, onSavePending, disabled, scrollRequest
 }) {
   const itemsAreaRef = useRef(null)
-  const subtotal = order.items.reduce((s, i) => s + i.price * i.quantity, 0)
+  const items = Array.isArray(order?.items) ? order.items : []
+  const subtotal = items.reduce((s, i) => s + Number(i?.price || 0) * Number(i?.quantity || 0), 0)
   const discountVal = order.discount?.value || 0
   const total = Math.max(0, subtotal - discountVal)
 
@@ -40,14 +41,16 @@ export default function OrderPanel({
           <span className="col-actions"></span>
         </div>
         <div className="order-items" ref={itemsAreaRef}>
-          {order.items.length === 0 ? (
+          {items.length === 0 ? (
             <div className="empty-cart">
               <Icon name="coffee" size={40} />
               <p>السلة فارغة</p>
             </div>
           ) : (
-            order.items.map((item, index) => {
-              const names = productNames(item)
+            items.map((item, index) => {
+              const names = productNames(item || {})
+              const options = Array.isArray(item?.options) ? item.options : []
+              const additions = Array.isArray(item?.additions) ? item.additions : []
               return <div key={item.lineId} className="cart-item">
                 <div className="i-num">{formatNumber(index + 1)}</div>
                 <div className="i-prod">
@@ -56,7 +59,7 @@ export default function OrderPanel({
                   </div>
                   <div className="i-prod-text">
                     <b>{names.arabic}</b>
-                    {(Array.isArray(item.options) ? item.options : []).map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o?.name || ''}</div>)}
+                    {[...options, ...additions].map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o?.name || ''}</div>)}
                   </div>
                 </div>
                 <div className="i-price">
@@ -69,7 +72,7 @@ export default function OrderPanel({
                   <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={14}/></button>
                 </div>
                 <div className="i-total">
-                  <span>{formatNumber(item.price * item.quantity)}</span>
+                  <span>{formatNumber(Number(item?.price || 0) * Number(item?.quantity || 0))}</span>
                   <small>د.ع</small>
                 </div>
                 <div className="i-actions">
@@ -117,17 +120,17 @@ export default function OrderPanel({
             <Icon name="return" size={20} />
             <span>إرجاع بيع</span>
           </button>
-          <button className="btn-sell" onClick={onContinue} disabled={!order.items.length}>
+          <button className="btn-sell" onClick={onContinue} disabled={!items.length}>
             <Icon name="check" size={20} className="sell-icon" />
             <span>بيع</span>
           </button>
         </div>
 
-        <button className="btn-pending-table" type="button" onClick={onSavePending} disabled={!order.items.length}>
+        <button className="btn-pending-table" type="button" onClick={onSavePending} disabled={!items.length}>
           حفظ كطاولة معلقة
         </button>
 
-        <button className="btn-cancel-order" onClick={onClear} disabled={!order.items.length}>
+        <button className="btn-cancel-order" onClick={onClear} disabled={!items.length}>
           <Icon name="trash" size={18} />
           <span>إلغاء الطلب</span>
         </button>

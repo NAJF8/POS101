@@ -6,6 +6,7 @@ import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatNumber, formatDate, formatTime, formatDateTime } from '../utils.js'
 import { getOpenOrders } from '../services/orderState.js'
+import { asArray, safeNumber } from '../services/cartItem.js'
 const format = formatMoney
 
 /* ── Product Options ── */
@@ -15,21 +16,29 @@ export function ProductOptions({ product, onClose, onAdd }) {
   const [quantity, setQuantity] = React.useState(1)
   const [notes, setNotes] = React.useState('')
 
-  const paid = addons.filter(a => a.paid).length * 500
-  const total = (product.price + (size === 'كبير' ? 1000 : size === 'صغير' ? -500 : 0) + paid) * quantity
-  const toggle = (name, paid) => setAddons(v => v.some(x => x.name === name) ? v.filter(x => x.name !== name) : [...v, { name, paid }])
+  const basePrice = safeNumber(product?.price, Number.NaN)
+  const safeAddons = asArray(addons)
+  const paid = safeAddons.filter(a => a?.paid).length * 500
+  const sizeDelta = size === 'كبير' ? 1000 : size === 'صغير' ? -500 : 0
+  const total = Number.isFinite(basePrice) ? (basePrice + sizeDelta + paid) * quantity : 0
+  const toggle = (name, isPaid) => setAddons(v => {
+    const current = asArray(v)
+    return current.some(x => x?.name === name)
+      ? current.filter(x => x?.name !== name)
+      : [...current, { name, paid: isPaid }]
+  })
 
   return (
     <Dialog onClose={onClose} className="options-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <div className="options-hero">
         <div className="options-product">
-          {product.image ? <img src={product.image} alt="" /> : <span>101</span>}
+          {product?.image ? <img src={product.image} alt="" /> : <span>101</span>}
         </div>
         <div>
-          <p>{product.category}</p>
-          <h2>{productNames(product).arabic}</h2>
-          <span>{format(product.price)}</span>
+          <p>{product?.category || ''}</p>
+          <h2>{productNames(product || {}).arabic}</h2>
+          <span>{format(Number.isFinite(basePrice) ? basePrice : 0)}</span>
         </div>
       </div>
       <section>
@@ -48,7 +57,7 @@ export function ProductOptions({ product, onClose, onAdd }) {
         <div className="addon-list">
           {[['شوت إضافي', true], ['فانيلا', true], ['كراميل', true], ['حليب خالي اللاكتوز', false]].map(([name, isPaid]) => (
             <label className="addon-option" key={name}>
-              <input type="checkbox" checked={addons.some(x => x.name === name)} onChange={() => toggle(name, isPaid)} />
+              <input type="checkbox" checked={safeAddons.some(x => x?.name === name)} onChange={() => toggle(name, isPaid)} />
               <span className="addon-name">{name}</span>
               <b>{isPaid ? '+500 د.ع' : 'مجاني'}</b>
             </label>
@@ -67,8 +76,9 @@ export function ProductOptions({ product, onClose, onAdd }) {
           <button onClick={() => setQuantity(quantity + 1)}><Icon name="plus" size={15} /></button>
         </div>
         <button className="primary-action" onClick={() => onAdd({
-          ...product, quantity, options: [size, ...addons.map(x => x.name)], notes,
-          unitPrice: product.price + (size === 'كبير' ? 1000 : size === 'صغير' ? -500 : 0) + paid
+          ...product, quantity, options: [size, ...safeAddons.map(x => x?.name).filter(Boolean)],
+          additions: safeAddons, selectedOptions: [size], notes,
+          unitPrice: Number.isFinite(basePrice) ? basePrice + sizeDelta + paid : Number.NaN
         })}>
           إضافة للطلب <b>{format(total)}</b>
         </button>

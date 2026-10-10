@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildCartItem } from '../src/services/cartItem.js'
+import { buildCartItem, normalizeOptions } from '../src/services/cartItem.js'
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const panel = fs.readFileSync(new URL('../src/components/OrderPanel.jsx', import.meta.url), 'utf8')
@@ -17,12 +17,23 @@ assert.equal(items.reduce((sum, item) => sum + 1, 0), 1)
 const malformed = buildCartItem({ id: 'legacy', price: '4500', options: 'not-an-array' }, 'legacy-1')
 assert.equal(malformed.ok, true)
 assert.deepEqual(malformed.item.options, [])
+assert.deepEqual(normalizeOptions({ name: 'not-an-array' }), [])
+const customized = buildCartItem({ id: 'latte', price: 5500, unitPrice: 6000, quantity: 2, options: ['عادي', { name: 'فانيلا', price: 500 }], additions: 'not-an-array', flavors: { name: 'not-an-array' }, variants: null, sizes: 'not-an-array' }, 'latte-1')
+assert.equal(customized.ok, true)
+assert.equal(customized.item.price, 6000)
+assert.equal(customized.item.quantity, 2)
+assert.deepEqual(customized.item.options.map(option => option.name), ['عادي', 'فانيلا'])
+assert.deepEqual(customized.item.additions, [])
+assert.deepEqual(customized.item.flavors, [])
+assert.deepEqual(customized.item.variants, [])
+assert.deepEqual(customized.item.sizes, [])
 const invalid = buildCartItem({ id: 'broken', price: 'not-a-number' }, 'broken-1')
 assert.equal(invalid.ok, false)
 assert.equal(invalid.error, 'تعذر إضافة المنتج: السعر غير صالح')
 
 assert.match(app, /buildCartItem\(p, /)
-assert.match(panel, /Array\.isArray\(item\.options\) \? item\.options : \[\]/)
+assert.match(panel, /Array\.isArray\(order\?\.items\) \? order\.items : \[\]/)
+assert.match(panel, /Array\.isArray\(item\?\.additions\) \? item\.additions : \[\]/)
 assert.match(main, /data-testid="app-error-fallback"/)
 assert.match(main, /إعادة تحميل النظام/)
 
