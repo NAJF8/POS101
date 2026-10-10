@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { buildCartItem, getOptionLabel, normalizeCartItem, normalizeCartItems, normalizeOptions, normalizeOrder } from '../src/services/cartItem.js'
 import { formatNumber } from '../src/utils.js'
+import { prepareCartAdd } from '../src/services/cartPipeline.js'
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const panel = fs.readFileSync(new URL('../src/components/OrderPanel.jsx', import.meta.url), 'utf8')
@@ -42,7 +43,8 @@ const invalid = buildCartItem({ id: 'broken', price: 'not-a-number' }, 'broken-1
 assert.equal(invalid.ok, false)
 assert.equal(invalid.error, 'تعذر إضافة المنتج: السعر غير صالح')
 
-assert.match(app, /buildCartItem\(p, /)
+assert.match(app, /prepareCartAdd\(\{ activeOrder, product: p/)
+assert.equal(prepareCartAdd({ activeOrder: { id: 'test', items: [] }, product: { id: 'espresso', name: 'قهوة', price: 3000 }, lineId: 'espresso-1' }).ok, true)
 assert.match(panel, /normalizeCartItems\(order\?\.items\)/)
 assert.match(panel, /Array\.isArray\(item\?\.additions\) \? item\.additions : \[\]/)
 assert.match(panel, /normalizeCartItems\(order\?\.items\)/)

@@ -37,6 +37,8 @@ class AppErrorBoundary extends React.Component {
       lastProductId: text(lastProduct.id) || 'UNKNOWN',
       lastCartItemSummary: window.__POS101_LAST_CART_ITEM_SUMMARY__ || null,
       activeOrderSummary: window.__POS101_ACTIVE_ORDER_SUMMARY__ || null,
+      realClickDiagnostic: window.__POS101_REAL_CLICK_DIAGNOSTIC__ || null,
+      realErrorStage: window.__POS101_REAL_CLICK_DIAGNOSTIC__?.REAL_ERROR_STAGE || 'NONE',
       loadedBundle: loadedBundle(),
       timestamp: new Date().toISOString(),
     }

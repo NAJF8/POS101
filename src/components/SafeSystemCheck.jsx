@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 const statusLabel = status => status === 'pass' ? 'سليم' : status === 'warn' ? 'تنبيه' : 'فشل'
 
-export default function SafeSystemCheck({ onRun, onTestFlow, state = { running: false, result: null } }) {
+export default function SafeSystemCheck({ onRun, onTestFlow, onTestRealAdd, state = { running: false, result: null } }) {
   const [copied, setCopied] = useState(false)
   const result = state.result
   const report = result ? JSON.stringify(result, null, 2) : ''
@@ -31,6 +31,7 @@ export default function SafeSystemCheck({ onRun, onTestFlow, state = { running: 
               <h3 id="safe-check-flow-title">اختبار مسار السلة</h3>
               <p>{result.realFlow?.status === 'pass' ? 'تم اختبار الإضافة والتسعير وتجهيز الدفع دون إنشاء بيع.' : result.realFlow?.status === 'warn' ? 'تعذر اختبار منتج خيارات فعلي؛ لا يعتبر النظام جاهزًا بالكامل.' : 'فشل اختبار الإضافة أو تجهيز الدفع؛ لم يتم إنشاء بيع.'}</p>
               {result.realFlow && <small data-testid="safe-check-flow-result">{result.realFlow.realFlowCheck || 'UNKNOWN'} · عادي: {result.realFlow.normalProductDryAdd || 'UNKNOWN'} · خيارات: {result.realFlow.optionsProductDryAdd || 'UNKNOWN'} · الإجمالي: {result.realFlow.totalsCalculable || 'UNKNOWN'} · الدفع: {result.realFlow.paymentSummaryReady || 'UNKNOWN'}</small>}
+              {result.realClickTest && <small data-testid="safe-check-real-click-result">الزر الحقيقي بدون حفظ: {result.realClickTest.ok ? 'PASS' : 'FAIL'} · state: {result.realClickTest.stateMutation || 'UNKNOWN'} · localStorage: {result.realClickTest.localStorageWrites ?? 'UNKNOWN'} · Firebase: {result.realClickTest.firebaseWrites ?? 'UNKNOWN'}</small>}
             </section>
             <div className="safe-check-list">
               {(result.checks || []).map(check => (
@@ -46,6 +47,7 @@ export default function SafeSystemCheck({ onRun, onTestFlow, state = { running: 
             </details>
             <div className="safe-check-actions">
               <button className="primary-btn" type="button" onClick={onTestFlow} disabled={state.running} data-testid="safe-test-cart-flow">اختبار السلة الآن</button>
+              <button className="primary-btn" type="button" onClick={onTestRealAdd} disabled={state.running} data-testid="safe-test-real-options-add">اختبار الزر الحقيقي بدون حفظ</button>
               <button className="primary-btn" type="button" onClick={copyReport} data-testid="safe-system-copy-report">{copied ? 'تم النسخ' : 'نسخ التقرير'}</button>
               <button className="secondary-btn" type="button" onClick={state.onClose} data-testid="safe-system-close">إغلاق</button>
             </div>

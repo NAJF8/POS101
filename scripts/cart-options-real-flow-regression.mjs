@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { buildCartItem, getAdditionLabel, getOptionLabel, getSizeLabel, normalizeCartItem, normalizeCartItems, normalizeOrder, safeFormatMoney } from '../src/services/cartItem.js'
 import { simulateCashierFlow } from '../src/services/safeSystemCheck.js'
+import { buildRealOptionsAddTest, prepareCartAdd } from '../src/services/cartPipeline.js'
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const panel = fs.readFileSync(new URL('../src/components/OrderPanel.jsx', import.meta.url), 'utf8')
@@ -52,16 +53,36 @@ assert.equal(flow.status, 'pass')
 assert.equal(flow.optionsProductDryAdd, 'PASS')
 assert.equal(flow.totalsCalculable, 'YES')
 assert.equal(flow.paymentSummaryReady, 'YES')
+assert.equal(flow.dryRunUsesSameBuildItemFunction, 'YES')
+assert.equal(flow.dryRunUsesSameNormalizer, 'YES')
+assert.equal(flow.dryRunUsesSameStateSave, 'NO')
+assert.equal(flow.dryRunUsesSameModalClose, 'NO')
 assert.deepEqual(baseOrder, { id: 'dry-run', items: [] })
+
+const prepared = prepareCartAdd({ activeOrder: baseOrder, product: { ...products[1], quantity: 1, options: ['عادي'], additions: [], selectedOptions: ['عادي'], unitPrice: products[1].price }, lineId: 'real-test-1' })
+assert.equal(prepared.ok, true)
+assert.equal(prepared.nextOrder.items.length, 1)
+const realTest = buildRealOptionsAddTest({ activeOrder: baseOrder, product: products[1] })
+assert.equal(realTest.ok, true)
+assert.equal(realTest.mode, 'no-save')
+assert.equal(realTest.stateMutation, 'SKIPPED')
+assert.equal(realTest.localStorageWrites, 0)
+assert.equal(realTest.firebaseWrites, 0)
 
 assert.match(app, /localStorage\.setItem\('pos101\.orders', JSON\.stringify\(orders\.map\(normalizeOrder\)\)/)
 assert.match(app, /__POS101_LAST_CART_ITEM_SUMMARY__/)
+assert.match(app, /REAL_CLICK_HANDLER_REACHED/)
+assert.match(app, /REAL_LOCALSTORAGE_SAVE_REACHED/)
+assert.match(app, /REAL_RENDER_AFTER_SETSTATE_REACHED/)
+assert.match(app, /onTestRealAdd=\{runRealOptionsAddTest\}/)
+assert.match(app, /prepareCartAdd\(/)
 assert.match(dialogs, /size: \{ id: `size-\$\{size\}`/)
 assert.match(panel, /getSizeLabel\(item\.size\)/)
 assert.match(panel, /getAdditionLabel/)
 assert.match(history, /normalizeCartItems\(sale\.items \|\| sale\.order\?\.items\)/)
 assert.match(main, /نسخ التقرير/)
 assert.match(main, /lastAction/)
+assert.match(main, /realClickDiagnostic/)
 
 console.log('NORMAL_PRODUCT_ADD_TEST=PASS')
 console.log('OPTIONS_PRODUCT_ADD_TEST=PASS')

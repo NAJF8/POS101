@@ -57,8 +57,8 @@ const cloneOrder = order => {
   try { return typeof structuredClone === 'function' ? structuredClone(order) : safeJsonParse(JSON.stringify(order), {}) } catch { return safeJsonParse(JSON.stringify(order), {}) }
 }
 
-export const simulateCashierFlow = ({ products = [], activeOrder = {}, buildCartItemFn, normalizeOrderFn, calculateTotalsFn, paymentSummaryFn }) => {
-  const result = { status: 'pass', realFlowCheck: 'PASS', normalProductDryAdd: 'FAIL', optionsProductDryAdd: 'NOT_AVAILABLE', totalsCalculable: 'NO', paymentSummaryReady: 'NO', error: '', productClicked: 'NONE', steps: [], dryRunDoesNotMutateCart: 'PASS' }
+export const simulateCashierFlow = ({ products = [], activeOrder = {}, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn }) => {
+  const result = { status: 'pass', realFlowCheck: 'PASS', normalProductDryAdd: 'FAIL', optionsProductDryAdd: 'NOT_AVAILABLE', totalsCalculable: 'NO', paymentSummaryReady: 'NO', error: '', productClicked: 'NONE', steps: [], dryRunDoesNotMutateCart: 'PASS', dryRunUsesSameBuildItemFunction: 'YES', dryRunUsesSameNormalizer: 'YES', dryRunUsesSameTotals: 'YES', dryRunUsesSamePaymentSummary: typeof paymentSummaryFn === 'function' ? 'YES' : 'FALLBACK', dryRunUsesSameStateSave: 'NO', dryRunUsesSameModalClose: 'NO' }
   const original = cloneOrder(activeOrder)
   try {
     if (typeof buildCartItemFn !== 'function' || typeof normalizeOrderFn !== 'function' || typeof calculateTotalsFn !== 'function') throw new Error('SAFE_FLOW_PRODUCTION_HELPERS_UNAVAILABLE')
@@ -66,15 +66,21 @@ export const simulateCashierFlow = ({ products = [], activeOrder = {}, buildCart
     const options = products.find(product => ['ايس لاتيه بنكهات', 'لاتيه بنكهات'].some(label => String(product?.name || '').includes(label))) || products.find(product => product?.configurable && Number.isFinite(Number(product.price)))
     if (!normal) throw new Error('SAFE_FLOW_NORMAL_PRODUCT_NOT_FOUND')
     result.productClicked = safeText(normal.name, 'UNKNOWN_PRODUCT')
-    const normalBuilt = buildCartItemFn({ ...normal, quantity: 1 }, 'safe-dry-normal')
-    if (!normalBuilt?.ok) throw new Error(normalBuilt?.error || 'SAFE_FLOW_NORMAL_ADD_FAILED')
-    let dryOrder = normalizeOrderFn({ ...cloneOrder(original), items: [...(Array.isArray(original.items) ? original.items : []), normalBuilt.item] })
+    const prepare = typeof prepareCartAddFn === 'function'
+      ? prepareCartAddFn
+      : ({ activeOrder: order, product, lineId }) => {
+        const built = buildCartItemFn(product, lineId)
+        return built?.ok ? { ...built, nextOrder: normalizeOrderFn({ ...cloneOrder(order), items: [...(Array.isArray(order?.items) ? order.items : []), built.item] }) } : built
+      }
+    const normalPrepared = prepare({ activeOrder: original, product: { ...normal, quantity: 1 }, lineId: 'safe-dry-normal', buildCartItemFn, normalizeOrderFn })
+    if (!normalPrepared?.ok) throw new Error(normalPrepared?.error || 'SAFE_FLOW_NORMAL_ADD_FAILED')
+    let dryOrder = normalizeOrderFn(normalPrepared.nextOrder)
     result.normalProductDryAdd = 'PASS'
     result.steps.push('normal-product-add')
     if (options) {
-      const optionBuilt = buildCartItemFn({ ...options, quantity: 1, options: ['عادي'], additions: [], selectedOptions: ['عادي'], unitPrice: options.price }, 'safe-dry-options')
-      if (!optionBuilt?.ok) throw new Error(optionBuilt?.error || 'SAFE_FLOW_OPTIONS_ADD_FAILED')
-      dryOrder = normalizeOrderFn({ ...dryOrder, items: [...dryOrder.items, optionBuilt.item] })
+      const optionPrepared = prepare({ activeOrder: dryOrder, product: { ...options, quantity: 1, options: ['عادي'], additions: [], selectedOptions: ['عادي'], unitPrice: options.price }, lineId: 'safe-dry-options', buildCartItemFn, normalizeOrderFn })
+      if (!optionPrepared?.ok) throw new Error(optionPrepared?.error || 'SAFE_FLOW_OPTIONS_ADD_FAILED')
+      dryOrder = normalizeOrderFn(optionPrepared.nextOrder)
       result.optionsProductDryAdd = 'PASS'
       result.productClicked = `${result.productClicked} + ${safeText(options.name, 'OPTIONS_PRODUCT')}`
       result.steps.push('options-product-add')
@@ -163,7 +169,7 @@ const checkBundle = async () => {
   return { status: ok ? 'pass' : 'warn', message: ok ? `الحزمة الحالية ${currentBundle}` : 'الحزمة الحالية تحتاج تحديثاً أو تعذر قراءة بيانات النشر.', details: { currentBundle, expectedBundle: expectedBundle || 'UNKNOWN', buildSha: BUILD_SHA, manifestRead: Boolean(meta) } }
 }
 
-export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, calculateTotalsFn, paymentSummaryFn }) => {
+export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn }) => {
   const results = await runIndependentChecks([
     ['bundle', checkBundle],
     ['activation', async () => {
@@ -192,7 +198,7 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
       return { status: products.length && !malformed ? 'pass' : 'warn', message: products.length ? `تم تحميل ${products.length} منتج` : 'لم يتم تحميل المنتجات', details: { count: products.length, optionsProducts: options, malformed } }
     }],
     ['real-cashier-flow-simulation', async () => {
-      const flow = simulateCashierFlow({ products, activeOrder, buildCartItemFn, normalizeOrderFn, calculateTotalsFn, paymentSummaryFn })
+      const flow = simulateCashierFlow({ products, activeOrder, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn })
       const recentErrors = typeof window !== 'undefined' && Array.isArray(window.__POS101_LAST_UI_ERRORS__) ? window.__POS101_LAST_UI_ERRORS__ : []
       if (flow.status === 'fail') recordSafeUiError('REAL_CASHIER_FLOW_SIMULATION', new Error(flow.error), { productClicked: flow.productClicked })
       return { status: flow.status, message: flow.status === 'pass' ? 'تمت محاكاة مسار السلة والدفع دون كتابة' : `خلل في مسار الكاشير: ${flow.error}`, details: { ...flow, recentErrors }, realFlow: flow }

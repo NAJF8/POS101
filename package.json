@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/finalize-dist.cjs && node scripts/generate-deploy-meta.cjs",
+    "build": "node scripts/build.cjs",
     "preview": "vite preview",
     "test:end-day-diagnostic": "node scripts/end-day-diagnostic-regression.mjs",
     "test:end-day-submit": "node scripts/end-day-submit-regression.mjs",

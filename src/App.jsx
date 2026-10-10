@@ -31,6 +31,7 @@ import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
+import { buildRealOptionsAddTest, prepareCartAdd } from './services/cartPipeline.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 
@@ -69,6 +70,11 @@ const recalculateDiscount = (order, discountPresets) => {
   const normalized = normalizeOrder(order)
   if (!normalized.discount) return normalized
   return { ...normalized, discount: { ...normalized.discount, value: discountValue(orderSubtotal(normalized), normalized.discount, discountPresets) } }
+}
+const markRealClickDiagnostic = (stage, details = {}) => {
+  if (typeof window === 'undefined') return
+  const previous = window.__POS101_REAL_CLICK_DIAGNOSTIC__ || {}
+  window.__POS101_REAL_CLICK_DIAGNOSTIC__ = { ...previous, stage, ...details, timestamp: new Date().toISOString() }
 }
 const shifts = [
   { shiftId: 'morning', shiftType: 'morning', shiftLabel: 'صباحي', name: 'كاشير صباحي' },
@@ -262,6 +268,7 @@ export default function App() {
         onRepairPayment: () => { setPendingPayment(null); setModal(null) },
         buildCartItemFn: buildCartItem,
         normalizeOrderFn: normalizeOrder,
+        prepareCartAddFn: prepareCartAdd,
         calculateTotalsFn: order => {
           const subtotalValue = orderSubtotal(order)
           const discountValueForOrder = discountValue(subtotalValue, order?.discount, discountPresets)
@@ -274,6 +281,17 @@ export default function App() {
       setSafeCheckState({ running: false, result: { status: 'fail', checks: [{ name: 'safe-check', status: 'fail', message: error?.message || 'تعذر الفحص' }], warnings: [], errors: [error?.message || 'SAFE_CHECK_FAILED'] }, onClose: () => setSafeCheckState(state => ({ ...state, result: null })) })
     }
   }, [session, operationalDay, activeOrder, orders, active, centralProducts, centralSales, pendingPayment, modal, discountPresets])
+
+  const runRealOptionsAddTest = useCallback(() => {
+    const safeProducts = [...new Map([...products, ...centralProducts].map(product => [String(product?.id), product])).values()]
+    const optionProduct = safeProducts.find(product => ['ايس لاتيه بنكهات', 'لاتيه بنكهات'].some(label => String(product?.name || '').includes(label))) || safeProducts.find(product => product?.configurable)
+    const realClickTest = optionProduct
+      ? buildRealOptionsAddTest({ activeOrder, product: optionProduct, buildCartItemFn: buildCartItem, normalizeOrderFn: normalizeOrder })
+      : { ok: false, error: 'SAFE_REAL_OPTIONS_PRODUCT_NOT_FOUND', stage: 'product', mode: 'no-save', stateMutation: 'SKIPPED', firebaseWrites: 0, localStorageWrites: 0, modalClose: 'SKIPPED' }
+    if (!realClickTest.ok) recordSafeUiError('SAFE_REAL_OPTIONS_ADD_TEST', new Error(realClickTest.error), { stage: realClickTest.stage })
+    setSafeCheckState(previous => ({ ...previous, result: previous.result ? { ...previous.result, realClickTest } : { status: realClickTest.ok ? 'pass' : 'fail', realClickTest } }))
+    return realClickTest
+  }, [activeOrder, centralProducts])
 
   const openOrdersCount = getOpenOrders(orders).length
 
@@ -396,7 +414,20 @@ export default function App() {
   }, [currentView])
 
   // Persist state
-  useEffect(() => localStorage.setItem('pos101.orders', JSON.stringify(orders.map(normalizeOrder))), [orders])
+  useEffect(() => {
+    try {
+      localStorage.setItem('pos101.orders', JSON.stringify(orders.map(normalizeOrder)))
+      const diagnostic = window.__POS101_REAL_CLICK_DIAGNOSTIC__
+      if (diagnostic?.pendingLocalStorageSave) {
+        markRealClickDiagnostic('localStorage_save_reached', { REAL_LOCALSTORAGE_SAVE_REACHED: 'YES', pendingLocalStorageSave: false })
+      }
+    } catch (error) {
+      if (window.__POS101_REAL_CLICK_DIAGNOSTIC__?.pendingLocalStorageSave) {
+        markRealClickDiagnostic('localStorage_save_error', { REAL_LOCALSTORAGE_SAVE_REACHED: 'NO', REAL_ERROR_STAGE: 'LOCALSTORAGE_SAVE' })
+        recordSafeUiError('REAL_OPTIONS_ADD_LOCALSTORAGE', error)
+      }
+    }
+  }, [orders])
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.discountPresets', JSON.stringify(discountPresets)), [discountPresets])
@@ -918,35 +949,33 @@ export default function App() {
   const addProduct = useCallback(p => {
     window.__POS101_LAST_ACTION__ = 'ADD_TO_CART'
     window.__POS101_LAST_PRODUCT_CLICKED__ = { name: String(p?.name || p?.displayName || ''), id: String(p?.id || p?.productId || ''), timestamp: new Date().toISOString() }
-    const result = buildCartItem(p, `${p?.id || 'product'}-${Date.now()}`)
-    if (!result.ok) {
-      recordSafeUiError('ADD_TO_CART', new Error(result.error), { product: p?.name || p?.id })
-      setCashierToast(result.error)
-      return
-    }
-    const item = result.item
-    window.__POS101_LAST_CART_ITEM_SUMMARY__ = {
-      id: item.id,
-      cartItemId: item.cartItemId,
-      productId: item.productId,
-      displayName: item.displayName,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      total: item.total,
-      size: item.size?.label || null,
-      options: item.options.map(option => option.label),
-      additions: item.additions.map(addition => addition.label),
-    }
-    update(o => {
-      const variantLine = item.variantId || item.childProductId
-      if (!variantLine) return { ...o, items: [...o.items, item] }
-      const existing = o.items.find(current => String(current.variantId || current.childProductId || '') === String(variantLine))
-      if (!existing) return { ...o, items: [...o.items, item] }
-      return { ...o, items: o.items.map(current => current === existing ? { ...current, quantity: current.quantity + (item.quantity || 1) } : current) }
+    markRealClickDiagnostic('options_add_start', {
+      REAL_CLICK_HANDLER_REACHED: 'YES', REAL_RAW_ITEM_CREATED: 'NO', REAL_NORMALIZED_ITEM_CREATED: 'NO', REAL_SET_ACTIVE_ORDER_CALLED: 'NO', REAL_MODAL_CLOSE_REACHED: 'NO', REAL_LOCALSTORAGE_SAVE_REACHED: 'NO', REAL_RENDER_AFTER_SETSTATE_REACHED: 'NO', REAL_ERROR_STAGE: 'NONE', pendingLocalStorageSave: false, pendingRenderAfterSetState: false,
+      product: { name: String(p?.name || p?.displayName || ''), id: String(p?.id || p?.productId || ''), size: String(p?.size?.label || p?.size?.name || ''), options: Array.isArray(p?.options) ? p.options.length : 0, additions: Array.isArray(p?.additions) ? p.additions.length : 0, flavors: Array.isArray(p?.flavors) ? p.flavors.length : 0 },
+      activeOrderBefore: { itemCount: activeOrder.items.length, id: String(activeOrder.id || '') },
     })
-    setCartScrollRequest(v => v + 1)
-    setModal(null)
-  }, [update])
+    try {
+      const result = prepareCartAdd({ activeOrder, product: p, lineId: `${p?.id || 'product'}-${Date.now()}`, buildCartItemFn: buildCartItem, normalizeOrderFn: normalizeOrder })
+      markRealClickDiagnostic('raw_item_created', { REAL_RAW_ITEM_CREATED: result.item ? 'YES' : 'NO', rawItem: result.item ? { productId: String(result.item.productId || ''), displayName: String(result.item.displayName || ''), quantity: result.item.quantity, unitPrice: result.item.unitPrice } : null })
+      if (!result.ok) {
+        markRealClickDiagnostic('build_or_normalize_error', { REAL_ERROR_STAGE: result.stage || 'BUILD' })
+        recordSafeUiError('ADD_TO_CART', new Error(result.error), { product: p?.name || p?.id, stage: result.stage })
+        setCashierToast('تعذر إضافة المنتج بسبب بيانات غير مكتملة')
+        return
+      }
+      markRealClickDiagnostic('normalized_item_created', { REAL_NORMALIZED_ITEM_CREATED: 'YES', normalizedItem: result.itemSummary, activeOrderAfter: result.orderSummary })
+      window.__POS101_LAST_CART_ITEM_SUMMARY__ = result.itemSummary
+      markRealClickDiagnostic('set_active_order_called', { REAL_SET_ACTIVE_ORDER_CALLED: 'YES', pendingLocalStorageSave: true, pendingRenderAfterSetState: true })
+      update(() => result.nextOrder)
+      setCartScrollRequest(v => v + 1)
+      setModal(null)
+      markRealClickDiagnostic('modal_close_reached', { REAL_MODAL_CLOSE_REACHED: 'YES' })
+    } catch (error) {
+      markRealClickDiagnostic('real_click_error', { REAL_ERROR_STAGE: 'REAL_ADD_HANDLER' })
+      recordSafeUiError('REAL_OPTIONS_ADD', error, { product: p?.name || p?.id })
+      setCashierToast('تعذر إضافة المنتج بسبب بيانات غير مكتملة')
+    }
+  }, [activeOrder, update])
   const selectProduct = useCallback(p => {
     try {
       window.__POS101_LAST_PRODUCT_CLICKED__ = { name: String(p?.name || ''), id: String(p?.id || ''), timestamp: new Date().toISOString() }
@@ -1458,6 +1487,13 @@ export default function App() {
     }
   }, [activeOrder, operationalDay?.businessDate, operationalDay?.status, session?.shiftType])
 
+  useEffect(() => {
+    const diagnostic = window.__POS101_REAL_CLICK_DIAGNOSTIC__
+    if (diagnostic?.pendingRenderAfterSetState) {
+      markRealClickDiagnostic('render_after_setstate_reached', { REAL_RENDER_AFTER_SETSTATE_REACHED: 'YES', pendingRenderAfterSetState: false })
+    }
+  }, [activeOrder])
+
   const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
   if (isCentralConfigured() && !centralAuthReady) return null
   if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
@@ -1484,6 +1520,7 @@ export default function App() {
           onNavigate={requestView}
           onSafeCheck={runSafeCheck}
           onTestFlow={runSafeCheck}
+          onTestRealAdd={runRealOptionsAddTest}
           safeCheckState={safeCheckState}
         />
       )}
