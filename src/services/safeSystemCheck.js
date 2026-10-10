@@ -1,6 +1,7 @@
 import { getKioskDeviceRecord } from './kioskAuth.js'
 import { kioskAuthStatus, loadCentralProducts, readCentralExpensesForReports, readCentralOperationalDay, readCentralPendingSaleDiagnostics, readCentralSalesForReports, readLocalOperationalDay } from './posCentralSync.js'
-import { inspectPendingSalesAgainstCentral, readPendingSaleDiagnostics, readRawSaleQueue, readSalesQuarantine, reconcileSalesAgainstCentral } from './salesSyncQueue.js'
+import { inspectPendingSalesAgainstCentral, quarantineStaleSaleQueueEntries, readPendingSaleDiagnostics, readRawSaleQueue, readSalesQuarantine, reconcileSalesAgainstCentral } from './salesSyncQueue.js'
+import { defaultSyncLockManager } from './syncLockManager.js'
 import { BUILD_SHA, VERSION_MANIFEST_PATH, validateDeployMeta } from './versionUpdate.js'
 import { cleanupOversizedLocalCaches, inspectLocalStorage, testLocalStorageWrite } from './localSalesCache.js'
 
@@ -263,8 +264,10 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
       return { status: malformed ? 'warn' : 'pass', message: malformed ? 'تمت معالجة بنية السلة المحلية' : 'بنية السلة سليمة', repaired: Boolean(malformed), details: { itemCount: Array.isArray(items) ? items.length : 0, total: safeFormatMoney(total), malformed: Number(malformed) || 0 } }
     }],
     ['queues', async () => {
+      const staleQueueQuarantine = quarantineStaleSaleQueueEntries({ centralSales, operationalDay })
+      const staleLock = defaultSyncLockManager.recoverStale()
       const summary = queueSummary()
-      return { status: summary.malformedCount ? 'warn' : 'pass', message: summary.malformedCount ? 'يوجد صف غير صالح؛ لم يتم حذفه' : 'تمت قراءة الطوابير دون تغيير', details: summary }
+      return { status: summary.malformedCount ? 'warn' : 'pass', message: staleQueueQuarantine.moved ? `تم عزل ${staleQueueQuarantine.moved} عنصر قديم من طابور المزامنة` : summary.malformedCount ? 'يوجد صف غير صالح؛ لم يتم حذفه' : 'تمت قراءة الطوابير دون تغيير', details: { ...summary, staleQueueQuarantine, staleLock, firebaseWritesPerformed: 0, activeSaleQueueUntouched: true } }
     }],
     ['sales-read', async () => {
       const sales = Array.isArray(centralSales) && centralSales.length ? centralSales : await readCentralSalesForReports()

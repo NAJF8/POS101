@@ -1259,9 +1259,11 @@ export default function App() {
         // Firebase failures keep this exact sale recoverable for automatic retry.
         // Diagnostics are admin-only and are never required to continue checkout.
         if (!['auth', 'permission'].includes(classified.kind)) {
-          enqueueSale(sale, { error })
+          // Preserve the exact sale for retry, but do not dispatch the queue
+          // worker from inside the current checkout. Historical queue rows
+          // must never block a fresh cashier sale or share its timeout/lock.
+          enqueueSale(sale, { error, dispatchEvent: false })
           setCashierSyncPhase('pending')
-          void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
         }
         setSaleSyncWarning(classified.message)
         setModal('seller-selection')

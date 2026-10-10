@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettleme
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, inspectPendingSalesAgainstCentral, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, markSaleVoidedCentral, quarantineSale, readPendingSaleDiagnostics, readRawSaleQueue, readSaleQueue, readVoidUpdateQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, inspectPendingSalesAgainstCentral, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, markSaleVoidedCentral, quarantineSale, quarantineStaleSaleQueueEntries, readPendingSaleDiagnostics, readRawSaleQueue, readSaleQueue, readVoidUpdateQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
@@ -1570,7 +1570,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
   // could persist the queue wrapper without retaining the matching ledger row,
   // so the worker must include queue.sale as a candidate instead of silently
   // treating that sale as nonexistent.
-  const rawQueue = readRawSaleQueue()
+  let rawQueue = readRawSaleQueue()
   logQueueDecision(null, '', '', { queueLength: rawQueue.length, processingStarted: true })
   const before = await get(salesRef())
   let beforeCentral = centralValues(before)
@@ -1584,6 +1584,8 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     if (manualReport) manualReport.errors.push(reason)
     return { uploaded: 0, received: 0, centralCount: beforeCentral.length, mergedCount: localSales.length, localCount: localSales.length, updated: 0, initialSyncCompleted: readInitialSyncCompleted(), uploadBlocked: true, blockedReason: reason, skipped: rawQueue.length, queueCleanup: { removed: 0, retained: rawQueue.length }, voidUpdateResult, voidedQueueResult, strandedRecovered: 0, historicalOrderNumberDuplicates: [] }
   }
+  const staleQueueQuarantine = quarantineStaleSaleQueueEntries({ centralSales: beforeCentral, operationalDay: centralDay })
+  if (staleQueueQuarantine.moved) rawQueue = readRawSaleQueue()
   const known1056 = beforeCentral.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   const local1056 = localSales.find(sale => saleIdOf(sale) === KNOWN_MANUAL_REVIEW_SALE_1056)
   if (known1056 || local1056) restoreManualReviewQuarantineMarker({ saleId: KNOWN_MANUAL_REVIEW_SALE_1056, orderNumber: 1056, reason: KNOWN_MANUAL_REVIEW_REASON_1056, centralExists: Boolean(known1056) })
@@ -1754,6 +1756,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     queueCleanup,
     strandedRecovered: recovery.added,
     historicalOrderNumberDuplicates,
+    staleQueueQuarantine,
   }
 }
 

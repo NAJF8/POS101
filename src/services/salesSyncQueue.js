@@ -342,6 +342,69 @@ export const readRawSaleQueue = () => {
 export const readSaleQueue = () => readRawSaleQueue().filter(isSaleEntry)
 export const readVoidUpdateQueue = () => readRawSaleQueue().filter(isVoidUpdateEntry)
 
+// Historical queue rows must never compete with a new cashier sale.  Move
+// only rows proven stale into a separate local bucket, preserving the exact
+// wrapper and sale identity for audit/recovery.  This is localStorage-only;
+// it performs no Firebase operation and never treats an order number alone as
+// a collision because order numbers can legitimately repeat across days.
+export const readQueueQuarantine = () => {
+  const value = readJson('pos101.queueQuarantine', [])
+  return Array.isArray(value) ? value : []
+}
+
+export const quarantineStaleSaleQueueEntries = ({ centralSales = [], operationalDay = null, now = Date.now() } = {}) => {
+  const queue = readRawSaleQueue()
+  const existing = readQueueQuarantine()
+  const moved = []
+  const retained = []
+  const currentDate = text(operationalDay?.businessDate)
+  const currentDayId = text(operationalDay?.id || operationalDay?.operationalDayId)
+  const central = Array.isArray(centralSales) ? centralSales : []
+  const exactCentral = sale => central.find(remote => sameSaleIdentity(sale, remote)) || null
+  const reasonFor = (entry, sale) => {
+    if (!sale || !isSaleSyncEligible(sale) || !isSaleIdentityComplete(sale)) return 'STALE_QUEUE_INCOMPLETE_PAYLOAD'
+    if (isInvalidSaleStatus(sale) || isVoidedSale(sale)) return 'STALE_QUEUE_INVALID_STATUS'
+    const saleDate = text(sale?.businessDate || entry?.businessDate)
+    const saleDayId = text(sale?.operationalDayId || sale?.operational_day_id || entry?.operationalDayId)
+    if (currentDate && saleDate && saleDate !== currentDate) return 'STALE_QUEUE_OLD_BUSINESS_DATE'
+    if (currentDayId && saleDayId && saleDayId !== currentDayId) return 'STALE_QUEUE_OLD_OPERATIONAL_DAY'
+    if (exactCentral(sale)) return 'STALE_QUEUE_ALREADY_VERIFIED_IN_FIREBASE'
+    return ''
+  }
+  for (const entry of queue) {
+    if (!isSaleEntry(entry)) { retained.push(entry); continue }
+    const sale = queueIdentity(entry)
+    const reason = reasonFor(entry, sale)
+    if (!reason) { retained.push(entry); continue }
+    const record = {
+      originalQueueId: text(entry?.queueKey || entry?.saleId || saleIdOf(sale)),
+      saleId: text(saleIdOf(sale) || entry?.saleId),
+      operationKey: text(operationKeyOf(sale) || entry?.operationKey),
+      orderNumber: sale?.orderNumber ?? entry?.orderNumber ?? '',
+      businessDate: text(sale?.businessDate || entry?.businessDate),
+      operationalDayId: text(sale?.operationalDayId || sale?.operational_day_id || entry?.operationalDayId),
+      reason,
+      quarantinedAt: now,
+      rawQueuePayload: entry,
+    }
+    const key = `${record.originalQueueId}|${record.saleId}|${record.operationKey}|${record.reason}`
+    if (!existing.some(row => `${row.originalQueueId}|${row.saleId}|${row.operationKey}|${row.reason}` === key)) moved.push(record)
+  }
+  if (!moved.length) return { moved: 0, retained: queue.length, queueLengthBefore: queue.length, queueLengthAfter: queue.length, quarantineLength: existing.length, firebaseWritesPerformed: 0, reasons: [] }
+  const movedKeys = new Set(moved.map(row => `${row.originalQueueId}|${row.saleId}|${row.operationKey}|${row.reason}`))
+  const nextQueue = queue.filter(entry => {
+    if (!isSaleEntry(entry)) return true
+    const sale = queueIdentity(entry)
+    const candidate = reasonFor(entry, sale)
+    const key = `${text(entry?.queueKey || entry?.saleId || saleIdOf(sale))}|${text(saleIdOf(sale) || entry?.saleId)}|${text(operationKeyOf(sale) || entry?.operationKey)}|${candidate}`
+    return !movedKeys.has(key)
+  })
+  writeJson(QUEUE_KEY, nextQueue)
+  writeJson('pos101.queueQuarantine', [...existing, ...moved])
+  for (const row of moved) console.info('[POS101_QUEUE_QUARANTINE]', JSON.stringify(row))
+  return { moved: moved.length, retained: nextQueue.length, queueLengthBefore: queue.length, queueLengthAfter: nextQueue.length, quarantineLength: existing.length + moved.length, firebaseWritesPerformed: 0, reasons: moved.map(row => row.reason) }
+}
+
 const voidQueueEntry = (sale, voidPayload = {}, { existing = null, error = '', queuedAt = Date.now() } = {}) => {
   const saleId = saleIdOf(sale)
   const attempts = Number(existing?.attemptCount ?? existing?.attempts)

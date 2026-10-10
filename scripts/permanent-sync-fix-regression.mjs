@@ -18,7 +18,8 @@ assert.match(sync, /await set\(saleRef, serializeSale\(\{ \.\.\.sale, status: sa
 const saleWriteInSync = sync.indexOf('await set(saleRef, serializeSale')
 const saleReadbackInSync = sync.indexOf('const readBack = await get(saleRef)', saleWriteInSync)
 assert.ok(saleWriteInSync >= 0 && saleReadbackInSync > saleWriteInSync)
-assert.match(app, /processSaleSyncQueue\(\{ reason: 'sale-write-failure' \}\)/)
+assert.match(app, /enqueueSale\(sale, \{ error, dispatchEvent: false \}\)/)
+assert.doesNotMatch(app, /processSaleSyncQueue\(\{ reason: 'sale-write-failure' \}\)/)
 
 const voidWrite = app.indexOf('await voidCentralSaleImmediately(pending')
 const voidMark = app.indexOf('markSaleVoidedCentral(pending', voidWrite)

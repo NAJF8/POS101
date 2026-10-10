@@ -85,6 +85,7 @@
     ,"test:safe-system-check": "node scripts/safe-system-check-regression.mjs"
     ,"test:emergency-sale-finalization": "node scripts/emergency-sale-finalization-regression.mjs"
     ,"test:sale-sync-failure-classification": "node scripts/sale-sync-failure-classification-regression.mjs"
+    ,"test:stale-queue-direct-sale": "node scripts/stale-queue-direct-sale-regression.mjs"
     ,"test:pending-diagnostics": "node scripts/pending-diagnostics-regression.mjs"
     ,"test:remote-reconcile": "node scripts/pending-diagnostics-regression.mjs"
     ,"audit:firebase-user-pc": "node scripts/firebase-user-pc-audit-readonly-2026-10-10.cjs"
