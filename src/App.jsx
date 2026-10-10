@@ -970,15 +970,15 @@ export default function App() {
       return false
     }
     if (!activeOrder.items.length || saleInFlight.current) return false
-    if (!operationalDayCentralReady || operationalDay?.status !== 'open') {
-      setOperationalDayError('اليوم التشغيلي مغلق، ابدأ يوم جديد')
+    if (!operationalDayCentralReady) {
+      setOperationalDayError('تعذر قراءة اليوم التشغيلي المركزي. تحقق من الاتصال ثم أعد المحاولة.')
       setModal('operational-day-required')
       return false
     }
     setPendingPayment(payment)
     setModal('seller-selection')
     return true
-  }, [session, activeOrder.items.length, operationalDay, operationalDayCentralReady])
+  }, [session, activeOrder.items.length, operationalDayCentralReady])
 
   const finalizeSale = useCallback(async (sellerName) => {
     if (!session || !session.shiftType || !session.shiftId || !activeOrder.items.length || saleInFlight.current || !pendingPayment) return false
@@ -991,13 +991,15 @@ export default function App() {
       setModal('operational-day-required')
       return false
     }
-    const localDay = operationalDay || readLocalOperationalDay()
-    if (!currentOperationalDay || currentOperationalDay.status !== 'open' || !localDay || localDay.id !== currentOperationalDay.id || localDay.businessDate !== currentOperationalDay.businessDate) {
-      setOperationalDay(currentOperationalDay || { ...(localDay || {}), status: 'closed', localOperationalDayStale: true })
+    if (!currentOperationalDay || currentOperationalDay.status !== 'open') {
+      setOperationalDay(currentOperationalDay || { ...(operationalDay || readLocalOperationalDay() || {}), status: 'closed', localOperationalDayStale: true })
       setOperationalDayError('لا يمكن البيع: اليوم التشغيلي مغلق أو تغيّر من جهاز آخر. حدّث الحالة أو افتح يوم جديد.')
       setModal('operational-day-required')
       return false
     }
+    // Firebase is authoritative. A stale local closed day must not block an
+    // open central day; refresh the local view from the verified read.
+    setOperationalDay(currentOperationalDay)
 
     saleInFlight.current = true
     setCashierSyncPhase('saving')

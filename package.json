@@ -76,6 +76,7 @@
     ,"test:expense-edit-delete": "node scripts/expense-edit-delete-regression.mjs"
     ,"test:print-white-screen": "node scripts/print-white-screen-regression.mjs"
     ,"test:ui-hardening": "node scripts/ui-hardening-regression.mjs"
+    ,"test:sale-guard-central-day": "node scripts/sale-guard-central-day-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
