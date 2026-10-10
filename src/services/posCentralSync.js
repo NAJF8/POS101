@@ -180,6 +180,37 @@ export const kioskAuthStatus = async () => {
   return { ready: token.claims.pos101_kiosk === true && token.claims.scope === 'cashier', kioskId: token.claims.kioskId || '', appCheck: Boolean(appCheck) }
 }
 
+// Read-only pre-sale diagnostics. It never probes the sale node with a write.
+export const readCashierSaleSyncDiagnostics = async () => {
+  const browserOnline = typeof navigator === 'undefined' || navigator.onLine !== false
+  const user = auth?.currentUser || null
+  const result = {
+    browserOnline: browserOnline ? 'YES' : 'NO', rtdbInfoConnected: 'UNKNOWN',
+    authReady: user?.uid ? 'YES' : 'NO', authUid: user?.uid || 'NONE', authTokenAvailable: 'NO',
+    deviceActivationValid: 'NO', operationalDayRead: 'FAIL', productsRead: 'FAIL',
+    saleWritePath: 'pos101_sales/<saleId>', saleWriteRuleStatus: 'UNKNOWN', readbackRuleStatus: 'UNKNOWN',
+  }
+  if (!db || !user) { console.info('POS101_SALE_SYNC_DIAGNOSTICS', result); return result }
+  try {
+    const token = await getIdTokenResult(user)
+    result.authTokenAvailable = token?.token ? 'YES' : 'NO'
+    result.deviceActivationValid = (await kioskAuthStatus()).ready ? 'YES' : 'NO'
+    const [connected, day, products] = await Promise.all([
+      get(ref(db, '.info/connected')).catch(() => null),
+      readCentralOperationalDay().catch(() => null),
+      get(productsRef()).catch(() => null),
+    ])
+    result.rtdbInfoConnected = connected?.val() === true ? 'YES' : connected?.val() === false ? 'NO' : 'UNKNOWN'
+    result.operationalDayRead = day ? 'PASS' : 'FAIL'
+    result.productsRead = products ? 'PASS' : 'FAIL'
+    const permission = await canSyncPosSales(user).catch(() => ({ allowed: false }))
+    result.saleWriteRuleStatus = permission.allowed ? 'LIKELY_OK' : 'FAIL'
+    result.readbackRuleStatus = permission.allowed ? 'LIKELY_OK' : 'FAIL'
+  } catch (error) { result.diagnosticError = error?.code || error?.message || 'DIAGNOSTIC_FAILED' }
+  console.info('POS101_SALE_SYNC_DIAGNOSTICS', result)
+  return result
+}
+
 const readCachedExpenses = () => {
   try {
     const value = JSON.parse(localStorage.getItem(EXPENSES_KEY) || '[]')

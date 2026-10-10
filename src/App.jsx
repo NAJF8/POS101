@@ -16,7 +16,7 @@ import { categories, products, categoryId } from './data/menu'
 import { Icon } from './components/Icons'
 import { checkThermalService, defaultThermalSettings, printThermalDocument } from './services/thermalPrinter'
 import { enqueueSale, buildSalesBackup, markSaleSynced, enqueueVoidUpdate, markSaleVoidedCentral, resolveVoidedSaleLocally, readSaleSyncStatus, readHeaderPendingDiagnostic, getPendingOrderBadgeState, readPendingSaleDiagnostics } from './services/salesSyncQueue'
-import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, isOperationalDayClosedError, isOperationalDayUser, readCashboxReadDiagnostics, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDay, readCentralOperationalDays, readCentralCashboxTransactions, readCentralSettlements, readCentralSettlementCorrections, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readLocalOperationalDay, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
+import { activateKioskWithCode, allocateCentralOrderNumber, canManageStaff, canSyncPosSales, centralAuth, correctCentralSaleItems, ensureKioskFirebaseSession, getCentralSyncState, isCentralAdminUser, isCentralCashierUser, isCentralConfigured, isCentralProductManager, isKioskAuthenticatedUser, isOperationalDayClosedError, isOperationalDayUser, readCashierSaleSyncDiagnostics, readCashboxReadDiagnostics, recoverStaleEmergencyRepairFlag, recoverStaleSyncLock, refreshCentralAuthorizationRecord, readCachedOperationalDay, readCentralOperationalDay, readCentralOperationalDays, readCentralCashboxTransactions, readCentralSettlements, readCentralSettlementCorrections, readEndDayDiagnostic, readFreshSettlementPreview, readOpeningCashSuggestion, readLocalExpenses, readLocalOperationalDay, readPreCloseReconciliation, processSaleSyncQueue, runAdminCentralRefresh, runCashierCentralSync, runCashierCentralSyncNow, runExpenseCentralSync, runNewSaleSyncDiagnostic, saveCentralProduct, saveCashierPin, saveCentralSaleImmediately, signInAdminWithGoogle, signOutCentral, subscribeCentralAuth, subscribeCentralReconnect, subscribeCentralExpenses, subscribeCentralProducts, subscribeCentralSales, subscribeCentralSalesReadOnly, subscribeOperationalDay, startOperationalDay, setOperationalDayOpeningCashBalance, settleAndEndOperationalDay, readOpenOperationalDay, subscribeCentralStaff, readCentralStaff, subscribeCentralCashboxTransactions, subscribeCentralSettlements, subscribeCentralSettlementCorrections, saveSettlementCorrection, saveCentralStaff, saveCashboxTransaction, updateCashboxTransaction, voidCashboxTransaction, saveCashCount, updateCentralSale, voidCentralSaleImmediately, subscribePendingTables, savePendingTable, updatePendingTable, payPendingTable, transitionPendingTable } from './services/posCentralSync.js'
 import { createCentralSyncClickHandler } from './services/centralSyncController.js'
 import { formatNumber } from './utils.js'
 import { readCentralSalesForReports } from './services/posCentralSync.js'
@@ -37,6 +37,7 @@ import { buildRealOptionsAddTest, prepareCartAdd } from './services/cartPipeline
 import { isQuotaExceededError, persistLocalSaleAfterCentralReadback, writeSalesCache } from './services/localSalesCache.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, readCentralPendingSaleDiagnostics, reconcileCentralPendingSaleDiagnostics, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
+import { classifySaleSyncError } from './services/saleSyncError.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -172,6 +173,7 @@ export default function App() {
   const pendingTablesListener = useRef(null)
   const [settlementCorrections, setSettlementCorrections] = useState([])
   const saleInFlight = useRef(false)
+  const lastSellerName = useRef('')
   const staffMigrationAttempted = useRef(false)
   const staffAuthInFlight = useRef(null)
 
@@ -1135,6 +1137,7 @@ export default function App() {
       return false
     }
     if (!activeOrder.items.length || saleInFlight.current) return false
+    void readCashierSaleSyncDiagnostics()
     if (!operationalDayCentralReady) {
       setOperationalDayError('تعذر قراءة اليوم التشغيلي المركزي. تحقق من الاتصال ثم أعد المحاولة.')
       setModal('payment')
@@ -1152,8 +1155,10 @@ export default function App() {
     try {
       currentOperationalDay = await readCentralOperationalDay()
     } catch (error) {
-      setOperationalDayError(error?.message || 'لا يمكن التحقق من اليوم التشغيلي المركزي.')
-      setModal('operational-day-required')
+      const classified = classifySaleSyncError(error)
+      setSaleSyncWarning(classified.message)
+      setOperationalDayError(classified.message)
+      setModal('payment')
       return false
     }
     if (!currentOperationalDay || currentOperationalDay.status !== 'open') {
@@ -1167,6 +1172,7 @@ export default function App() {
     setOperationalDay(currentOperationalDay)
 
     saleInFlight.current = true
+    lastSellerName.current = sellerName
     setCashierSyncPhase('saving')
     const payment = pendingPayment
     const originalItems = activeOrder.items.map(i => ({ ...i }))
@@ -1183,8 +1189,10 @@ export default function App() {
       }
     } catch (error) {
       saleInFlight.current = false
-      setOperationalDayError(error?.message || 'تعذر تخصيص رقم طلب مركزي بأمان. تحقق من الاتصال ثم أعد المحاولة.')
-      setModal('operational-day-required')
+      const classified = classifySaleSyncError(error)
+      setSaleSyncWarning(classified.message)
+      setOperationalDayError(classified.message)
+      setModal('payment')
       return false
     }
 
@@ -1231,8 +1239,8 @@ export default function App() {
       return true
     } catch (error) {
       if (isQuotaExceededError(error)) {
-        setOperationalDayError('امتلأت ذاكرة الجهاز المحلية. لم يتم اعتبار البيع ناجحًا قبل تأكيد Firebase. افحص النظام قبل إعادة المحاولة.')
-        setModal('storage-quota')
+        setSaleSyncWarning('فشل إرسال الطلب. تحقق من الاتصال ثم اضغط إعادة المحاولة.')
+        setModal('seller-selection')
         saleInFlight.current = false
         return false
       }
@@ -1246,24 +1254,27 @@ export default function App() {
       // A write/readback/auth failure is the only normal entry into the
       // emergency queue. Keep the exact saleId/orderNumber for retry and do
       // not claim central verification.
+      const classified = classifySaleSyncError(error)
       try {
         // Firebase failures keep this exact sale recoverable for automatic retry.
         // Diagnostics are admin-only and are never required to continue checkout.
-        enqueueSale(sale, { error })
-        setCashierSyncPhase('pending')
-        setSaleSyncWarning('فشل إرسال الطلب. تحقق من الإنترنت وحاول مرة أخرى. لم يتم حذف الطلب من السلة.')
+        if (!['auth', 'permission'].includes(classified.kind)) {
+          enqueueSale(sale, { error })
+          setCashierSyncPhase('pending')
+          void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
+        }
+        setSaleSyncWarning(classified.message)
         setModal('seller-selection')
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
-        void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       } catch (queueError) {
-        setSaleSyncWarning('فشل إرسال الطلب. تحقق من الإنترنت وحاول مرة أخرى. لم يتم حذف الطلب من السلة.')
+        setSaleSyncWarning(classified.message)
         setModal('seller-selection')
         saleInFlight.current = false
         return false
       }
     }
     window.setTimeout(() => { saleInFlight.current = false }, 350)
-    return true
+    return false
   }, [session, activeOrder, subtotal, total, activeDiscount, active, autoPrint, pendingPayment, requestSalePrint, operationalDay])
 
   const handleVoidSale = useCallback(async sale => {
@@ -1752,7 +1763,7 @@ export default function App() {
       {modal === 'tables' && <TableSelection orders={orders} onClose={() => setModal(null)} onChoose={chooseTable} />}
       {modal === 'payment' && <Payment total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
-      {modal === 'seller-selection' && <SellerSelection staff={staff} staffStatus={staffStatus} onClose={() => setModal(null)} onSelect={finalizeSale} />}
+      {modal === 'seller-selection' && <SellerSelection staff={staff} staffStatus={staffStatus} saleSyncWarning={saleSyncWarning} retrySellerName={lastSellerName.current} onClose={() => setModal(null)} onSelect={finalizeSale} />}
       {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} discountPresets={discountPresets} onClose={() => setModal(null)} onApply={applyDiscount} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}
       {modal === 'single-history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}

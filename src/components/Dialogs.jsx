@@ -633,7 +633,7 @@ export function StaffPinDialog({ staff, systemCode, onClose, onSave }) {
 }
 
 /* ── Seller Selection ── */
-export function SellerSelection({ staff = [], staffStatus = { state: 'empty', error: '' }, onClose, onSelect }) {
+export function SellerSelection({ staff = [], staffStatus = { state: 'empty', error: '' }, onClose, onSelect, saleSyncWarning = '', retrySellerName = '' }) {
   const sellers = sellerEligibleStaff(staff)
   const [busy, setBusy] = React.useState(false)
   const choose = async name => {
@@ -650,6 +650,7 @@ export function SellerSelection({ staff = [], staffStatus = { state: 'empty', er
     <Dialog onClose={onClose} className="type-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
       <h2>اختر اسم الكابتن</h2>
+      {saleSyncWarning && <div className="pos101-sync-blocking-warning" role="alert" aria-live="assertive"><p>{saleSyncWarning}</p>{retrySellerName && <button type="button" className="primary-action" disabled={busy} onClick={() => choose(retrySellerName)}>إعادة المحاولة</button>}</div>}
       <div className="type-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
         {staffStatus.state === 'loading' ? <p className="settings-readonly">جارٍ تحميل الموظفين من Firebase…</p>
           : staffStatus.state === 'error' ? <p className="settings-readonly" role="alert">تعذر تحميل قائمة الموظفين المركزية: {staffStatus.error || 'خطأ غير معروف'}</p>
