@@ -158,7 +158,7 @@ assert.match(service, /SAME_SALE_ID_DUPLICATE_QUEUE_ENTRIES/)
 assert.match(service, /KNOWN_MANUAL_REVIEW_SALE_1056/)
 assert.match(service, /BACKUP_RECOVERY_READBACK_FAILED/)
 assert.match(service, /pos101_operational_days/)
-assert.match(readbackSource, /localStorage\.setItem/)
+assert.match(readbackSource, /writeSalesCache|localStorage\.setItem/)
 assert.doesNotMatch(readbackSource, /runTransaction|pos101_sales/)
 
 console.log(JSON.stringify({
