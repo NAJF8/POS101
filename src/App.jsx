@@ -29,12 +29,13 @@ import { calculateSettlement } from './services/financialCenter.js'
 import KioskActivation from './components/KioskActivation.jsx'
 import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import PendingSaleStatusDialog from './components/PendingSaleStatusDialog.jsx'
+import CentralPendingDiagnostics from './components/CentralPendingDiagnostics.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { buildRealOptionsAddTest, prepareCartAdd } from './services/cartPipeline.js'
 import { isQuotaExceededError, persistLocalSaleAfterCentralReadback, writeSalesCache } from './services/localSalesCache.js'
-import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
+import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, readCentralPendingSaleDiagnostics, reconcileCentralPendingSaleDiagnostics, recoverBackupSale, runOneClickSyncRepair, writePendingSaleCentralDiagnostic } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -141,6 +142,9 @@ export default function App() {
   const [kioskActivationError, setKioskActivationError] = useState('')
   const [productAuthUser, setProductAuthUser] = useState(null)
   const [adminCentralSales, setAdminCentralSales] = useState([])
+  const [centralPendingDiagnostics, setCentralPendingDiagnostics] = useState([])
+  const [centralPendingDiagnosticsBusy, setCentralPendingDiagnosticsBusy] = useState(false)
+  const [centralPendingDiagnosticsReport, setCentralPendingDiagnosticsReport] = useState(null)
   const [centralSales, setCentralSales] = useState([])
   const [pendingTables, setPendingTables] = useState([])
   const [centralOperationalDays, setCentralOperationalDays] = useState([])
@@ -264,6 +268,7 @@ export default function App() {
         centralProducts,
         products: safeProducts,
         centralSales,
+        adminDiagnostics: Boolean((adminAuthUser && isCentralAdminUser(adminAuthUser)) || (centralAuthUser && isCentralAdminUser(centralAuthUser))),
         pendingPayment,
         modal,
         saleInFlight,
@@ -284,7 +289,7 @@ export default function App() {
     } catch (error) {
       setSafeCheckState({ running: false, result: { status: 'fail', checks: [{ name: 'safe-check', status: 'fail', message: error?.message || 'تعذر الفحص' }], warnings: [], errors: [error?.message || 'SAFE_CHECK_FAILED'] }, onClose: () => setSafeCheckState(state => ({ ...state, result: null })) })
     }
-  }, [session, operationalDay, activeOrder, orders, active, centralProducts, centralSales, pendingPayment, modal, discountPresets])
+  }, [session, operationalDay, activeOrder, orders, active, centralProducts, centralSales, pendingPayment, modal, discountPresets, adminAuthUser, centralAuthUser])
 
   const checkPendingSale = useCallback(async () => {
     if (pendingSaleActionBusy) return
@@ -330,6 +335,20 @@ export default function App() {
       setPendingSaleActionBusy(false)
     }
   }, [pendingSaleActionBusy])
+
+  const refreshCentralPendingDiagnostics = useCallback(async ({ reconcile = false } = {}) => {
+    setCentralPendingDiagnosticsBusy(true)
+    try {
+      const report = reconcile ? await reconcileCentralPendingSaleDiagnostics() : null
+      const rows = await readCentralPendingSaleDiagnostics()
+      setCentralPendingDiagnostics(rows)
+      setCentralPendingDiagnosticsReport(report || { firebaseRead: 'PASS', results: [], resolved: 0, missing: 0, duplicates: 0, salesCreated: 0, salesDeleted: 0 })
+      return { report, rows }
+    } catch (error) {
+      setCentralPendingDiagnosticsReport({ firebaseRead: 'FAIL', error: error?.message || String(error), results: [] })
+      throw error
+    } finally { setCentralPendingDiagnosticsBusy(false) }
+  }, [])
 
   const runRealOptionsAddTest = useCallback(() => {
     const safeProducts = [...new Map([...products, ...centralProducts].map(product => [String(product?.id), product])).values()]
@@ -1234,9 +1253,12 @@ export default function App() {
       try {
         // The emergency fallback remains the canonical enqueueSale(sale) path.
         enqueueSale(sale, { error })
+        const pendingEntry = readPendingSaleDiagnostics().find(row => row.type === 'sale_write' && row.saleId === sale.saleId)
+        let centralDiagnosticWrite = null
+        try { centralDiagnosticWrite = await writePendingSaleCentralDiagnostic(sale, error, { attempts: pendingEntry?.attempts || 0 }) } catch (diagnosticError) { console.warn('PENDING_DIAGNOSTIC_WRITE_FAILED', diagnosticError?.code || diagnosticError?.message || String(diagnosticError)) }
         const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
         setCashierSyncPhase('pending')
-        setSaleSyncWarning('الطلب محفوظ بانتظار المزامنة\nلم يتم تأكيد الطلب مركزيًا بسبب الاتصال. لا تعيد البيع. سيتم رفع الطلب تلقائيًا عند عودة الاتصال.')
+        setSaleSyncWarning(centralDiagnosticWrite ? 'الطلب محفوظ بانتظار المزامنة\nلم يتم تأكيد الطلب مركزيًا بسبب الاتصال. لا تعيد البيع. تم إرسال تنبيه للمدير للفحص.' : 'الطلب محفوظ بانتظار المزامنة\nتعذر إرسال التنبيه المركزي، لكن الطلب محفوظ محليًا. لا تعيد البيع.')
         setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: null })
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
         void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
@@ -1446,6 +1468,15 @@ export default function App() {
   // Use the hydrated current user here: adminAuthUser was captured before the
   // async authorization record loaded, so it could permanently miss admin-viewer.
   const adminReady = isCentralAdminUser(adminAuthUser) || isCentralAdminUser(centralAuthUser)
+  useEffect(() => {
+    if (!adminReady) {
+      setCentralPendingDiagnostics([])
+      setCentralPendingDiagnosticsReport(null)
+      return undefined
+    }
+    void refreshCentralPendingDiagnostics().catch(error => console.warn('CENTRAL_PENDING_DIAGNOSTICS_READ_FAILED', error?.code || error?.message || String(error)))
+    return undefined
+  }, [adminReady, centralAuthUser?.uid, refreshCentralPendingDiagnostics])
   const saveSaleEdit = useCallback((sale, changes) => changes?.itemCorrection ? correctCentralSaleItems(sale, changes) : updateCentralSale(sale, changes), [])
   const inspectBackup = useCallback(({ sales, syncQueueItems }) => inspectBackupSales({ sales, syncQueueItems }), [])
   const markBackupLocal = useCallback(({ sale, centralSale }) => markBackupSaleReadbackLocally({ sale, centralSale }), [])
@@ -1562,7 +1593,7 @@ export default function App() {
 
   const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
   if (isCentralConfigured() && !centralAuthReady) return null
-  if (isCentralConfigured() && !kioskAuthReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} />
+  if (isCentralConfigured() && !kioskAuthReady && !adminReady) return <KioskActivation onActivate={activateKiosk} busy={kioskActivationBusy} error={kioskActivationError} onAdminLogin={loginAdmin} adminBusy={adminAuthBusy} adminError={adminAuthError} />
 
   return (
     <main className={`app-shell ${currentView === 'settings' ? 'settings-app-shell' : ''} ${currentView === 'cashbox' ? 'cashbox-app-shell' : ''} ${currentView === 'employees' ? 'employees-app-shell' : ''} ${currentView === 'reports' || currentView === 'reports-captain' ? 'reports-app-shell' : ''} ${currentView === 'backup-recovery' ? 'backup-recovery-app-shell' : ''}`}>
@@ -1695,6 +1726,7 @@ export default function App() {
           </header>
           <div className="admin-central-actions"><span>وضع الإدارة: قراءة فقط · الرفع محظور</span></div>
           <div className="admin-central-table-wrap"><table className="history-table"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>الكاشير</th><th>الدفع</th><th>الإجمالي</th></tr></thead><tbody>{adminCentralSales.slice().sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map(sale => <tr key={sale.saleId}><td>{sale.orderNumber || '—'}</td><td>{new Date(sale.createdAt).toLocaleString('ar-IQ')}</td><td>{sale.cashierNameSnapshot || sale.seller || '—'}</td><td>{sale.paymentMethod || sale.payment?.method || '—'}</td><td>{formatNumber(sale.total || 0)}</td></tr>)}</tbody></table></div>
+          <CentralPendingDiagnostics rows={centralPendingDiagnostics} report={centralPendingDiagnosticsReport} busy={centralPendingDiagnosticsBusy} onRefresh={() => refreshCentralPendingDiagnostics()} onReconcile={() => refreshCentralPendingDiagnostics({ reconcile: true })} />
           <Reports session={{ name: 'الإدارة', status: 'admin-readonly' }} operationalDay={operationalDay} cashboxTransactions={cashboxTransactions} staff={staff} salesOverride={adminCentralSales} products={catalogProducts} categories={catalogCategories} onNavigate={() => {}} onBeforePrint={syncBeforeReportPrint} />
         </section>
       )}

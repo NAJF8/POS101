@@ -1,5 +1,5 @@
 import { getKioskDeviceRecord } from './kioskAuth.js'
-import { kioskAuthStatus, loadCentralProducts, readCentralExpensesForReports, readCentralOperationalDay, readCentralSalesForReports, readLocalOperationalDay } from './posCentralSync.js'
+import { kioskAuthStatus, loadCentralProducts, readCentralExpensesForReports, readCentralOperationalDay, readCentralPendingSaleDiagnostics, readCentralSalesForReports, readLocalOperationalDay } from './posCentralSync.js'
 import { inspectPendingSalesAgainstCentral, readPendingSaleDiagnostics, readRawSaleQueue, readSalesQuarantine, reconcileSalesAgainstCentral } from './salesSyncQueue.js'
 import { BUILD_SHA, VERSION_MANIFEST_PATH, validateDeployMeta } from './versionUpdate.js'
 import { cleanupOversizedLocalCaches, inspectLocalStorage, testLocalStorageWrite } from './localSalesCache.js'
@@ -173,7 +173,7 @@ const checkBundle = async () => {
   return { status: ok ? 'pass' : 'warn', message: ok ? `الحزمة الحالية ${currentBundle}` : 'الحزمة الحالية تحتاج تحديثاً أو تعذر قراءة بيانات النشر.', details: { currentBundle, expectedBundle: expectedBundle || 'UNKNOWN', buildSha: BUILD_SHA, manifestRead: Boolean(meta) } }
 }
 
-export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn }) => {
+export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, adminDiagnostics = false, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn }) => {
   const pendingSalesBeforeCheck = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
   const results = await runIndependentChecks([
     ['bundle', checkBundle],
@@ -203,6 +203,11 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
         message: duplicate ? 'يوجد خطر تكرار؛ لم تتم أي إعادة محاولة' : exists && !missing ? 'تم العثور على الطلب مركزيًا؛ تمت تسوية الحالة المحلية دون كتابة مركزية جديدة' : 'يوجد طلب محفوظ بانتظار الرفع',
         details: { pendingCount: pending.length, firebaseRead, readError, items, duplicateRisk: duplicate, exactMatches: exists, missingCount: missing, safeRetry: !duplicate, reconciled: reconciliation.reconciled || 0, remaining: reconciliation.remaining, queuePreserved: reconciliation.queuePreserved === true },
       }
+    }],
+    ['central-pending-diagnostics', async () => {
+      if (!adminDiagnostics) return { status: 'pass', message: 'تشخيص التنبيهات المركزية متاح لواجهة الإدارة فقط', details: { adminOnly: true, read: 'NOT_REQUESTED', financialEffect: 0 } }
+      const rows = await readCentralPendingSaleDiagnostics()
+      return { status: rows.length ? 'warn' : 'pass', message: rows.length ? `يوجد ${rows.length} تنبيه مركزي غير محلول` : 'لا توجد تنبيهات مركزية غير محلولة', details: { count: rows.length, rows: rows.map(row => ({ saleId: row.saleId, operationKey: row.operationKey, orderNumber: row.orderNumber, status: row.status, lastError: row.lastError })), firebaseRead: 'PASS', financialEffect: 0 } }
     }],
     ['storage-quota', async () => {
       const before = inspectLocalStorage()

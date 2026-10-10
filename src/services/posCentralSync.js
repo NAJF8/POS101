@@ -40,6 +40,7 @@ import { BUILD_SHA } from './versionUpdate.js'
 import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
 import { buildRecoveryCandidates, classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
 import { readSalesCache, writeSalesCache } from './localSalesCache.js'
+import { buildPendingSaleDiagnostic, classifyPendingDiagnostic, diagnosticKeyFor, PENDING_DIAGNOSTIC_STATUS, RESOLVED_DIAGNOSTIC_STATUS } from './pendingSaleDiagnostics.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -117,6 +118,7 @@ const tokenClaimsCache = new Map()
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const pendingTablesRef = () => ref(db, 'pos101_pending_tables')
+const pendingSaleDiagnosticsRef = () => ref(db, 'pos101_sync_diagnostics/pending_sales')
 const productsRef = () => ref(db, 'pos101_products')
 const operationalDaysRef = () => ref(db, 'pos101_operational_days')
 const operationalDayCurrentRef = () => ref(db, 'pos101_operational_day/current')
@@ -367,6 +369,80 @@ export const inspectPendingSaleCentralStatus = async ({ reconcile = true } = {})
       error: error?.message || String(error),
     }
   }
+}
+
+const pendingDiagnosticValues = snapshot => snapshot.exists()
+  ? Object.entries(snapshot.val() || {}).map(([key, value]) => ({ ...value, diagnosticKey: key })).filter(row => row.saleId || row.operationKey)
+  : []
+
+const pendingDiagnosticRef = diagnostic => ref(db, `pos101_sync_diagnostics/pending_sales/${diagnosticKeyFor(diagnostic)}`)
+
+const currentKioskIdentity = async user => {
+  const device = await getKioskDeviceRecord().catch(() => null)
+  const claims = tokenClaimsCache.get(user?.uid) || await getIdTokenResult(user).then(result => result.claims || {}).catch(() => ({}))
+  return { deviceId: device?.deviceId || getDeviceId(), kioskId: claims?.kioskId || device?.kioskId || '' }
+}
+
+// A pending-sale diagnostic is intentionally metadata-only. It contains no
+// item payload and is never read by financial reports or cashbox code.
+export const writePendingSaleCentralDiagnostic = async (sale, error, { attempts = 0 } = {}) => {
+  const user = await requireRole('cashier-sync')
+  const identity = await currentKioskIdentity(user)
+  const diagnostic = buildPendingSaleDiagnostic(sale, { error, attempts, ...identity })
+  const target = pendingDiagnosticRef(diagnostic)
+  const existing = await get(target)
+  const previous = existing.exists() ? existing.val() : null
+  const next = {
+    ...diagnostic,
+    createdAt: Number(previous?.createdAt) || diagnostic.createdAt,
+    attempts: Math.max(Number(previous?.attempts) || 0, diagnostic.attempts),
+    status: PENDING_DIAGNOSTIC_STATUS,
+    centralSalePathKnown: false,
+  }
+  await set(target, next)
+  const readBack = await get(target)
+  if (!readBack.exists() || String(readBack.val()?.saleId || '') !== String(next.saleId) || String(readBack.val()?.operationKey || '') !== String(next.operationKey)) {
+    throw Object.assign(new Error('تعذر التحقق من حفظ تنبيه المزامنة المركزي.'), { code: 'PENDING_DIAGNOSTIC_READBACK_FAILED' })
+  }
+  return { diagnostic: { ...readBack.val(), diagnosticKey: diagnosticKeyFor(next) }, readbackVerified: true }
+}
+
+export const resolvePendingSaleCentralDiagnostic = async (sale, { resolution = 'retried_and_readback_passed', centralSalePathKnown = true } = {}) => {
+  const user = await requireRole('cashier-sync')
+  const target = pendingDiagnosticRef(sale)
+  const current = await get(target)
+  if (!current.exists()) return { updated: false, reason: 'DIAGNOSTIC_NOT_FOUND' }
+  const next = { status: RESOLVED_DIAGNOSTIC_STATUS, resolvedAt: Date.now(), updatedAt: Date.now(), resolution, centralSalePathKnown, resolvedBy: user.uid }
+  await update(target, next)
+  const readBack = await get(target)
+  if (!readBack.exists() || readBack.val()?.status !== RESOLVED_DIAGNOSTIC_STATUS || readBack.val()?.resolution !== resolution) throw Object.assign(new Error('تعذر التحقق من حل تنبيه المزامنة المركزي.'), { code: 'PENDING_DIAGNOSTIC_RESOLVE_READBACK_FAILED' })
+  return { updated: true, readbackVerified: true, diagnostic: { ...readBack.val(), diagnosticKey: diagnosticKeyFor(sale) } }
+}
+
+export const readCentralPendingSaleDiagnostics = async () => {
+  await requireAdminViewer()
+  return pendingDiagnosticValues(await get(pendingSaleDiagnosticsRef()))
+}
+
+export const reconcileCentralPendingSaleDiagnostics = async () => {
+  const admin = await requireAdminViewer()
+  const [diagnosticsSnapshot, salesSnapshot] = await Promise.all([get(pendingSaleDiagnosticsRef()), get(salesRef())])
+  const diagnostics = pendingDiagnosticValues(diagnosticsSnapshot).filter(row => row.status !== RESOLVED_DIAGNOSTIC_STATUS)
+  const centralSales = centralValues(salesSnapshot)
+  const results = []
+  let resolved = 0
+  for (const diagnostic of diagnostics) {
+    const result = classifyPendingDiagnostic(diagnostic, centralSales)
+    if (result.status === 'EXISTS_ONCE') {
+      const target = ref(db, `pos101_sync_diagnostics/pending_sales/${diagnostic.diagnosticKey}`)
+      await update(target, { status: RESOLVED_DIAGNOSTIC_STATUS, resolvedAt: Date.now(), updatedAt: Date.now(), resolution: 'exists_in_firebase', centralSalePathKnown: true, resolvedBy: admin.uid })
+      const readBack = await get(target)
+      if (!readBack.exists() || readBack.val()?.status !== RESOLVED_DIAGNOSTIC_STATUS) throw Object.assign(new Error('تعذر التحقق من حل التشخيص المركزي.'), { code: 'PENDING_DIAGNOSTIC_RESOLVE_READBACK_FAILED' })
+      resolved += 1
+      results.push({ ...result, resolved: true, readbackVerified: true })
+    } else results.push({ ...result, resolved: false, readbackVerified: false })
+  }
+  return { firebaseRead: 'PASS', diagnostics, centralCount: centralSales.length, results, resolved, missing: results.filter(row => row.status === 'MISSING').length, duplicates: results.filter(row => row.status === 'DUPLICATE').length, salesCreated: 0, salesDeleted: 0 }
 }
 
 const requireRole = async expectedRole => {
@@ -1574,7 +1650,10 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
       continue
     }
     if (classification.action === 'duplicate') {
-      if (queueEntry) markSaleSynced(sale)
+      if (queueEntry) {
+        markSaleSynced(sale)
+        void resolvePendingSaleCentralDiagnostic(sale, { resolution: 'exists_in_firebase' }).catch(error => console.warn('PENDING_DIAGNOSTIC_RESOLVE_FAILED', error?.code || error?.message || String(error)))
+      }
       if (manualSale) { manualSale.readbackResult = 'PASS'; manualSale.localUpdateResult = queueEntry ? 'PASS' : 'FAIL' }
       logQueueDecision(sale, 'duplicate guard', 'central payload already matches', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'not-needed', readbackResult: 'verified', localUpdateResult: 'synced' })
       updated += 1
@@ -1618,6 +1697,7 @@ const runCashierCentralSyncUnlocked = async ({ initial = false, queueOnly = fals
     // The local ledger and queue are changed only after the full central
     // payload has been read back and matched, including operationKey.
     markSaleSynced(sale)
+    void resolvePendingSaleCentralDiagnostic(sale).catch(error => console.warn('PENDING_DIAGNOSTIC_RESOLVE_FAILED', error?.code || error?.message || String(error)))
     if (manualSale) { manualSale.readbackResult = 'PASS'; manualSale.localUpdateResult = 'PASS' }
     logQueueDecision(sale, 'synced', 'central read-back verified', { queueLength: rawQueue.length, eligible: true, processingStarted: true, firebaseWriteResult: 'completed', readbackResult: 'verified', localUpdateResult: 'synced' })
     syncLockManager.heartbeat({ trigger: queueOnly ? 'manual' : 'worker', processingSaleIds: [] })

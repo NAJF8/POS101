@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function KioskActivation({ onActivate, busy = false, error = '' }) {
+export default function KioskActivation({ onActivate, busy = false, error = '', onAdminLogin, adminBusy = false, adminError = '' }) {
   const [code, setCode] = useState('')
   const submit = async event => {
     event.preventDefault()
@@ -19,6 +19,7 @@ export default function KioskActivation({ onActivate, busy = false, error = '' }
           <button type="submit" className="primary-action" disabled={busy || !code.trim()}>{busy ? 'جارٍ التحقق من الجهاز…' : 'تفعيل الجهاز'}</button>
         </form>
         {error && <p className="kiosk-activation-error" role="alert">{error}</p>}
+        {onAdminLogin && <><div className="kiosk-activation-divider">أو</div><button type="button" className="secondary-action" onClick={() => void onAdminLogin()} disabled={adminBusy}>{adminBusy ? 'جارٍ تسجيل دخول الإدارة…' : 'دخول الإدارة من هذا الجهاز'}</button>{adminError && <p className="kiosk-activation-error" role="alert">{adminError}</p>}</>}
         <small>لا يتم إرسال المفتاح الخاص للجهاز؛ يبقى محفوظًا محليًا داخل هذا المتصفح.</small>
       </section>
     </main>

@@ -2011,3 +2011,16 @@ input, textarea, select { cursor: text; }
 .pending-sale-error { padding: 9px 11px; border: 1px solid #fca5a5; border-radius: 10px; background: #fef2f2; color: #991b1b; white-space: pre-line; }
 .pending-sale-actions { flex-wrap: wrap; }
 @media (max-width: 520px) { .pending-sale-details { grid-template-columns: 1fr; } }
+.admin-pending-diagnostics { margin: 22px 0; }
+.admin-pending-diagnostics-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.admin-pending-diagnostics-head h2 { margin: 0 0 5px; }
+.admin-pending-diagnostics-head p { margin: 0; color: #667085; font-size: 13px; }
+.admin-pending-diagnostics-list { display: grid; gap: 12px; }
+.admin-pending-diagnostic-card { padding: 14px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fffdf8; }
+.admin-pending-diagnostic-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.admin-pending-diagnostic-title span { padding: 4px 8px; border-radius: 999px; background: #fff0c2; color: #7a4a00; font-size: 11px; font-weight: 800; }
+.admin-pending-diagnostic-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.admin-pending-diagnostic-card dl div { min-width: 0; padding: 8px; border-radius: 8px; background: #f8fafc; }
+.admin-pending-diagnostic-card dt { color: #667085; font-size: 11px; }
+.admin-pending-diagnostic-card dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 700; }
+@media (max-width: 700px) { .admin-pending-diagnostics-head { flex-direction: column; }.admin-pending-diagnostic-card dl { grid-template-columns: 1fr; } }
