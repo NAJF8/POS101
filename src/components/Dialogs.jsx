@@ -75,9 +75,14 @@ export function ProductOptions({ product, onClose, onAdd }) {
           <b>{formatNumber(quantity)}</b>
           <button onClick={() => setQuantity(quantity + 1)}><Icon name="plus" size={15} /></button>
         </div>
-        <button className="primary-action" onClick={() => onAdd({
-          ...product, quantity, options: [size, ...safeAddons.map(x => x?.name).filter(Boolean)],
-          additions: safeAddons, selectedOptions: [size], notes,
+        <button className="primary-action" type="button" onClick={() => onAdd({
+          ...product,
+          quantity,
+          size: { id: `size-${size}`, label: size, name: size, priceDelta: sizeDelta },
+          options: [{ id: `size-${size}`, label: size, name: size, priceDelta: sizeDelta }],
+          additions: safeAddons,
+          selectedOptions: [size],
+          notes,
           unitPrice: Number.isFinite(basePrice) ? basePrice + sizeDelta + paid : Number.NaN
         })}>
           إضافة للطلب <b>{format(total)}</b>

@@ -79,6 +79,7 @@
     ,"test:sale-guard-central-day": "node scripts/sale-guard-central-day-regression.mjs"
     ,"test:add-to-cart": "node scripts/add-to-cart-regression.mjs"
     ,"test:cashier-local-state": "node scripts/cashier-local-state-regression.mjs"
+    ,"test:cart-options-real-flow": "node scripts/cart-options-real-flow-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

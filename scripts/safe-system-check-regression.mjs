@@ -16,7 +16,10 @@ assert.deepEqual(service.safeObjectSummary([1, 2]), { type: 'array', length: 2 }
 
 const products = [{ id: 'normal', name: 'قهوة مقطرة', price: 7000 }, { id: 'options', name: 'ايس لاتيه بنكهات', price: 5500, configurable: true }]
 const baseOrder = { id: 1, items: [] }
-const build = (product, lineId) => ({ ok: true, item: { ...product, lineId, productId: product.id, quantity: 1, price: Number(product.unitPrice ?? product.price), options: product.options || [], additions: product.additions || [] } })
+const build = (product, lineId) => {
+  const price = Number(product.unitPrice ?? product.price)
+  return { ok: true, item: { ...product, lineId, cartItemId: lineId, productId: product.id, displayName: product.name, quantity: 1, price, unitPrice: price, total: price, options: Array.isArray(product.options) ? product.options : [], additions: Array.isArray(product.additions) ? product.additions : [] } }
+}
 const normalize = order => ({ ...order, items: Array.isArray(order.items) ? order.items.map(item => ({ ...item, options: Array.isArray(item.options) ? item.options : [] })) : [] })
 const totals = order => ({ subtotal: order.items.reduce((sum, item) => sum + item.price * item.quantity, 0), discount: 0, total: order.items.reduce((sum, item) => sum + item.price * item.quantity, 0) })
 const runFlow = overrides => service.simulateCashierFlow({ products, activeOrder: baseOrder, buildCartItemFn: build, normalizeOrderFn: normalize, calculateTotalsFn: totals, paymentSummaryFn: value => ({ total: value.total, label: `${value.total} د.ع` }), ...overrides })

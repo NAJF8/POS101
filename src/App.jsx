@@ -396,7 +396,7 @@ export default function App() {
   }, [currentView])
 
   // Persist state
-  useEffect(() => localStorage.setItem('pos101.orders', JSON.stringify(orders)), [orders])
+  useEffect(() => localStorage.setItem('pos101.orders', JSON.stringify(orders.map(normalizeOrder))), [orders])
   useEffect(() => localStorage.setItem('pos101.session', JSON.stringify(session)), [session])
   useEffect(() => localStorage.setItem('pos101.autoPrint', JSON.stringify(autoPrint)), [autoPrint])
   useEffect(() => localStorage.setItem('pos101.discountPresets', JSON.stringify(discountPresets)), [discountPresets])
@@ -916,6 +916,8 @@ export default function App() {
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(normalizeOrder(o)), discountPresets) : normalizeOrder(o))), [active, discountPresets])
   const addProduct = useCallback(p => {
+    window.__POS101_LAST_ACTION__ = 'ADD_TO_CART'
+    window.__POS101_LAST_PRODUCT_CLICKED__ = { name: String(p?.name || p?.displayName || ''), id: String(p?.id || p?.productId || ''), timestamp: new Date().toISOString() }
     const result = buildCartItem(p, `${p?.id || 'product'}-${Date.now()}`)
     if (!result.ok) {
       recordSafeUiError('ADD_TO_CART', new Error(result.error), { product: p?.name || p?.id })
@@ -923,6 +925,18 @@ export default function App() {
       return
     }
     const item = result.item
+    window.__POS101_LAST_CART_ITEM_SUMMARY__ = {
+      id: item.id,
+      cartItemId: item.cartItemId,
+      productId: item.productId,
+      displayName: item.displayName,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      total: item.total,
+      size: item.size?.label || null,
+      options: item.options.map(option => option.label),
+      additions: item.additions.map(addition => addition.label),
+    }
     update(o => {
       const variantLine = item.variantId || item.childProductId
       if (!variantLine) return { ...o, items: [...o.items, item] }
@@ -1424,6 +1438,25 @@ export default function App() {
     window.__POS101_CASHIER_DIAGNOSTICS__ = diagnostics
     console.info('POS101_CASHIER_DIAGNOSTICS', diagnostics)
   }, [activeOrder.items.length, activeShift, centralAuthReady, centralAuthUser, cashierSyncState.state, operationalDay, operationalDayCentralReady, sellingBlocked])
+
+  useEffect(() => {
+    window.__POS101_ACTIVE_ORDER_SUMMARY__ = {
+      id: String(activeOrder?.id || ''),
+      itemCount: activeOrder.items.length,
+      itemShapes: activeOrder.items.map(item => ({
+        cartItemId: item.cartItemId,
+        productId: item.productId,
+        displayName: item.displayName,
+        options: Array.isArray(item.options),
+        additions: Array.isArray(item.additions),
+        price: Number.isFinite(item.price),
+        quantity: Number.isFinite(item.quantity),
+      })),
+      businessDate: operationalDay?.businessDate || null,
+      dayStatus: operationalDay?.status || null,
+      shift: session?.shiftType || null,
+    }
+  }, [activeOrder, operationalDay?.businessDate, operationalDay?.status, session?.shiftType])
 
   const kioskAuthReady = Boolean(centralAuthUser && isKioskAuthenticatedUser(centralAuthUser))
   if (isCentralConfigured() && !centralAuthReady) return null

@@ -27,6 +27,11 @@ export default function SafeSystemCheck({ onRun, onTestFlow, state = { running: 
               {result.realFlow?.status === 'fail' ? 'الفحص وجد مشكلة عند إضافة منتج أو تجهيز الدفع. لم يتم إنشاء بيع أو حذف بيانات.' : result.status === 'pass' ? 'اكتمل الفحص بدون أخطاء.' : result.status === 'warn' ? 'اكتمل الفحص مع تنبيهات.' : 'تعذر إكمال بعض الفحوصات.'}
             </p>
             {result.realFlow?.status === 'fail' && <div className="safe-check-flow-error" data-testid="safe-flow-error"><b>المنتج:</b> {result.realFlow.productClicked || 'غير معروف'}<br /><b>السبب:</b> {result.realFlow.error || 'غير معروف'}<br /><b>الاقتراح:</b> راجع تفاصيل الفحص وأرسل التقرير للدعم الفني.</div>}
+            <section className="safe-check-flow" aria-labelledby="safe-check-flow-title">
+              <h3 id="safe-check-flow-title">اختبار مسار السلة</h3>
+              <p>{result.realFlow?.status === 'pass' ? 'تم اختبار الإضافة والتسعير وتجهيز الدفع دون إنشاء بيع.' : result.realFlow?.status === 'warn' ? 'تعذر اختبار منتج خيارات فعلي؛ لا يعتبر النظام جاهزًا بالكامل.' : 'فشل اختبار الإضافة أو تجهيز الدفع؛ لم يتم إنشاء بيع.'}</p>
+              {result.realFlow && <small data-testid="safe-check-flow-result">{result.realFlow.realFlowCheck || 'UNKNOWN'} · عادي: {result.realFlow.normalProductDryAdd || 'UNKNOWN'} · خيارات: {result.realFlow.optionsProductDryAdd || 'UNKNOWN'} · الإجمالي: {result.realFlow.totalsCalculable || 'UNKNOWN'} · الدفع: {result.realFlow.paymentSummaryReady || 'UNKNOWN'}</small>}
+            </section>
             <div className="safe-check-list">
               {(result.checks || []).map(check => (
                 <div className="safe-check-row" key={check.name} data-status={check.status}>

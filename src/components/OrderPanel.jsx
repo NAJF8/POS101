@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Icon } from './Icons'
 import { formatNumber } from '../utils.js'
 import { productNames } from '../data/menu'
-import { normalizeCartItems, getOptionLabel, safeNumber } from '../services/cartItem.js'
+import { normalizeCartItems, getOptionLabel, getSizeLabel, getAdditionLabel, safeNumber } from '../services/cartItem.js'
 
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
@@ -12,7 +12,7 @@ export default function OrderPanel({
   const itemsAreaRef = useRef(null)
   const items = normalizeCartItems(order?.items)
   const subtotal = items.reduce((s, i) => s + safeNumber(i.price * i.quantity, 0), 0)
-  const discountVal = order.discount?.value || 0
+  const discountVal = safeNumber(order?.discount?.value, 0)
   const total = Math.max(0, subtotal - discountVal)
 
   useEffect(() => {
@@ -50,22 +50,27 @@ export default function OrderPanel({
           ) : (
             items.map((item, index) => {
               const names = productNames(item || {})
+              const displayName = item.displayName || names.arabic || 'منتج غير مكتمل البيانات'
               const options = Array.isArray(item?.options) ? item.options : []
               const additions = Array.isArray(item?.additions) ? item.additions : []
+              const sizeLabel = getSizeLabel(item.size)
+              const optionLabels = options.map(getOptionLabel).filter(Boolean).filter(label => label !== sizeLabel)
+              const additionLabels = additions.map(getAdditionLabel).filter(Boolean)
               return <div key={item.lineId} className="cart-item">
                 <div className="i-num">{formatNumber(index + 1)}</div>
                 <div className="i-prod">
                   <div className="i-prod-img">
-                    {item.image ? <img src={item.image} alt={names.arabic} /> : <div className="no-img"></div>}
+                    {item.image ? <img src={item.image} alt={displayName} /> : <div className="no-img"></div>}
                   </div>
                   <div className="i-prod-text">
-                    <b>{names.arabic}</b>
-                    {[...options, ...additions].map((o, i) => <div className="opt" key={i}>+ {getOptionLabel(o)}</div>)}
+                    <b>{displayName}</b>
+                    {sizeLabel && <div className="opt">+ {sizeLabel}</div>}
+                    {[...optionLabels, ...additionLabels].map((label, i) => <div className="opt" key={`${item.lineId}-option-${i}`}>+ {label}</div>)}
                   </div>
                 </div>
                 <div className="i-price">
-                  <span>{item.price != null ? formatNumber(item.price) : '—'}</span>
-                  {item.price != null && <small>د.ع</small>}
+                  <span>{formatNumber(safeNumber(item.unitPrice, 0))}</span>
+                  <small>د.ع</small>
                 </div>
                 <div className="qty-ctrl">
                   <button onClick={() => updateQuantity(item.lineId, -1)}><Icon name="minus" size={14}/></button>

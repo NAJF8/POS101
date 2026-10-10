@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { formatNumber } from '../utils.js'
+import { normalizeCartItems, safeNumber } from '../services/cartItem.js'
 
 const statusLabel = { open: 'معلقة', paid: 'مدفوعة', cancelled: 'ملغية', unpaid_lost: 'غير مدفوعة / دين' }
 const money = value => `${formatNumber(Number(value || 0))} د.ع`
@@ -18,7 +19,7 @@ export default function PendingTables({ tables = [], session, onClose, onPay, on
   const [error, setError] = useState('')
   const [editItems, setEditItems] = useState([])
   const rows = useMemo(() => tables.filter(row => (status === 'all' || row.status === status) && (!query.trim() || `${row.customerName || ''} ${row.phone || ''} ${row.tableNumber || ''}`.toLowerCase().includes(query.trim().toLowerCase()))).sort((a, b) => Number(b.openedAt || 0) - Number(a.openedAt || 0)), [tables, status, query])
-  const openEdit = row => { setSelected(row); setEditItems((row.items || []).map(item => ({ ...item }))); setAction('edit'); setError('') }
+  const openEdit = row => { setSelected(row); setEditItems(normalizeCartItems(row.items)); setAction('edit'); setError('') }
   const submit = async () => {
     if (!selected || busy) return
     setBusy(true); setError('')
@@ -36,14 +37,14 @@ export default function PendingTables({ tables = [], session, onClose, onPay, on
     <div className="pending-table-grid">{rows.map(row => <article className="pending-table-card" key={row.tabId || row.id}>
       <div className="pending-table-card-head"><h2>{row.customerName}</h2><span className={`pending-status pending-${row.status}`}>{statusLabel[row.status] || row.status}</span></div>
       <dl><div><dt>الطاولة</dt><dd>{row.tableNumber || '—'}</dd></div><div><dt>الهاتف</dt><dd>{row.phone || '—'}</dd></div><div><dt>فتح</dt><dd>{dateTime(row.openedAt)}</dd></div><div><dt>businessDate</dt><dd>{row.businessDate || '—'}</dd></div><div><dt>الكاشير</dt><dd>{row.cashierName || '—'}</dd></div><div><dt>الإجمالي</dt><dd>{money(row.total)}</dd></div></dl>
-      <ul className="pending-item-list">{(row.items || []).map((item, index) => <li key={item.lineId || index}><span>{item.name || item.displayName || 'منتج'}</span><span>{formatNumber(item.quantity)} × {money(item.price)}</span><b>{money(item.lineTotal ?? Number(item.price || 0) * Number(item.quantity || 0))}</b></li>)}</ul>
+      <ul className="pending-item-list">{normalizeCartItems(row.items).map((item, index) => <li key={item.lineId || index}><span>{item.displayName}</span><span>{formatNumber(item.quantity)} × {money(item.price)}</span><b>{money(safeNumber(item.lineTotal, item.price * item.quantity))}</b></li>)}</ul>
       {row.note && <p className="pending-note">ملاحظة: {row.note}</p>}
       <div className="pending-actions"><button type="button" onClick={() => { setSelected(row); setAction('pay'); setError('') }} disabled={row.status !== 'open'}>تحصيل الدفع</button><button type="button" onClick={() => openEdit(row)} disabled={row.status !== 'open'}>تعديل</button><button type="button" onClick={() => { setSelected(row); setAction('cancelled'); setError('') }} disabled={row.status !== 'open'}>إلغاء</button><button type="button" onClick={() => { setSelected(row); setAction('unpaid_lost'); setError('') }} disabled={row.status !== 'open'}>تحويل إلى غير مدفوعة / دين</button></div>
     </article>)}{!rows.length && <p className="pending-empty">لا توجد طاولات مطابقة.</p>}</div>
     {selected && action && <div className="overlay"><div className="dialog pending-action-dialog">
       <h2>{action === 'pay' ? 'تحصيل الدفع' : action === 'edit' ? 'تعديل الطاولة المعلقة' : action === 'cancelled' ? 'إلغاء الطاولة' : 'تحويل إلى غير مدفوعة / دين'}</h2><p>الزبون: <b>{selected.customerName}</b> · الإجمالي: <b>{money(selected.total)}</b></p>
       {action === 'pay' && <label>طريقة الدفع<select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label>}
-      {action === 'edit' && <div className="pending-edit-items">{editItems.map((item, index) => <div key={item.lineId || index}><span>{item.name || item.displayName || 'منتج'}</span><label>الكمية<input type="number" min="0" value={item.quantity} onChange={e => setEditItems(v => v.map((x, i) => i === index ? { ...x, quantity: Number(e.target.value) } : x))} /></label><label>السعر<input type="number" min="0" value={item.price} onChange={e => setEditItems(v => v.map((x, i) => i === index ? { ...x, price: Number(e.target.value) } : x))} /></label></div>)}</div>}
+      {action === 'edit' && <div className="pending-edit-items">{editItems.map((item, index) => <div key={item.lineId || index}><span>{item.displayName}</span><label>الكمية<input type="number" min="0" value={item.quantity} onChange={e => setEditItems(v => v.map((x, i) => i === index ? { ...x, quantity: Number(e.target.value) } : x))} /></label><label>السعر<input type="number" min="0" value={item.price} onChange={e => setEditItems(v => v.map((x, i) => i === index ? { ...x, price: Number(e.target.value) } : x))} /></label></div>)}</div>}
       {action !== 'pay' && action !== 'edit' && <><label>السبب<textarea autoFocus value={reason} onChange={e => setReason(e.target.value)} /></label><label>تأكيد اسم المستخدم/الكود<input value={confirmation} onChange={e => setConfirmation(e.target.value)} placeholder={session?.name || session?.shiftName || ''} /></label></>}
       {error && <p className="form-error" role="alert">{error}</p>}<div className="dialog-actions"><button className="secondary-action" type="button" onClick={() => setAction(null)}>إلغاء</button><button className="primary-action" type="button" disabled={busy || (action !== 'pay' && action !== 'edit' && (!reason.trim() || !confirmation.trim()))} onClick={submit}>{busy ? 'جارٍ الحفظ…' : 'تأكيد'}</button></div>
     </div></div>}

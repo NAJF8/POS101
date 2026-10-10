@@ -63,7 +63,7 @@ export const simulateCashierFlow = ({ products = [], activeOrder = {}, buildCart
   try {
     if (typeof buildCartItemFn !== 'function' || typeof normalizeOrderFn !== 'function' || typeof calculateTotalsFn !== 'function') throw new Error('SAFE_FLOW_PRODUCTION_HELPERS_UNAVAILABLE')
     const normal = products.find(product => product && !product.configurable && !product.variantProducts?.length && Number.isFinite(Number(product.price)) && Number(product.price) >= 0)
-    const options = products.find(product => String(product?.name || '').includes('ايس لاتيه بنكهات')) || products.find(product => product?.configurable && Number.isFinite(Number(product.price)))
+    const options = products.find(product => ['ايس لاتيه بنكهات', 'لاتيه بنكهات'].some(label => String(product?.name || '').includes(label))) || products.find(product => product?.configurable && Number.isFinite(Number(product.price)))
     if (!normal) throw new Error('SAFE_FLOW_NORMAL_PRODUCT_NOT_FOUND')
     result.productClicked = safeText(normal.name, 'UNKNOWN_PRODUCT')
     const normalBuilt = buildCartItemFn({ ...normal, quantity: 1 }, 'safe-dry-normal')
@@ -79,7 +79,14 @@ export const simulateCashierFlow = ({ products = [], activeOrder = {}, buildCart
       result.productClicked = `${result.productClicked} + ${safeText(options.name, 'OPTIONS_PRODUCT')}`
       result.steps.push('options-product-add')
     }
-    if (!Array.isArray(dryOrder.items) || dryOrder.items.some(item => !safeText(item?.name) || !Array.isArray(item?.options) || !Number.isFinite(Number(item?.price)))) throw new Error('SAFE_FLOW_CART_RENDER_SHAPE_FAILED')
+    if (!options) {
+      result.status = 'warn'
+      result.realFlowCheck = 'WARN'
+      result.error = 'SAFE_FLOW_OPTIONS_PRODUCT_NOT_FOUND'
+      result.details = { productClicked: result.productClicked, originalShape: safeObjectSummary(original) }
+      return result
+    }
+    if (!Array.isArray(dryOrder.items) || dryOrder.items.some(item => !safeText(item?.displayName || item?.name) || !Array.isArray(item?.options) || !Array.isArray(item?.additions) || !Number.isFinite(Number(item?.price)) || !Number.isFinite(Number(item?.total)))) throw new Error('SAFE_FLOW_CART_RENDER_SHAPE_FAILED')
     result.steps.push('cart-render')
     const totals = calculateTotalsFn(dryOrder)
     if (!totals || !Number.isFinite(Number(totals.total)) || Number(totals.total) < 0) throw new Error('SAFE_FLOW_TOTALS_FAILED')
@@ -110,8 +117,24 @@ const readLocal = key => {
   try { return safeJsonParse(window.localStorage?.getItem(key), null) } catch { return null }
 }
 
+const safeCartItemSummary = item => ({
+  cartItemId: safeText(item?.cartItemId || item?.lineId, 'NONE'),
+  productId: safeText(item?.productId || item?.id, 'NONE'),
+  displayName: safeText(item?.displayName || item?.name, 'NONE'),
+  optionsArray: Array.isArray(item?.options),
+  additionsArray: Array.isArray(item?.additions),
+  priceFinite: Number.isFinite(Number(item?.price)),
+  quantityFinite: Number.isFinite(Number(item?.quantity)),
+})
+
+const safeOrderSummary = order => ({
+  id: safeText(order?.id, 'NONE'),
+  itemCount: Array.isArray(order?.items) ? order.items.length : 0,
+  itemShapes: Array.isArray(order?.items) ? order.items.map(safeCartItemSummary) : [],
+})
+
 const isValidProduct = product => Boolean(product && safeText(product.id) && safeText(product.name) && Number.isFinite(Number(product.price)) && Number(product.price) >= 0)
-const itemIsValid = item => Boolean(item && safeText(item.productId || item.id || item.name) && Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0 && Number.isFinite(Number(item.price)) && Array.isArray(item.options || []))
+const itemIsValid = item => Boolean(item && safeText(item.productId || item.id || item.name) && Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0 && Number.isFinite(Number(item.price)) && Array.isArray(item.options) && Array.isArray(item.additions))
 
 const queueSummary = () => {
   const raw = readRawSaleQueue()
@@ -208,7 +231,31 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
   const warnings = results.filter(result => result.status === 'warn')
   const realFlow = results.find(result => result.name === 'real-cashier-flow-simulation')?.realFlow || null
   const recentErrors = typeof window !== 'undefined' && Array.isArray(window.__POS101_LAST_UI_ERRORS__) ? window.__POS101_LAST_UI_ERRORS__ : []
-  const summary = { ok: fail.length === 0, status: fail.length ? 'fail' : warnings.length ? 'warn' : 'pass', timestamp: new Date().toISOString(), checks: results, realFlow, recentErrors, lastProductClicked: typeof window !== 'undefined' ? window.__POS101_LAST_PRODUCT_CLICKED__ || null : null, lastModalProduct: typeof window !== 'undefined' ? window.__POS101_LAST_MODAL_PRODUCT__ || null : null, warnings: warnings.map(result => `${result.name}: ${result.message}`), errors: fail.map(result => `${result.name}: ${result.message}`), safety: { firebaseWrites: 0, salesCreated: 0, queueDeletes: 0, localStorageWiped: false } }
+  const bundle = results.find(result => result.name === 'bundle')?.details || {}
+  const activation = results.find(result => result.name === 'activation')?.details || {}
+  const day = results.find(result => result.name === 'operational-day')?.details || {}
+  const sessionDetails = results.find(result => result.name === 'session')?.details || {}
+  const summary = {
+    ok: fail.length === 0,
+    status: fail.length ? 'fail' : warnings.length ? 'warn' : 'pass',
+    timestamp: new Date().toISOString(),
+    loadedBundle: bundle.currentBundle || 'UNKNOWN_BUNDLE',
+    deployMeta: { buildSha: bundle.buildSha || 'UNKNOWN', expectedBundle: bundle.expectedBundle || 'UNKNOWN' },
+    device: { deviceId: activation.deviceId || 'NONE', kioskId: activation.kioskId || 'NONE' },
+    operationalDay: { businessDate: day.central?.businessDate || day.local?.businessDate || 'NONE', status: day.central?.status || day.local?.status || 'NONE' },
+    shift: { shiftId: sessionDetails.shiftId || 'NONE', shiftType: sessionDetails.shiftType || 'NONE' },
+    activeOrder: safeOrderSummary(activeOrder),
+    checks: results,
+    realFlow,
+    recentErrors,
+    lastError: typeof window !== 'undefined' ? window.__POS101_LAST_ERROR__ || null : null,
+    lastProductClicked: typeof window !== 'undefined' ? window.__POS101_LAST_PRODUCT_CLICKED__ || null : null,
+    lastModalProduct: typeof window !== 'undefined' ? window.__POS101_LAST_MODAL_PRODUCT__ || null : null,
+    queueSummary: results.find(result => result.name === 'queues')?.details || null,
+    warnings: warnings.map(result => `${result.name}: ${result.message}`),
+    errors: fail.map(result => `${result.name}: ${result.message}`),
+    safety: { firebaseWrites: 0, salesCreated: 0, queueDeletes: 0, localStorageWiped: false },
+  }
   console.info('[POS101_SAFE_CHECK]', safeObjectSummary(summary))
   return summary
 }

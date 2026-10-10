@@ -9,6 +9,7 @@ const readSales = () => {
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { businessDateForSale } from '../services/reportSales.js'
 import { validateCorrectionIdentity } from '../services/saleEdit.js'
+import { getOptionLabel, normalizeCartItems, safeNumber, safeText } from '../services/cartItem.js'
 const money = formatMoney
 const paymentLabel = value => value === 'cash' ? 'نقدي' : value === 'electronic' || value === 'card' ? 'إلكتروني' : 'غير محدد'
 const statusLabel = value => value === 'voided' ? 'مبطل' : value === 'void_pending_sync' ? 'إبطال غير مثبت مركزيًا' : 'مكتمل'
@@ -26,19 +27,19 @@ const soldItemsForEdit = sale => firstArray([
   sale?.order?.items, sale?.order?.cart, sale?.order?.products, sale?.order?.orderItems, sale?.order?.lines,
 ])
 const normalizeSoldItem = (item, index) => {
-  const quantityValue = Number(item?.quantity ?? item?.qty ?? item?.count ?? 0)
-  const unitPriceValue = Number(item?.price ?? item?.unitPrice ?? item?.unit_price ?? item?.amount ?? 0)
+  const quantityValue = safeNumber(item?.quantity ?? item?.qty ?? item?.count, 0)
+  const unitPriceValue = safeNumber(item?.price ?? item?.unitPrice ?? item?.unit_price ?? item?.amount, 0)
   const storedLineTotal = item?.lineTotal ?? item?.line_total ?? item?.total
-  const lineTotalValue = storedLineTotal === undefined ? unitPriceValue * (Number.isFinite(quantityValue) ? quantityValue : 0) : Number(storedLineTotal)
-  const options = Array.isArray(item?.options) ? item.options.filter(Boolean).join('، ') : String(item?.options || '')
-  const notes = item?.notes ?? item?.note ?? ''
+  const lineTotalValue = storedLineTotal === undefined ? unitPriceValue * quantityValue : safeNumber(storedLineTotal, 0)
+  const options = Array.isArray(item?.options) ? item.options.map(getOptionLabel).filter(Boolean).join('، ') : getOptionLabel(item?.options)
+  const notes = safeText(item?.notes ?? item?.note)
   return {
     key: item?.lineId || item?.id || `sold-item-${index}`,
     _originalIndex: index,
-    name: item?.name || item?.productName || item?.title || item?.itemName || item?.product?.name || 'منتج غير مسمى',
-    quantity: Number.isFinite(quantityValue) ? quantityValue : 0,
-    unitPrice: Number.isFinite(unitPriceValue) ? unitPriceValue : 0,
-    lineTotal: Number.isFinite(lineTotalValue) ? lineTotalValue : 0,
+    name: getOptionLabel(item?.displayName ?? item?.name ?? item?.productName ?? item?.title ?? item?.itemName ?? item?.product?.name) || 'منتج غير مسمى',
+    quantity: quantityValue,
+    unitPrice: unitPriceValue,
+    lineTotal: lineTotalValue,
     options,
     notes: String(notes || ''),
   }
@@ -65,7 +66,7 @@ function EditableSoldProducts({ items, enabled, canCorrect, onChange, onDelete, 
 
 function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }) {
   const [confirmingVoid, setConfirmingVoid] = useState(false)
-  const items = sale.items || sale.order?.items || []
+  const items = normalizeCartItems(sale.items || sale.order?.items)
 
   return (
     <section className="history-details" aria-label="تفاصيل المبيعات">
@@ -90,7 +91,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }
           <thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الوحدة</th><th>المجموع</th></tr></thead>
           <tbody>{items.map((item, index) => (
             <tr key={item.lineId || `${item.id}-${index}`}>
-              <td><b>{item.name}</b>{item.options?.length ? <small>{item.options.join('، ')}</small> : null}{item.notes ? <small>ملاحظة: {item.notes}</small> : null}</td>
+              <td><b>{item.displayName}</b>{item.options?.length ? <small>{item.options.map(getOptionLabel).filter(Boolean).join('، ')}</small> : null}{item.notes ? <small>ملاحظة: {item.notes}</small> : null}</td>
               <td className="number-cell">{formatNumber(item.quantity)}</td>
               <td className="number-cell">{money(item.price)}</td>
               <td className="number-cell">{money(item.price * item.quantity)}</td>
