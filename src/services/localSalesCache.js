@@ -156,9 +156,9 @@ export const persistLocalSaleAfterCentralReadback = (sale, markLocalSync) => {
   try {
     const result = typeof markLocalSync === 'function' ? markLocalSync(sale) : null
     const cacheFailed = Boolean(result?.cacheWrite && result.cacheWrite.ok === false)
-    return { centralSaleSafe: true, localCacheOk: !cacheFailed, warning: cacheFailed ? 'تم حفظ البيع مركزيًا، لكن تم تنظيف ذاكرة الجهاز المحلية' : '' }
+    return { centralSaleSafe: true, localCacheOk: !cacheFailed, warning: cacheFailed ? 'تم حفظ البيع مركزيًا. تم تنظيف الكاش المحلي.' : '' }
   } catch {
-    return { centralSaleSafe: true, localCacheOk: false, warning: 'تم حفظ البيع مركزيًا، لكن تم تنظيف ذاكرة الجهاز المحلية' }
+    return { centralSaleSafe: true, localCacheOk: false, warning: 'تم حفظ البيع مركزيًا. تم تنظيف الكاش المحلي.' }
   }
 }
 

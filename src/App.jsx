@@ -35,7 +35,7 @@ import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { buildRealOptionsAddTest, prepareCartAdd } from './services/cartPipeline.js'
 import { isQuotaExceededError, persistLocalSaleAfterCentralReadback, writeSalesCache } from './services/localSalesCache.js'
-import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, readCentralPendingSaleDiagnostics, reconcileCentralPendingSaleDiagnostics, recoverBackupSale, runOneClickSyncRepair, writePendingSaleCentralDiagnostic } from './services/posCentralSync.js'
+import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, readCentralPendingSaleDiagnostics, reconcileCentralPendingSaleDiagnostics, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -1137,7 +1137,7 @@ export default function App() {
     if (!activeOrder.items.length || saleInFlight.current) return false
     if (!operationalDayCentralReady) {
       setOperationalDayError('تعذر قراءة اليوم التشغيلي المركزي. تحقق من الاتصال ثم أعد المحاولة.')
-      setModal('operational-day-required')
+      setModal('payment')
       return false
     }
     setPendingPayment(payment)
@@ -1158,7 +1158,7 @@ export default function App() {
     }
     if (!currentOperationalDay || currentOperationalDay.status !== 'open') {
       setOperationalDay(currentOperationalDay || { ...(operationalDay || readLocalOperationalDay() || {}), status: 'closed', localOperationalDayStale: true })
-      setOperationalDayError('لا يمكن البيع: اليوم التشغيلي مغلق أو تغيّر من جهاز آخر. حدّث الحالة أو افتح يوم جديد.')
+      setOperationalDayError('اليوم التشغيلي مغلق.')
       setModal('operational-day-required')
       return false
     }
@@ -1219,11 +1219,7 @@ export default function App() {
       await saveCentralSaleImmediately(sale)
       const localCacheResult = persistLocalSaleAfterCentralReadback(sale, markSaleSynced)
       if (!localCacheResult.localCacheOk) recordSafeUiError('CENTRAL_SALE_LOCAL_CACHE', new Error(localCacheResult.warning), { saleId: sale.saleId })
-      setSaleSyncWarning(localCacheResult.warning)
-      if (!localCacheResult.localCacheOk) {
-        setCashierSyncPhase('pending')
-        setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: null })
-      }
+      setSaleSyncWarning(localCacheResult.warning || '')
       if (autoPrint) await requestSalePrint(sale)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
       setPendingPayment(null)
@@ -1242,7 +1238,7 @@ export default function App() {
       }
       if (isOperationalDayClosedError(error)) {
         setOperationalDay(error.operationalDay || { ...currentOperationalDay, status: 'closed' })
-        setOperationalDayError('لا يمكن البيع: اليوم التشغيلي مغلق أو تغيّر من جهاز آخر. حدّث الحالة أو افتح يوم جديد.')
+        setOperationalDayError('اليوم التشغيلي مغلق.')
         setModal('operational-day-required')
         saleInFlight.current = false
         return false
@@ -1251,20 +1247,17 @@ export default function App() {
       // emergency queue. Keep the exact saleId/orderNumber for retry and do
       // not claim central verification.
       try {
-        // The emergency fallback remains the canonical enqueueSale(sale) path.
+        // Firebase failures keep this exact sale recoverable for automatic retry.
+        // Diagnostics are admin-only and are never required to continue checkout.
         enqueueSale(sale, { error })
-        const pendingEntry = readPendingSaleDiagnostics().find(row => row.type === 'sale_write' && row.saleId === sale.saleId)
-        let centralDiagnosticWrite = null
-        try { centralDiagnosticWrite = await writePendingSaleCentralDiagnostic(sale, error, { attempts: pendingEntry?.attempts || 0 }) } catch (diagnosticError) { console.warn('PENDING_DIAGNOSTIC_WRITE_FAILED', diagnosticError?.code || diagnosticError?.message || String(diagnosticError)) }
-        const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
         setCashierSyncPhase('pending')
-        setSaleSyncWarning(centralDiagnosticWrite ? 'الطلب محفوظ بانتظار المزامنة\nلم يتم تأكيد الطلب مركزيًا بسبب الاتصال. لا تعيد البيع. تم إرسال تنبيه للمدير للفحص.' : 'الطلب محفوظ بانتظار المزامنة\nتعذر إرسال التنبيه المركزي، لكن الطلب محفوظ محليًا. لا تعيد البيع.')
-        setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: null })
+        setSaleSyncWarning('فشل إرسال الطلب. تحقق من الإنترنت وحاول مرة أخرى. لم يتم حذف الطلب من السلة.')
+        setModal('seller-selection')
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
         void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       } catch (queueError) {
-        setOperationalDayError(queueError?.message || error?.message || 'تعذر حفظ الطلب مؤقتًا.')
-        setModal('operational-day-required')
+        setSaleSyncWarning('فشل إرسال الطلب. تحقق من الإنترنت وحاول مرة أخرى. لم يتم حذف الطلب من السلة.')
+        setModal('seller-selection')
         saleInFlight.current = false
         return false
       }
