@@ -1,3 +1,5 @@
+import { readSalesCache } from './localSalesCache.js'
+
 const ARABIC_DIGITS = String.raw`٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹`
 
 const normalizeDigits = value => String(value ?? '').replace(/[٠-٩۰-۹]/g, digit => {
@@ -78,12 +80,7 @@ export const businessDateForSale = sale => {
 export const businessDateTimestamp = sale => dateValue(businessDateForSale(sale))
 
 export const readLocalSales = () => {
-  try {
-    const raw = JSON.parse(localStorage.getItem('pos101.sales') || '[]')
-    return Array.isArray(raw) ? raw.map(normalizeSale) : []
-  } catch {
-    return []
-  }
+  return readSalesCache().map(normalizeSale)
 }
 
 export const filterReportSales = (sales, { startMs = -Infinity, endMs = Infinity } = {}) => (Array.isArray(sales) ? sales : [])

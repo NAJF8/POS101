@@ -2,6 +2,7 @@ import { getKioskDeviceRecord } from './kioskAuth.js'
 import { kioskAuthStatus, loadCentralProducts, readCentralExpensesForReports, readCentralOperationalDay, readCentralSalesForReports, readLocalOperationalDay } from './posCentralSync.js'
 import { readRawSaleQueue, readSalesQuarantine } from './salesSyncQueue.js'
 import { BUILD_SHA, VERSION_MANIFEST_PATH, validateDeployMeta } from './versionUpdate.js'
+import { cleanupOversizedLocalCaches, inspectLocalStorage, testLocalStorageWrite } from './localSalesCache.js'
 
 export const safeJsonParse = (value, fallback = null) => {
   try { return JSON.parse(String(value)) } catch { return fallback }
@@ -172,6 +173,20 @@ const checkBundle = async () => {
 export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn }) => {
   const results = await runIndependentChecks([
     ['bundle', checkBundle],
+    ['storage-quota', async () => {
+      const before = inspectLocalStorage()
+      const probe = testLocalStorageWrite()
+      const centralReadable = Array.isArray(centralSales) && centralSales.length > 0
+      const cleanup = before.quotaRisk && centralReadable ? cleanupOversizedLocalCaches({ centralReadable: true }) : { cleanedKeys: [], preservedKeys: [], before, after: before }
+      const after = inspectLocalStorage()
+      const riskCleared = !after.quotaRisk || after.salesBytes < before.salesBytes
+      return {
+        status: before.quotaRisk && !riskCleared ? 'warn' : 'pass',
+        message: before.quotaRisk ? (riskCleared ? 'تم تنظيف كاش المبيعات الآمن' : 'ذاكرة المبيعات المحلية كبيرة وسيتم تنظيف الكاش الآمن') : 'استخدام ذاكرة الجهاز المحلية ضمن الحد الآمن',
+        repaired: cleanup.cleanedKeys.length > 0,
+        details: { before, after, centralReadable, tinyWriteProbe: probe, cleanedKeys: cleanup.cleanedKeys, preservedKeys: cleanup.preservedKeys, fullSalesCacheDisabled: !after.fullSalesCachePresent },
+      }
+    }],
     ['activation', async () => {
       const [deviceResult, authResult] = await Promise.allSettled([getKioskDeviceRecord(), kioskAuthStatus()])
       const device = deviceResult.status === 'fulfilled' ? deviceResult.value : null

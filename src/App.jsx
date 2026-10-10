@@ -32,6 +32,7 @@ import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { buildRealOptionsAddTest, prepareCartAdd } from './services/cartPipeline.js'
+import { isQuotaExceededError, persistLocalSaleAfterCentralReadback, writeSalesCache } from './services/localSalesCache.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 
@@ -1144,8 +1145,9 @@ export default function App() {
     // complete before local sync metadata, printing, or cart clearing.
     try {
       await saveCentralSaleImmediately(sale)
-      markSaleSynced(sale)
-      setSaleSyncWarning('')
+      const localCacheResult = persistLocalSaleAfterCentralReadback(sale, markSaleSynced)
+      if (!localCacheResult.localCacheOk) recordSafeUiError('CENTRAL_SALE_LOCAL_CACHE', new Error(localCacheResult.warning), { saleId: sale.saleId })
+      setSaleSyncWarning(localCacheResult.warning)
       if (autoPrint) await requestSalePrint(sale)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
       setPendingPayment(null)
@@ -1156,6 +1158,12 @@ export default function App() {
       saleInFlight.current = false
       return true
     } catch (error) {
+      if (isQuotaExceededError(error)) {
+        setOperationalDayError('امتلأت ذاكرة الجهاز المحلية. لم يتم اعتبار البيع ناجحًا قبل تأكيد Firebase. افحص النظام قبل إعادة المحاولة.')
+        setModal('storage-quota')
+        saleInFlight.current = false
+        return false
+      }
       if (isOperationalDayClosedError(error)) {
         setOperationalDay(error.operationalDay || { ...currentOperationalDay, status: 'closed' })
         setOperationalDayError('لا يمكن البيع: اليوم التشغيلي مغلق أو تغيّر من جهاز آخر. حدّث الحالة أو افتح يوم جديد.')
@@ -1194,7 +1202,7 @@ export default function App() {
     const writeLocalPending = next => {
       const sales = readLocalSales()
       const nextSales = sales.map(row => (row.saleId || row.id) === saleId ? next : row)
-      localStorage.setItem('pos101.sales', JSON.stringify(nextSales))
+      writeSalesCache(nextSales)
       window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: next }))
       return next
     }
@@ -1538,7 +1546,7 @@ export default function App() {
       {currentView === 'orders' && (session || adminReady) && (
         <OrderHistoryMenu
           session={session}
-          salesOverride={adminReady ? adminCentralSales : null}
+          salesOverride={adminReady ? adminCentralSales : centralSales.length ? centralSales : null}
           readOnly={false}
           onEditSale={saveSaleEdit}
           canCorrectSaleItems
@@ -1583,7 +1591,7 @@ export default function App() {
             session={session}
             disabled={false}
           />
-          {modal === 'history' && <OrderHistoryMenu session={session} onEditSale={saveSaleEdit} onVoidSale={handleVoidSale} canCorrectSaleItems staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
+          {modal === 'history' && <OrderHistoryMenu session={session} salesOverride={centralSales.length ? centralSales : null} onEditSale={saveSaleEdit} onVoidSale={handleVoidSale} canCorrectSaleItems staff={staff} correctionActor={centralAuthUser || adminAuthUser} correctionAuthorization={staffAuthorizationRecord} onClose={() => setModal(null)} />}
         </div>
       )}
 
@@ -1651,6 +1659,7 @@ export default function App() {
       {modal === 'cashier-menu' && <CashierMenu session={session} settlementPreview={settlementPreview} onClose={() => setModal(null)} onLogout={logout} />}
       {modal === 'financial-pin' && <FinancialPinDialog staff={staff} onClose={() => { setFinancialPinTarget(null); setModal(null) }} onUnlock={unlockFinancialView} />}
       {modal === 'operational-day-required' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>{operationalDayError ? 'تعذر إكمال البيع' : 'يجب بدء اليوم التشغيلي أولاً'}</h2><p>{operationalDayError || 'لن يتم إكمال البيع أو مسح السلة قبل بدء يوم تشغيلي مركزي.'}</p><div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => { setModal(null); setOperationalDayError('') }}>رجوع</button><button type="button" className="primary-action" onClick={() => { setModal(null); setOperationalDayError(''); setCurrentView('dashboard') }}>الانتقال إلى بدء اليوم</button></div></div></div>}
+      {modal === 'storage-quota' && <div className="overlay"><div className="dialog operational-day-required-dialog" dir="rtl"><h2>امتلأت ذاكرة الجهاز المحلية</h2><p>البيع المركزي آمن إذا تم تأكيده من Firebase. سيتم تنظيف الكاش المحلي بدون حذف المبيعات.</p><div className="dialog-actions"><button type="button" className="primary-action" onClick={() => { setModal(null); void runSafeCheck() }}>فحص وإصلاح النظام</button><button type="button" className="primary-action" onClick={() => { setModal(pendingPayment ? 'seller-selection' : 'payment'); setOperationalDayError('') }}>إعادة المحاولة بعد الفحص</button><button type="button" className="secondary-action" onClick={() => { setModal(null); setOperationalDayError('') }}>رجوع</button></div></div></div>}
       {modal === 'confirm-clear' && <ConfirmDialog title="تفريغ سلة المشتريات" message="سيتم مسح العناصر الحالية ولا يمكن التراجع عن العملية." onClose={() => setModal(null)} onConfirm={() => { clearCart(); setModal(null) }} />}
       {modal === 'save-pending-table' && <SavePendingTableDialog total={total} session={session} onClose={() => setModal(null)} onSave={saveCurrentPendingTable} />}
       {modal === 'print-menu' && <PrintMenu enabled={autoPrint} settings={printerSettings} thermalStatus={thermalStatus} onClose={() => setModal(null)} onChange={v => setAutoPrint(v)} onSave={savePrinterSettings} onCheck={settings => refreshThermalStatus({ ...printerSettings, ...settings })} onDirectChange={v => setPrinterSettings(s => ({ ...s, directThermal: v }))} />}

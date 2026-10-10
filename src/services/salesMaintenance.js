@@ -1,3 +1,5 @@
+import { writeSalesCache } from './localSalesCache.js'
+
 const SALES_KEY = 'pos101.sales'
 const FIRST_DELETE_ORDER = 1023
 const LAST_DELETE_ORDER = 1050
@@ -82,7 +84,8 @@ export const runSalesMaintenance = ({ storage = window.localStorage, download = 
     const orderNumber = orderNumberOf(sale)
     return !(orderNumber >= FIRST_DELETE_ORDER && orderNumber <= LAST_DELETE_ORDER)
   })
-  storage.setItem(SALES_KEY, JSON.stringify(filtered))
+  const cacheWrite = writeSalesCache(filtered, { storage, centralReadable: true })
+  if (!cacheWrite.ok) throw new Error('فشل تحديث كاش المبيعات المحلي الآمن.')
 
   const after = parseSales(storage)
   const afterPlan = buildSalesMaintenancePlan(after)

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icons'
+import { readSalesCache, writeSalesCache } from '../services/localSalesCache.js'
 
 const PAGE_SIZE = 10
-const readSales = () => {
-  try { return JSON.parse(localStorage.getItem('pos101.sales')) || [] } catch { return [] }
-}
+const readSales = () => readSalesCache()
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { businessDateForSale } from '../services/reportSales.js'
 import { validateCorrectionIdentity } from '../services/saleEdit.js'
@@ -193,7 +192,7 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
     const voidedAt = Date.now()
     const audit = { id: crypto.randomUUID(), type: 'void', at: voidedAt, cashierId: session?.cashierId || null, cashierNameSnapshot: session?.cashierNameSnapshot || null }
     const nextSales = sales.map(entry => entry.id === sale.id ? { ...entry, status: 'voided', voidedAt, audit: [...(entry.audit || []), audit] } : entry)
-    localStorage.setItem('pos101.sales', JSON.stringify(nextSales))
+    writeSalesCache(nextSales)
     window.dispatchEvent(new CustomEvent('pos101-sale-updated', { detail: nextSales.find(entry => entry.id === sale.id) }))
     setSales(nextSales)
     setSelectedSale(nextSales.find(entry => entry.id === sale.id))

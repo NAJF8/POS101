@@ -1,3 +1,5 @@
+import { writeSalesCache } from './localSalesCache.js'
+
 const SALES_KEY = 'pos101.sales'
 const QUEUE_KEY = 'pos101.syncQueue'
 export const QUARANTINE_BUCKET = 'pos101.salesQuarantine'
@@ -14,7 +16,14 @@ const readJson = (key, fallback) => {
   }
 }
 
-const writeJson = (key, value) => localStorage.setItem(key, JSON.stringify(value))
+const writeJson = (key, value) => {
+  if (key === SALES_KEY) {
+    const result = writeSalesCache(value)
+    if (typeof window !== 'undefined') window.__POS101_LAST_SALES_CACHE_WRITE__ = result
+    return result
+  }
+  return localStorage.setItem(key, JSON.stringify(value))
+}
 const saleIdOf = sale => sale?.saleId || sale?.id
 const operationKeyOf = sale => sale?.operationKey || sale?.operation_key
 const sameSale = (sale, saleId) => saleIdOf(sale) === saleId
@@ -394,16 +403,20 @@ export const resolveVoidedSaleLocally = (sale, { centralVerified = false, queueR
 export const readSalesCount = () => readJson(SALES_KEY, []).filter(sale => saleIdOf(sale)).length
 
 export const readPendingSaleCount = () => {
+  const queued = readRawSaleQueue().filter(isSaleEntry).filter(entry => pendingStatus(entry?.status)).map(entry => entry?.sale || entry)
+  const queuedIds = new Set(queued.map(sale => String(saleIdOf(sale) || '')))
+  const queuedCount = new Set(queued.map(sale => String(saleIdOf(sale) || '')).filter(Boolean)).size
   const seenIds = new Set()
   const seenOperationKeys = new Set()
-  return readJson(SALES_KEY, []).reduce((count, sale) => {
+  const legacyCount = readJson(SALES_KEY, []).reduce((count, sale) => {
     const saleId = saleIdOf(sale)
     const operationKey = operationKeyOf(sale)
-    if (!isSaleSyncEligible(sale) || seenIds.has(saleId) || (operationKey && seenOperationKeys.has(operationKey)) || sale.status === 'synced' || sale.syncStatus === 'synced' || sale.centralVerified === true || sale.syncConfirmedAt) return count
+    if (!isSaleSyncEligible(sale) || queuedIds.has(String(saleId || '')) || seenIds.has(saleId) || (operationKey && seenOperationKeys.has(operationKey)) || sale.status === 'synced' || sale.syncStatus === 'synced' || sale.centralVerified === true || sale.syncConfirmedAt) return count
     seenIds.add(saleId)
     if (operationKey) seenOperationKeys.add(operationKey)
     return count + 1
   }, 0)
+  return queuedCount + legacyCount
 }
 
 export const readSaleSyncStatus = () => {
@@ -543,7 +556,8 @@ export const reconcileSalesAgainstCentral = centralSales => {
   const sales = readJson(SALES_KEY, [])
   const queue = readJson(QUEUE_KEY, [])
   const reconciledIds = new Set()
-  for (const sale of sales) {
+  const candidates = [...sales, ...queue.filter(isSaleEntry).map(entry => entry.sale)].filter(Boolean)
+  for (const sale of candidates) {
     if (!isSaleSyncEligible(sale) || sale.syncStatus === 'synced' || sale.centralVerified === true || sale.syncConfirmedAt) continue
     // Identity alone is not sufficient: a collision must remain blocked. A
     // local sale is verified only after the complete financial payload matches.
@@ -671,13 +685,14 @@ export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
   const nextSales = index >= 0
     ? sales.map((row, rowIndex) => rowIndex === index ? { ...row, ...synced } : row)
     : sales.some(row => saleIdOf(row) === saleId) ? sales : [...sales, synced]
-  writeJson(SALES_KEY, nextSales)
+  const cacheWrite = writeJson(SALES_KEY, nextSales)
   writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => {
     if (entry?.expense || entry?.kind === 'expense' || entry?.type === 'expense') return true
     const queuedSale = entry?.sale || entry
     return !sameSaleIdentity(queuedSale, sale)
   }))
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-created', { detail: synced }))
+  return { saleId, centralVerified: true, cacheWrite }
 }
 
 export const markSaleVoidedCentral = (sale, { voidConfirmedAt = Date.now(), queueResolution = 'void_status_synced', audit = null } = {}) => {

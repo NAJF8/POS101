@@ -39,6 +39,7 @@ import { defaultSyncLockManager, EMERGENCY_REPAIR_KEY } from './syncLockManager.
 import { BUILD_SHA } from './versionUpdate.js'
 import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
 import { buildRecoveryCandidates, classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
+import { readSalesCache, writeSalesCache } from './localSalesCache.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -131,10 +132,7 @@ const OPERATIONAL_DAY_STALE_DETECTED_AT_KEY = 'pos101.staleDetectedAt'
 const DEVICE_ID_KEY = 'pos101.deviceId'
 const ALLOWED_DAY_CLOSE_SOURCES = new Set(['manual_end_day', 'admin_reopen_fix', 'system_test'])
 const readSales = () => {
-  try {
-    const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
-    return Array.isArray(value) ? value : []
-  } catch { return [] }
+  return readSalesCache()
 }
 const readLocalCashierSession = () => {
   try {
@@ -145,7 +143,7 @@ const readLocalCashierSession = () => {
     return cashierName || cashierId ? { ...session, cashierName, cashierId } : null
   } catch { return null }
 }
-const writeSales = sales => localStorage.setItem(SALES_KEY, JSON.stringify(sales))
+const writeSales = sales => writeSalesCache(sales)
 const dispatchUpdated = () => window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
 const dispatchExpensesUpdated = () => window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
 
@@ -1276,7 +1274,7 @@ export const mergeCentralSalesLocally = centralSales => {
   const localSales = readSales()
   const merged = mergeBySaleId(localSales, centralSales)
   if (JSON.stringify(merged) !== JSON.stringify(localSales)) {
-    writeSales(merged)
+    writeSalesCache(merged, { centralReadable: Array.isArray(centralSales) && centralSales.length > 0 })
     dispatchUpdated()
   }
   // Run after the merge so a legacy central status (including null) cannot
@@ -1852,10 +1850,7 @@ export const BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED = true
 export const TEMP_OPEN_ONE_BUTTON_REPAIR = env.VITE_TEMP_OPEN_ONE_BUTTON_REPAIR === 'true'
 
 const readLocalSalesForBackupTool = () => {
-  try {
-    const value = JSON.parse(localStorage.getItem(SALES_KEY) || '[]')
-    return Array.isArray(value) ? value : []
-  } catch { return [] }
+  return readSalesCache()
 }
 
 export const inspectBackupSales = async ({ sales = [], syncQueueItems = [] } = {}) => {
@@ -1899,7 +1894,7 @@ export const markBackupSaleReadbackLocally = async ({ sale, centralSale } = {}) 
   if (index < 0) return { updated: false, reason: 'LOCAL_SALE_NOT_FOUND' }
   const now = Date.now()
   localSales[index] = { ...localSales[index], centralVerified: true, centralVerifiedAt: now, syncConfirmedAt: now, syncSource: 'firebase-readback', syncStatus: 'synced', status: 'synced' }
-  localStorage.setItem(SALES_KEY, JSON.stringify(localSales))
+  writeSalesCache(localSales, { centralReadable: true })
   window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
   return { updated: true, saleId: saleIdOf(expected), at: now }
 }
@@ -1948,7 +1943,7 @@ const writeBackupRepairLocalSale = (expected, now = Date.now()) => {
     syncStatus: 'synced',
     status: 'synced',
   }
-  localStorage.setItem(SALES_KEY, JSON.stringify(localSales))
+  writeSalesCache(localSales, { centralReadable: true })
   return { updated: true, saleId: saleIdOf(expected) }
 }
 

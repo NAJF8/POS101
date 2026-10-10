@@ -80,6 +80,7 @@
     ,"test:add-to-cart": "node scripts/add-to-cart-regression.mjs"
     ,"test:cashier-local-state": "node scripts/cashier-local-state-regression.mjs"
     ,"test:cart-options-real-flow": "node scripts/cart-options-real-flow-regression.mjs"
+    ,"test:localstorage-quota": "node scripts/localstorage-quota-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
