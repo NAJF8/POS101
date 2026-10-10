@@ -56,7 +56,7 @@ export default function OrderPanel({
                   </div>
                   <div className="i-prod-text">
                     <b>{names.arabic}</b>
-                    {item.options?.map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o.name}</div>)}
+                    {(Array.isArray(item.options) ? item.options : []).map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o?.name || ''}</div>)}
                   </div>
                 </div>
                 <div className="i-price">

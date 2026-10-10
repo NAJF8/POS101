@@ -30,6 +30,7 @@ import KioskActivation from './components/KioskActivation.jsx'
 import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
+import { buildCartItem } from './services/cartItem.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -879,7 +880,12 @@ export default function App() {
   // Order mutations
   const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o), discountPresets) : o)), [active, discountPresets])
   const addProduct = useCallback(p => {
-    const item = { ...p, price: p.unitPrice || p.price, lineId: `${p.id}-${Date.now()}` }
+    const result = buildCartItem(p, `${p?.id || 'product'}-${Date.now()}`)
+    if (!result.ok) {
+      setCashierToast(result.error)
+      return
+    }
+    const item = result.item
     update(o => {
       const variantLine = item.variantId || item.childProductId
       if (!variantLine) return { ...o, items: [...o.items, item] }

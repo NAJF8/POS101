@@ -8,7 +8,7 @@ class AppErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) { return { error } }
   componentDidCatch(error, info) { console.error('APP_RENDER_ERROR', error, info) }
   render() {
-    if (this.state.error) return <main dir="rtl" role="alert" style={{ padding: '2rem', textAlign: 'center' }}><h1>حدث خطأ غير متوقع. أعد تحميل النظام.</h1><button type="button" onClick={() => window.location.reload()}>إعادة تحميل</button></main>
+    if (this.state.error) return <main dir="rtl" role="alert" data-testid="app-error-fallback" style={{ padding: '2rem', textAlign: 'center' }}><h1>حدث خطأ غير متوقع</h1><p>{this.state.error?.message || 'تعذر عرض الشاشة.'}</p><button type="button" onClick={() => window.location.reload()}>إعادة تحميل النظام</button></main>
     return this.props.children
   }
 }
