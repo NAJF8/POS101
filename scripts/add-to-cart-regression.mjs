@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildCartItem, getOptionLabel, normalizeCartItem, normalizeCartItems, normalizeOptions } from '../src/services/cartItem.js'
+import { buildCartItem, getOptionLabel, normalizeCartItem, normalizeCartItems, normalizeOptions, normalizeOrder } from '../src/services/cartItem.js'
 import { formatNumber } from '../src/utils.js'
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
@@ -36,6 +36,7 @@ assert.deepEqual(legacy.selectedOptions, [])
 assert.equal(getOptionLabel({ id: 'size-large' }), 'size-large')
 assert.equal(getOptionLabel({ unexpected: true }), '')
 assert.equal(normalizeCartItems({ broken: true }).length, 0)
+assert.deepEqual(normalizeOrder({ id: 1, items: { broken: true } }).items, [])
 assert.equal(formatNumber(Number.NaN), '0')
 const invalid = buildCartItem({ id: 'broken', price: 'not-a-number' }, 'broken-1')
 assert.equal(invalid.ok, false)

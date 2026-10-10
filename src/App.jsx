@@ -30,14 +30,10 @@ import KioskActivation from './components/KioskActivation.jsx'
 import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
-import { buildCartItem, normalizeCartItems, normalizeCartItem, safeNumber } from './services/cartItem.js'
+import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
-const normalizeOrder = order => ({
-  ...order,
-  items: normalizeCartItems(order?.items),
-})
 const ensureOrderSlots = (value, count = 10) => {
   const list = Array.isArray(value) ? value.filter(Boolean).map(normalizeOrder) : []
   const usedIds = new Set(list.map(order => Number(order?.id)).filter(Number.isFinite))

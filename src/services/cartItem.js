@@ -57,6 +57,11 @@ export const normalizeCartItem = (rawItem, fallbackLineId = 'cart-item') => {
 
 export const normalizeCartItems = items => asArray(items).map((item, index) => normalizeCartItem(item, `cart-item-${index + 1}`))
 
+export const normalizeOrder = rawOrder => ({
+  ...(rawOrder && typeof rawOrder === 'object' ? rawOrder : {}),
+  items: normalizeCartItems(rawOrder?.items),
+})
+
 export const buildCartItem = (product, lineId) => {
   if (!product || typeof product !== 'object') return { ok: false, error: INVALID_PRICE_MESSAGE }
   const rawPrice = product.unitPrice ?? product.price
