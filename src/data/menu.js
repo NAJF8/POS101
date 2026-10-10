@@ -88,7 +88,8 @@ export const products = rows.map(([category, name, english, price], index) => ({
 // The authoritative menu currently stores Arabic in `name` and the optional
 // secondary English label in `english`; alternate established keys stay safe.
 const hasArabic = value => typeof value === 'string' && /[\u0600-\u06ff]/.test(value)
+const safeName = value => typeof value === 'string' ? value.trim() : ''
 export const productNames = product => ({
-  arabic: [product?.nameAr, product?.name_ar, product?.name].find(hasArabic) || product?.name || '',
-  english: [product?.nameEn, product?.name_en, product?.english].find(value => typeof value === 'string' && value.trim()) || ''
+  arabic: [product?.nameAr, product?.name_ar, product?.name].map(safeName).find(hasArabic) || '',
+  english: [product?.nameEn, product?.name_en, product?.english].map(safeName).find(value => value) || ''
 })

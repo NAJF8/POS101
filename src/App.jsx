@@ -30,12 +30,16 @@ import KioskActivation from './components/KioskActivation.jsx'
 import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
-import { buildCartItem } from './services/cartItem.js'
+import { buildCartItem, normalizeCartItems, normalizeCartItem, safeNumber } from './services/cartItem.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
+const normalizeOrder = order => ({
+  ...order,
+  items: normalizeCartItems(order?.items),
+})
 const ensureOrderSlots = (value, count = 10) => {
-  const list = Array.isArray(value) ? value.slice() : []
+  const list = Array.isArray(value) ? value.filter(Boolean).map(normalizeOrder) : []
   const usedIds = new Set(list.map(order => Number(order?.id)).filter(Number.isFinite))
   let nextId = 1
   while (list.length < count) {
@@ -48,7 +52,7 @@ const ensureOrderSlots = (value, count = 10) => {
 }
 export const tablesEnabled = false
 const read = (key, fallback) => { try { const raw = localStorage.getItem(key); return raw === null ? fallback : JSON.parse(raw) } catch { return fallback } }
-const orderSubtotal = order => order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+const orderSubtotal = order => normalizeCartItems(order?.items).reduce((sum, item) => sum + safeNumber(item.price * item.quantity, 0), 0)
 export const DEFAULT_DISCOUNT_PRESETS = { baly: 26, toters: 25 }
 const normalizeDiscountPresets = value => ({
   baly: Math.min(100, Math.max(0, Number.isFinite(Number(value?.baly)) ? Number(value.baly) : DEFAULT_DISCOUNT_PRESETS.baly)),
@@ -65,8 +69,9 @@ const discountValue = (subtotal, discount, discountPresets = DEFAULT_DISCOUNT_PR
   return Math.min(subtotal, Math.max(0, value))
 }
 const recalculateDiscount = (order, discountPresets) => {
-  if (!order.discount) return order
-  return { ...order, discount: { ...order.discount, value: discountValue(orderSubtotal(order), order.discount, discountPresets) } }
+  const normalized = normalizeOrder(order)
+  if (!normalized.discount) return normalized
+  return { ...normalized, discount: { ...normalized.discount, value: discountValue(orderSubtotal(normalized), normalized.discount, discountPresets) } }
 }
 const shifts = [
   { shiftId: 'morning', shiftType: 'morning', shiftLabel: 'صباحي', name: 'كاشير صباحي' },
@@ -232,7 +237,7 @@ export default function App() {
   }, [operationalDay])
 
 
-  const activeOrder = orders[active] || orders[0]
+  const activeOrder = normalizeOrder(orders[active] || orders[0] || blankOrder(1))
   const subtotal = orderSubtotal(activeOrder)
   const activeDiscount = discountValue(subtotal, activeOrder.discount, discountPresets)
   const total = Math.max(0, subtotal - activeDiscount)
@@ -878,7 +883,7 @@ export default function App() {
   const activeShift = Boolean(session?.shiftId && (session?.shiftType === 'morning' || session?.shiftType === 'evening'))
 
   // Order mutations
-  const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(o), discountPresets) : o)), [active, discountPresets])
+  const update = useCallback(fn => setOrders(v => v.map((o, i) => i === active ? recalculateDiscount(fn(normalizeOrder(o)), discountPresets) : normalizeOrder(o))), [active, discountPresets])
   const addProduct = useCallback(p => {
     const result = buildCartItem(p, `${p?.id || 'product'}-${Date.now()}`)
     if (!result.ok) {

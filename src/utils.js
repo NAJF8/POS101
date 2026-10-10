@@ -3,7 +3,10 @@ const LATN_DATETIME_FORMAT = new Intl.DateTimeFormat('en-GB', { numberingSystem:
 
 export const toEnglishDigits = value => String(value).replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit)).replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))
 
-export const formatNumber = value => LATN_NUMBER_FORMAT.format(Number(value || 0))
+export const formatNumber = value => {
+  const number = Number(value)
+  return LATN_NUMBER_FORMAT.format(Number.isFinite(number) ? number : 0)
+}
 
 export const formatCurrency = (value, showCurrency = true) => {
   const formatted = formatNumber(value)

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildCartItem, normalizeOptions } from '../src/services/cartItem.js'
+import { buildCartItem, getOptionLabel, normalizeCartItem, normalizeCartItems, normalizeOptions } from '../src/services/cartItem.js'
+import { formatNumber } from '../src/utils.js'
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const panel = fs.readFileSync(new URL('../src/components/OrderPanel.jsx', import.meta.url), 'utf8')
@@ -27,13 +28,28 @@ assert.deepEqual(customized.item.additions, [])
 assert.deepEqual(customized.item.flavors, [])
 assert.deepEqual(customized.item.variants, [])
 assert.deepEqual(customized.item.sizes, [])
+const legacy = normalizeCartItem({ id: 'legacy-render', name: 'ايس لاتيه بنكهات', price: '5500', quantity: 1, options: { broken: true }, additions: { broken: true }, selectedOptions: { broken: true } }, 'legacy-render')
+assert.equal(legacy.total, 5500)
+assert.deepEqual(legacy.options, [])
+assert.deepEqual(legacy.additions, [])
+assert.deepEqual(legacy.selectedOptions, [])
+assert.equal(getOptionLabel({ id: 'size-large' }), 'size-large')
+assert.equal(getOptionLabel({ unexpected: true }), '')
+assert.equal(normalizeCartItems({ broken: true }).length, 0)
+assert.equal(formatNumber(Number.NaN), '0')
 const invalid = buildCartItem({ id: 'broken', price: 'not-a-number' }, 'broken-1')
 assert.equal(invalid.ok, false)
 assert.equal(invalid.error, 'تعذر إضافة المنتج: السعر غير صالح')
 
 assert.match(app, /buildCartItem\(p, /)
-assert.match(panel, /Array\.isArray\(order\?\.items\) \? order\.items : \[\]/)
+assert.match(panel, /normalizeCartItems\(order\?\.items\)/)
 assert.match(panel, /Array\.isArray\(item\?\.additions\) \? item\.additions : \[\]/)
+assert.match(panel, /normalizeCartItems\(order\?\.items\)/)
+assert.match(app, /normalizeCartItems\(order\?\.items\)/)
+assert.match(app, /normalizeOrder\(o\)/)
+assert.match(main, /APP_RENDER_ERROR/)
+const menu = fs.readFileSync(new URL('../src/data/menu.js', import.meta.url), 'utf8')
+assert.match(menu, /const safeName = value => typeof value === 'string'/)
 assert.match(main, /data-testid="app-error-fallback"/)
 assert.match(main, /إعادة تحميل النظام/)
 

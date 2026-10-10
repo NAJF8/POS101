@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Icon } from './Icons'
 import { formatNumber } from '../utils.js'
 import { productNames } from '../data/menu'
+import { normalizeCartItems, getOptionLabel, safeNumber } from '../services/cartItem.js'
 
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
@@ -9,8 +10,8 @@ export default function OrderPanel({
   onPrintMenu, onReturn, onSavePending, disabled, scrollRequest
 }) {
   const itemsAreaRef = useRef(null)
-  const items = Array.isArray(order?.items) ? order.items : []
-  const subtotal = items.reduce((s, i) => s + Number(i?.price || 0) * Number(i?.quantity || 0), 0)
+  const items = normalizeCartItems(order?.items)
+  const subtotal = items.reduce((s, i) => s + safeNumber(i.price * i.quantity, 0), 0)
   const discountVal = order.discount?.value || 0
   const total = Math.max(0, subtotal - discountVal)
 
@@ -59,7 +60,7 @@ export default function OrderPanel({
                   </div>
                   <div className="i-prod-text">
                     <b>{names.arabic}</b>
-                    {[...options, ...additions].map((o, i) => <div className="opt" key={i}>+ {typeof o === 'string' ? o : o?.name || ''}</div>)}
+                    {[...options, ...additions].map((o, i) => <div className="opt" key={i}>+ {getOptionLabel(o)}</div>)}
                   </div>
                 </div>
                 <div className="i-price">
@@ -72,7 +73,7 @@ export default function OrderPanel({
                   <button onClick={() => updateQuantity(item.lineId, 1)}><Icon name="plus" size={14}/></button>
                 </div>
                 <div className="i-total">
-                  <span>{formatNumber(Number(item?.price || 0) * Number(item?.quantity || 0))}</span>
+                  <span>{formatNumber(safeNumber(item?.price * item?.quantity, 0))}</span>
                   <small>د.ع</small>
                 </div>
                 <div className="i-actions">

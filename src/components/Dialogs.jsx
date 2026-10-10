@@ -6,7 +6,7 @@ import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatNumber, formatDate, formatTime, formatDateTime } from '../utils.js'
 import { getOpenOrders } from '../services/orderState.js'
-import { asArray, safeNumber } from '../services/cartItem.js'
+import { asArray, getOptionLabel, normalizeCartItems, safeNumber } from '../services/cartItem.js'
 const format = formatMoney
 
 /* ── Product Options ── */
@@ -323,8 +323,8 @@ export function OpenOrders({ orders, onClose, onSelect, onHistory }) {
       </div>
       <div className="open-orders-list">
         {list.map(o => {
-          const items = o.originalItems || o.items
-          const orderTotal = o.total || items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+          const items = normalizeCartItems(o.originalItems || o.items)
+          const orderTotal = safeNumber(o.total, 0) || items.reduce((sum, item) => sum + safeNumber(item.price * item.quantity, 0), 0)
           const type = o.table ? `داخل الكوفي — طاولة ${o.table}` : o.orderType || 'غير محدد'
           return <article className="open-order" key={o.id}>
             <div className="open-order-main"><b dir="ltr">{o.sale?.orderNumber ? `#${formatNumber(o.sale.orderNumber)}` : o.name}</b><em className={o.held ? 'held' : ''}>{o.completed ? 'مكتمل' : o.held ? 'معلق' : 'مفتوح'}</em></div>
@@ -341,7 +341,7 @@ export function OpenOrders({ orders, onClose, onSelect, onHistory }) {
 /* ── History ── */
 export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint }) {
   const adjustments = order?.adjustments || []
-  const items = order?.originalItems || order?.items || []
+  const items = normalizeCartItems(order?.originalItems || order?.items)
   return (
     <Dialog onClose={onClose} className="history-dialog">
       <button className="close" onClick={onClose}><Icon name="x" /></button>
@@ -350,7 +350,7 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
       <div className="history-lines">
         {items.map(i => (
           <div key={i.lineId}>
-            <span>{i.name} × {formatNumber(i.quantity)}</span>
+            <span>{getOptionLabel(i.name)} × {formatNumber(i.quantity)}</span>
             <b>{format(i.price * i.quantity)}</b>
           </div>
         ))}
@@ -379,7 +379,7 @@ export function History({ order, onClose, onReturn, onAdd, onPrint, onReprint })
 
 /* ── Return Dialog ── */
 export function ReturnDialog({ order, onClose, onConfirm }) {
-  const items = order?.originalItems || order?.items || []
+  const items = normalizeCartItems(order?.originalItems || order?.items)
   const [item, setItem] = React.useState(items[0]?.lineId || '')
   const [quantity, setQuantity] = React.useState(1)
   const [reason, setReason] = React.useState('طلب غير صحيح')
@@ -422,11 +422,11 @@ export function Receipt({ sale }) {
   if (!sale) return null
   const logoSrc = logoDataUri || `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
   const order = sale.order || {}
-  const items = order.items || sale.items || []
-  const subtotal = Number(sale.subtotal ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0))
+  const items = normalizeCartItems(order.items || sale.items)
+  const subtotal = safeNumber(sale.subtotal ?? items.reduce((sum, item) => sum + safeNumber(item.price * item.quantity, 0), 0), 0)
   const discount = Number(sale.discount || 0)
   const service = Number(sale.service || 0)
-  const total = Number(sale.total ?? Math.max(0, subtotal - discount))
+  const total = safeNumber(sale.total ?? Math.max(0, subtotal - discount), 0)
   const cashier = sale.seller || sale.cashierNameSnapshot || ''
   const orderType = order.orderType || sale.orderType || 'صالة'
   const orderNumber = sale.orderNumber || order.orderNumber || ''
