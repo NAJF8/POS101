@@ -37,13 +37,74 @@ export const safeObjectSummary = value => {
 export const runSafeCheck = async (name, check) => {
   try {
     const result = await check()
-    return { name, status: result?.status || 'pass', message: safeText(result?.message, 'تم الفحص'), details: result?.details || null, repaired: result?.repaired === true }
+    return { name, status: result?.status || 'pass', message: safeText(result?.message, 'تم الفحص'), details: result?.details || null, repaired: result?.repaired === true, realFlow: result?.realFlow || null }
   } catch (error) {
     return { name, status: 'fail', message: safeErrorMessage(error), details: { error: safeErrorMessage(error) }, repaired: false }
   }
 }
 
 export const runIndependentChecks = async checks => Promise.all(checks.map(([name, check]) => runSafeCheck(name, check)))
+
+export const recordSafeUiError = (type, error, details = {}) => {
+  if (typeof window === 'undefined') return
+  const entry = { type: safeText(type, 'UI_ERROR'), message: safeErrorMessage(error), details: safeObjectSummary(details), timestamp: new Date().toISOString() }
+  const current = Array.isArray(window.__POS101_LAST_UI_ERRORS__) ? window.__POS101_LAST_UI_ERRORS__ : []
+  window.__POS101_LAST_UI_ERRORS__ = [...current, entry].slice(-20)
+  window.__POS101_LAST_ERROR__ = entry
+}
+
+const cloneOrder = order => {
+  try { return typeof structuredClone === 'function' ? structuredClone(order) : safeJsonParse(JSON.stringify(order), {}) } catch { return safeJsonParse(JSON.stringify(order), {}) }
+}
+
+export const simulateCashierFlow = ({ products = [], activeOrder = {}, buildCartItemFn, normalizeOrderFn, calculateTotalsFn, paymentSummaryFn }) => {
+  const result = { status: 'pass', realFlowCheck: 'PASS', normalProductDryAdd: 'FAIL', optionsProductDryAdd: 'NOT_AVAILABLE', totalsCalculable: 'NO', paymentSummaryReady: 'NO', error: '', productClicked: 'NONE', steps: [], dryRunDoesNotMutateCart: 'PASS' }
+  const original = cloneOrder(activeOrder)
+  try {
+    if (typeof buildCartItemFn !== 'function' || typeof normalizeOrderFn !== 'function' || typeof calculateTotalsFn !== 'function') throw new Error('SAFE_FLOW_PRODUCTION_HELPERS_UNAVAILABLE')
+    const normal = products.find(product => product && !product.configurable && !product.variantProducts?.length && Number.isFinite(Number(product.price)) && Number(product.price) >= 0)
+    const options = products.find(product => String(product?.name || '').includes('ايس لاتيه بنكهات')) || products.find(product => product?.configurable && Number.isFinite(Number(product.price)))
+    if (!normal) throw new Error('SAFE_FLOW_NORMAL_PRODUCT_NOT_FOUND')
+    result.productClicked = safeText(normal.name, 'UNKNOWN_PRODUCT')
+    const normalBuilt = buildCartItemFn({ ...normal, quantity: 1 }, 'safe-dry-normal')
+    if (!normalBuilt?.ok) throw new Error(normalBuilt?.error || 'SAFE_FLOW_NORMAL_ADD_FAILED')
+    let dryOrder = normalizeOrderFn({ ...cloneOrder(original), items: [...(Array.isArray(original.items) ? original.items : []), normalBuilt.item] })
+    result.normalProductDryAdd = 'PASS'
+    result.steps.push('normal-product-add')
+    if (options) {
+      const optionBuilt = buildCartItemFn({ ...options, quantity: 1, options: ['عادي'], additions: [], selectedOptions: ['عادي'], unitPrice: options.price }, 'safe-dry-options')
+      if (!optionBuilt?.ok) throw new Error(optionBuilt?.error || 'SAFE_FLOW_OPTIONS_ADD_FAILED')
+      dryOrder = normalizeOrderFn({ ...dryOrder, items: [...dryOrder.items, optionBuilt.item] })
+      result.optionsProductDryAdd = 'PASS'
+      result.productClicked = `${result.productClicked} + ${safeText(options.name, 'OPTIONS_PRODUCT')}`
+      result.steps.push('options-product-add')
+    }
+    if (!Array.isArray(dryOrder.items) || dryOrder.items.some(item => !safeText(item?.name) || !Array.isArray(item?.options) || !Number.isFinite(Number(item?.price)))) throw new Error('SAFE_FLOW_CART_RENDER_SHAPE_FAILED')
+    result.steps.push('cart-render')
+    const totals = calculateTotalsFn(dryOrder)
+    if (!totals || !Number.isFinite(Number(totals.total)) || Number(totals.total) < 0) throw new Error('SAFE_FLOW_TOTALS_FAILED')
+    result.totalsCalculable = 'YES'
+    result.steps.push('totals')
+    const quantityBefore = Number(dryOrder.items[0].quantity)
+    dryOrder = normalizeOrderFn({ ...dryOrder, items: dryOrder.items.map((item, index) => index === 0 ? { ...item, quantity: quantityBefore + 1 } : item) })
+    dryOrder = normalizeOrderFn({ ...dryOrder, items: dryOrder.items.map((item, index) => index === 0 ? { ...item, quantity: Math.max(1, Number(item.quantity) - 1) } : item) })
+    result.steps.push('quantity-change')
+    dryOrder = normalizeOrderFn({ ...dryOrder, items: dryOrder.items.slice(0, 1) })
+    result.steps.push('delete-item')
+    const paymentSummary = typeof paymentSummaryFn === 'function' ? paymentSummaryFn(calculateTotalsFn(dryOrder)) : { total: calculateTotalsFn(dryOrder).total, label: safeFormatMoney(calculateTotalsFn(dryOrder).total) }
+    if (!paymentSummary || !Number.isFinite(Number(paymentSummary.total)) || !safeText(paymentSummary.label)) throw new Error('SAFE_FLOW_PAYMENT_SUMMARY_FAILED')
+    result.paymentSummaryReady = 'YES'
+    result.steps.push('payment-summary')
+    result.details = { normalProduct: safeText(normal.name), optionsProduct: safeText(options?.name, 'NOT_AVAILABLE'), itemCount: dryOrder.items.length, paymentSummary: { total: Number(paymentSummary.total), label: safeText(paymentSummary.label) }, originalShape: safeObjectSummary(original) }
+    return result
+  } catch (error) {
+    result.status = 'fail'
+    result.realFlowCheck = 'FAIL'
+    result.error = safeErrorMessage(error)
+    result.details = { productClicked: result.productClicked, originalShape: safeObjectSummary(original) }
+    return result
+  }
+}
 
 const readLocal = key => {
   try { return safeJsonParse(window.localStorage?.getItem(key), null) } catch { return null }
@@ -79,7 +140,7 @@ const checkBundle = async () => {
   return { status: ok ? 'pass' : 'warn', message: ok ? `الحزمة الحالية ${currentBundle}` : 'الحزمة الحالية تحتاج تحديثاً أو تعذر قراءة بيانات النشر.', details: { currentBundle, expectedBundle: expectedBundle || 'UNKNOWN', buildSha: BUILD_SHA, manifestRead: Boolean(meta) } }
 }
 
-export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment }) => {
+export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, calculateTotalsFn, paymentSummaryFn }) => {
   const results = await runIndependentChecks([
     ['bundle', checkBundle],
     ['activation', async () => {
@@ -106,6 +167,12 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
       const malformed = products.filter(product => !isValidProduct(product)).length
       const options = products.filter(product => product?.configurable || Array.isArray(product?.options) || Array.isArray(product?.variantProducts)).length
       return { status: products.length && !malformed ? 'pass' : 'warn', message: products.length ? `تم تحميل ${products.length} منتج` : 'لم يتم تحميل المنتجات', details: { count: products.length, optionsProducts: options, malformed } }
+    }],
+    ['real-cashier-flow-simulation', async () => {
+      const flow = simulateCashierFlow({ products, activeOrder, buildCartItemFn, normalizeOrderFn, calculateTotalsFn, paymentSummaryFn })
+      const recentErrors = typeof window !== 'undefined' && Array.isArray(window.__POS101_LAST_UI_ERRORS__) ? window.__POS101_LAST_UI_ERRORS__ : []
+      if (flow.status === 'fail') recordSafeUiError('REAL_CASHIER_FLOW_SIMULATION', new Error(flow.error), { productClicked: flow.productClicked })
+      return { status: flow.status, message: flow.status === 'pass' ? 'تمت محاكاة مسار السلة والدفع دون كتابة' : `خلل في مسار الكاشير: ${flow.error}`, details: { ...flow, recentErrors }, realFlow: flow }
     }],
     ['cart', async () => {
       const raw = orders?.[active] || activeOrder
@@ -139,7 +206,9 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
   ])
   const fail = results.filter(result => result.status === 'fail')
   const warnings = results.filter(result => result.status === 'warn')
-  const summary = { ok: fail.length === 0, status: fail.length ? 'fail' : warnings.length ? 'warn' : 'pass', timestamp: new Date().toISOString(), checks: results, warnings: warnings.map(result => `${result.name}: ${result.message}`), errors: fail.map(result => `${result.name}: ${result.message}`), safety: { firebaseWrites: 0, salesCreated: 0, queueDeletes: 0, localStorageWiped: false } }
+  const realFlow = results.find(result => result.name === 'real-cashier-flow-simulation')?.realFlow || null
+  const recentErrors = typeof window !== 'undefined' && Array.isArray(window.__POS101_LAST_UI_ERRORS__) ? window.__POS101_LAST_UI_ERRORS__ : []
+  const summary = { ok: fail.length === 0, status: fail.length ? 'fail' : warnings.length ? 'warn' : 'pass', timestamp: new Date().toISOString(), checks: results, realFlow, recentErrors, lastProductClicked: typeof window !== 'undefined' ? window.__POS101_LAST_PRODUCT_CLICKED__ || null : null, lastModalProduct: typeof window !== 'undefined' ? window.__POS101_LAST_MODAL_PRODUCT__ || null : null, warnings: warnings.map(result => `${result.name}: ${result.message}`), errors: fail.map(result => `${result.name}: ${result.message}`), safety: { firebaseWrites: 0, salesCreated: 0, queueDeletes: 0, localStorageWiped: false } }
   console.info('[POS101_SAFE_CHECK]', safeObjectSummary(summary))
   return summary
 }

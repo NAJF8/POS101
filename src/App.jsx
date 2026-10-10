@@ -32,7 +32,7 @@ import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
-import { runSafeSystemCheck } from './services/safeSystemCheck.js'
+import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -244,6 +244,7 @@ export default function App() {
   const runSafeCheck = useCallback(async () => {
     setSafeCheckState(previous => ({ ...previous, running: true, result: null }))
     try {
+      const safeProducts = [...new Map([...products, ...centralProducts].map(product => [String(product?.id), product])).values()]
       const result = await runSafeSystemCheck({
         session,
         operationalDay,
@@ -251,6 +252,7 @@ export default function App() {
         orders,
         active,
         centralProducts,
+        products: safeProducts,
         centralSales,
         pendingPayment,
         modal,
@@ -258,6 +260,14 @@ export default function App() {
         onRepairOrder: () => setOrders(current => current.map((order, index) => index === active ? recalculateDiscount(normalizeOrder(order), discountPresets) : normalizeOrder(order))),
         onRepairDay: day => { setOperationalDay(day); setOperationalDayCentralReady(day?.status === 'open') },
         onRepairPayment: () => { setPendingPayment(null); setModal(null) },
+        buildCartItemFn: buildCartItem,
+        normalizeOrderFn: normalizeOrder,
+        calculateTotalsFn: order => {
+          const subtotalValue = orderSubtotal(order)
+          const discountValueForOrder = discountValue(subtotalValue, order?.discount, discountPresets)
+          return { subtotal: subtotalValue, discount: discountValueForOrder, total: Math.max(0, subtotalValue - discountValueForOrder) }
+        },
+        paymentSummaryFn: totals => ({ total: totals.total, label: `${formatNumber(totals.total)} د.ع` }),
       })
       setSafeCheckState({ running: false, result, onClose: () => setSafeCheckState(state => ({ ...state, result: null })) })
     } catch (error) {
@@ -908,6 +918,7 @@ export default function App() {
   const addProduct = useCallback(p => {
     const result = buildCartItem(p, `${p?.id || 'product'}-${Date.now()}`)
     if (!result.ok) {
+      recordSafeUiError('ADD_TO_CART', new Error(result.error), { product: p?.name || p?.id })
       setCashierToast(result.error)
       return
     }
@@ -923,9 +934,15 @@ export default function App() {
     setModal(null)
   }, [update])
   const selectProduct = useCallback(p => {
-    if (p.variantProducts?.length) { setSelected(p); setModal('variants'); return }
-    if (p.configurable) { setSelected(p); setModal('options'); return }
-    addProduct({ ...p, quantity: 1 })
+    try {
+      window.__POS101_LAST_PRODUCT_CLICKED__ = { name: String(p?.name || ''), id: String(p?.id || ''), timestamp: new Date().toISOString() }
+      if (p.variantProducts?.length) { setSelected(p); setModal('variants'); return }
+      if (p.configurable) { window.__POS101_LAST_MODAL_PRODUCT__ = { name: String(p?.name || ''), id: String(p?.id || ''), timestamp: new Date().toISOString() }; setSelected(p); setModal('options'); return }
+      addProduct({ ...p, quantity: 1 })
+    } catch (error) {
+      recordSafeUiError('PRODUCT_CLICK_HANDLER', error, { product: p?.name || p?.id })
+      setCashierToast(error?.message || 'تعذر إضافة المنتج')
+    }
   }, [addProduct])
   const selectVariant = useCallback((parent, child) => {
     const parentName = parent.name || ''
@@ -1433,6 +1450,7 @@ export default function App() {
           currentView={currentView}
           onNavigate={requestView}
           onSafeCheck={runSafeCheck}
+          onTestFlow={runSafeCheck}
           safeCheckState={safeCheckState}
         />
       )}

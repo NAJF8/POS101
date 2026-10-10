@@ -2001,3 +2001,4 @@ input, textarea, select { cursor: text; }
 .safe-check-details { margin-top: 12px; }
 .safe-check-details pre { max-height: 260px; overflow: auto; padding: 10px; border-radius: 8px; background: #111827; color: #e5e7eb; font-size: 11px; white-space: pre-wrap; }
 .safe-check-actions { display: flex; justify-content: flex-start; gap: 8px; margin-top: 14px; }
+.safe-check-flow-error { margin: 10px 0; padding: 10px 12px; border: 1px solid #fca5a5; border-radius: 10px; background: #fef2f2; color: #991b1b; line-height: 1.7; }
