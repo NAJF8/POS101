@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 import { formatTime, formatDate, formatNumber } from '../utils.js'
+import SafeSystemCheck from './SafeSystemCheck.jsx'
 
 const logoUrl = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
 
@@ -13,7 +14,7 @@ function useLiveClock() {
   return now
 }
 
-export default function Header({ onOpenOrders, onCashierMenu, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {} }) {
+export default function Header({ onOpenOrders, onCashierMenu, session, openOrdersCount = 0, currentView, onNavigate, onDownloadSalesBackup, syncStatus = {}, onSafeCheck, safeCheckState }) {
   const now = useLiveClock()
   const pendingBadge = syncStatus.pendingBadgeState || { show: false, reason: '', badgeBlockers: [], badgeSourceComponent: 'Header.jsx:sync-status-chip' }
   const safeSyncStatus = pendingBadge.show
@@ -72,6 +73,7 @@ export default function Header({ onOpenOrders, onCashierMenu, session, openOrder
 
         {session && currentView === 'pos' && (
           <>
+            <SafeSystemCheck onRun={onSafeCheck} state={safeCheckState} />
             <button className="header-btn outline-btn" type="button" onClick={onDownloadSalesBackup} aria-label="تنزيل نسخة المبيعات">
               <Icon name="download" size={20} />
               <span>تنزيل نسخة المبيعات</span>

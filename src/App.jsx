@@ -32,6 +32,7 @@ import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
+import { runSafeSystemCheck } from './services/safeSystemCheck.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -100,6 +101,8 @@ export default function App() {
   const [selected, setSelected] = useState(null)
   const [printSale, setPrintSale] = useState(null)
   const [printMessage, setPrintMessage] = useState(null)
+  const [pendingPayment, setPendingPayment] = useState(null)
+  const [safeCheckState, setSafeCheckState] = useState({ running: false, result: null, onClose: () => {} })
   const [session, setSession] = useState(() => read('pos101.session', null))
   const [autoPrint, setAutoPrint] = useState(() => read('pos101.autoPrint', true))
   const [discountPresets, setDiscountPresets] = useState(() => normalizeDiscountPresets(read('pos101.discountPresets', DEFAULT_DISCOUNT_PRESETS)))
@@ -237,6 +240,30 @@ export default function App() {
   const subtotal = orderSubtotal(activeOrder)
   const activeDiscount = discountValue(subtotal, activeOrder.discount, discountPresets)
   const total = Math.max(0, subtotal - activeDiscount)
+
+  const runSafeCheck = useCallback(async () => {
+    setSafeCheckState(previous => ({ ...previous, running: true, result: null }))
+    try {
+      const result = await runSafeSystemCheck({
+        session,
+        operationalDay,
+        activeOrder,
+        orders,
+        active,
+        centralProducts,
+        centralSales,
+        pendingPayment,
+        modal,
+        saleInFlight,
+        onRepairOrder: () => setOrders(current => current.map((order, index) => index === active ? recalculateDiscount(normalizeOrder(order), discountPresets) : normalizeOrder(order))),
+        onRepairDay: day => { setOperationalDay(day); setOperationalDayCentralReady(day?.status === 'open') },
+        onRepairPayment: () => { setPendingPayment(null); setModal(null) },
+      })
+      setSafeCheckState({ running: false, result, onClose: () => setSafeCheckState(state => ({ ...state, result: null })) })
+    } catch (error) {
+      setSafeCheckState({ running: false, result: { status: 'fail', checks: [{ name: 'safe-check', status: 'fail', message: error?.message || 'تعذر الفحص' }], warnings: [], errors: [error?.message || 'SAFE_CHECK_FAILED'] }, onClose: () => setSafeCheckState(state => ({ ...state, result: null })) })
+    }
+  }, [session, operationalDay, activeOrder, orders, active, centralProducts, centralSales, pendingPayment, modal, discountPresets])
 
   const openOrdersCount = getOpenOrders(orders).length
 
@@ -874,8 +901,6 @@ export default function App() {
 
   useEffect(() => { void refreshThermalStatus(printerSettings) }, [printerSettings.serviceUrl, printerSettings.token, refreshThermalStatus])
 
-  const [pendingPayment, setPendingPayment] = useState(null)
-
   const activeShift = Boolean(session?.shiftId && (session?.shiftType === 'morning' || session?.shiftType === 'evening'))
 
   // Order mutations
@@ -1407,6 +1432,8 @@ export default function App() {
           syncStatus={cashierSyncState}
           currentView={currentView}
           onNavigate={requestView}
+          onSafeCheck={runSafeCheck}
+          safeCheckState={safeCheckState}
         />
       )}
 

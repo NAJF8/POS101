@@ -1985,3 +1985,19 @@ input, textarea, select { cursor: text; }
 }
 .pos101-sync-blocking-warning { white-space: pre-line; }
 .cashier-success-toast { position: fixed; right: 18px; bottom: 18px; z-index: 1000; padding: 10px 14px; border: 1px solid #c9e5d0; border-radius: 999px; background: #eef8f0; color: #27633d; box-shadow: 0 8px 24px rgba(0,0,0,.12); direction: rtl; font-size: 13px; font-weight: 700; }
+.safe-check-button { border-color: #8aa6c8; }
+.safe-check-overlay { z-index: 1200; }
+.safe-check-dialog { width: min(720px, calc(100vw - 28px)); max-height: min(86vh, 760px); overflow: auto; }
+.safe-check-summary { padding: 10px 12px; border-radius: 10px; font-weight: 700; }
+.safe-check-pass { color: #166534; background: #ecfdf5; }
+.safe-check-warn { color: #92400e; background: #fffbeb; }
+.safe-check-fail { color: #991b1b; background: #fef2f2; }
+.safe-check-list { display: grid; gap: 7px; margin: 12px 0; }
+.safe-check-row { display: grid; grid-template-columns: minmax(110px, 1fr) auto; gap: 4px 10px; padding: 9px 11px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; }
+.safe-check-row b { color: #166534; }
+.safe-check-row[data-status="warn"] b { color: #92400e; }
+.safe-check-row[data-status="fail"] b { color: #991b1b; }
+.safe-check-row small { grid-column: 1 / -1; color: #667085; overflow-wrap: anywhere; }
+.safe-check-details { margin-top: 12px; }
+.safe-check-details pre { max-height: 260px; overflow: auto; padding: 10px; border-radius: 8px; background: #111827; color: #e5e7eb; font-size: 11px; white-space: pre-wrap; }
+.safe-check-actions { display: flex; justify-content: flex-start; gap: 8px; margin-top: 14px; }
