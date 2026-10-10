@@ -31,7 +31,7 @@ import { verifySystemAdminCode } from './systemAdminCode.js'
 import { classifyCentralSale, financialFingerprint, inspectPendingSalesAgainstCentral, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, markSaleVoidedCentral, quarantineSale, quarantineStaleSaleQueueEntries, readPendingSaleDiagnostics, readRawSaleQueue, readSaleQueue, readVoidUpdateQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
-import { reconcilePreCloseSales } from './preCloseReconciliation.js'
+import { reconcilePreCloseSales, repairPendingQueueForEndDay } from './preCloseReconciliation.js'
 import { buildEndDayDiagnostic } from './endDayDiagnostic.js'
 import { canonicalSalesForOperationalDay, reconcileCanonicalSales, summarizeCanonicalSales } from './canonicalSales.js'
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
@@ -1213,14 +1213,26 @@ const readPreCloseFinancialReconciliation = async operationalDay => {
 
 export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0 } = {}) => {
   await financialUser(false)
-  const centralSales = centralValues(await get(salesRef()))
+  const [salesSnapshot, centralDay] = await Promise.all([get(salesRef()), readCentralOperationalDay()])
+  const centralSales = centralValues(salesSnapshot)
+  if (centralDay?.status === 'closed') {
+    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, message: 'اليوم منتهي مركزيًا.' }
+  }
+  if (!centralDay || centralDay.status !== 'open') {
+    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, message: 'تعذر قراءة حالة اليوم المركزي.' }
+  }
+  if (operationalDay?.id && (String(operationalDay.id) !== String(centralDay.id) || String(operationalDay.businessDate || '') !== String(centralDay.businessDate || ''))) {
+    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, message: 'تغيّر اليوم التشغيلي مركزيًا. أعد قراءة الحالة قبل الإنهاء.' }
+  }
+  const repair = repairPendingQueueForEndDay({ centralSales, operationalDay: centralDay })
   // Readback is also the restart repair path. Persist only sync metadata after
   // exact payload verification; never resend or rewrite the central sale.
   reconcileSalesAgainstCentral(centralSales)
-  const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay, openOrderCount })
+  const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readRawSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay: centralDay, openOrderCount, saleEngineState: typeof window !== 'undefined' ? window.__POS101_SALE_ENGINE_STATE__ || '' : '' })
   const financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
   return {
     ...salesReconciliation,
+    queueRepair: repair,
     financialReconciliation,
     allowed: salesReconciliation.allowed && financialReconciliation.allowed,
     message: salesReconciliation.message || financialReconciliation.message,

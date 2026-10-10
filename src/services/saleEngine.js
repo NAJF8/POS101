@@ -257,7 +257,20 @@ export const createSaleEngine = (overrides = {}) => {
   let inFlight = null
   let retryPayload = readRetry(storage)
 
-  const setState = next => { state = next; if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-sale-engine-state', { detail: { state: next } })) }
+  if (typeof window !== 'undefined') window.addEventListener('pos101-sale-retry-resolved', event => {
+    const resolved = event.detail || {}
+    if (!retryPayload || (resolved.saleId && idOf(retryPayload.sale) !== String(resolved.saleId)) || (resolved.operationKey && operationOf(retryPayload.sale) !== String(resolved.operationKey))) return
+    retryPayload = null
+    clearRetry(storage)
+  })
+
+  const setState = next => {
+    state = next
+    if (typeof window !== 'undefined') {
+      window.__POS101_SALE_ENGINE_STATE__ = next
+      window.dispatchEvent(new CustomEvent('pos101-sale-engine-state', { detail: { state: next } }))
+    }
+  }
   const currentState = () => ({ state, inFlight: Boolean(inFlight), retryAvailable: Boolean(retryPayload) })
 
   const fail = ({ sale, error, diagnostics = {}, final = false, errorClass = '' } = {}) => {

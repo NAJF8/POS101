@@ -797,7 +797,10 @@ export default function App() {
       setPreCloseGuard({ ...guard, loading: false, state: 'real-pending', allowed: false, message, financialReconciliation: reconciliation })
       throw Object.assign(new Error(message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose: { ...guard, financialReconciliation: reconciliation } })
     }
-    setPreCloseGuard({ ...guard, loading: false, state: 'verified', allowed: true, message: '', financialReconciliation: reconciliation })
+    const repairMessage = guard.queueRepair?.moved > 0
+      ? 'تم عزل طلب قديم من هذا الجهاز ولا يمنع إنهاء اليوم.'
+      : 'لا توجد طلبات معلقة. يمكنك إنهاء اليوم.'
+    setPreCloseGuard({ ...guard, loading: false, state: 'verified', allowed: true, message: repairMessage, financialReconciliation: reconciliation })
   }, [operationalDay, openOrdersCount, centralSales])
 
   const handleEndOperationalDay = useCallback(async actualCash => {

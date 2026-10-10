@@ -233,7 +233,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
     </div>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {startError && <p className="form-error" role="alert">{startError}</p>}
-    {open && preCloseGuard?.message && <p className="form-error" role="alert">{preCloseGuard.message}</p>}
+    {open && preCloseGuard?.message && <p className={preCloseGuard?.allowed === false ? 'form-error' : 'form-success'} role={preCloseGuard?.allowed === false ? 'alert' : 'status'}>{preCloseGuard.message}</p>}
 
     {openingAdjustOpen && <div className="overlay"><div className="dialog operational-day-dialog" dir="rtl">
       <h2>تعديل رصيد الافتتاح</h2>
@@ -333,7 +333,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           </header>
 
           {pendingTableCount > 0 && <p className="pending-day-warning" role="note">توجد طاولات معلقة غير مدفوعة، سيتم إبقاؤها في قسم الطاولات المعلقة ولا تُحسب ضمن المبيعات</p>}
-          {preCloseGuard?.allowed === false && <p className="form-error end-day-guard-error" role="alert">{preCloseGuard.pendingQueue > 0 || preCloseGuard.validCurrentDayPendingSyncCount > 0 ? 'توجد عملية غير مكتملة، سيتم المحاولة تلقائيًا.' : (preCloseGuard.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.')}</p>}
+          {preCloseGuard?.allowed === false && <p className="form-error end-day-guard-error" role="alert">{preCloseGuard.message || (preCloseGuard.pendingQueue > 0 || preCloseGuard.validCurrentDayPendingSyncCount > 0 ? 'يوجد طلب غير مثبت لهذا اليوم. أعد المحاولة أو انسخ تقرير الخطأ.' : 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.')}</p>}
 
           <section className="end-day-section" aria-labelledby="end-day-sales-title">
             <div className="end-day-section-heading"><div><span className="end-day-section-kicker">الأداء</span><h3 id="end-day-sales-title">ملخص المبيعات</h3></div><span className="end-day-section-icon">↗</span></div>
