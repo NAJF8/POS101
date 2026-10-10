@@ -35,10 +35,17 @@ export const buildOrderNumberDuplicateReport = (sales = []) => {
 export const findActiveOrderNumberCollision = (sale, centralSales = []) => {
   const orderNumber = text(sale?.orderNumber)
   const saleId = saleIdOf(sale)
+  const saleDate = text(sale?.businessDate || sale?.business_date)
+  const saleDay = text(sale?.operationalDayId || sale?.operational_day_id)
   if (!orderNumber) return null
   return (centralSales || []).find(candidate => isActiveOrderNumberSale(candidate)
     && text(candidate?.orderNumber) === orderNumber
-    && saleIdOf(candidate) !== saleId) || null
+    && saleIdOf(candidate) !== saleId
+    // Order numbers are only unique inside the current operational day. A
+    // historical duplicate is a warning/report concern and must not block a
+    // new sale today.
+    && (!saleDate || !text(candidate?.businessDate || candidate?.business_date) || saleDate === text(candidate?.businessDate || candidate?.business_date))
+    && (!saleDay || !text(candidate?.operationalDayId || candidate?.operational_day_id) || saleDay === text(candidate?.operationalDayId || candidate?.operational_day_id))) || null
 }
 
 export const nextCentralOrderNumber = ({ day = null, centralSales = [] } = {}) => {

@@ -657,7 +657,7 @@ export function SellerSelection({ staff = [], staffStatus = { state: 'empty', er
             : sellers.length ? sellers.map(person => (
           <button disabled={busy} onClick={() => choose(person.name)} key={person.id}>
             <span><Icon name="user" size={27} /></span>
-            <b>{busy ? 'جارٍ الحفظ…' : person.name}</b>
+            <b>{busy ? 'جاري إرسال الطلب...' : person.name}</b>
           </button>
         )) : <p className="settings-readonly">لا يوجد موظفون مؤهلون للبيع في بيانات الموظفين المركزية.</p>}
       </div>

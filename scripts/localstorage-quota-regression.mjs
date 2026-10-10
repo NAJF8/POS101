@@ -78,9 +78,11 @@ assert.equal(afterReadback.localCacheOk, false)
 assert.match(afterReadback.warning, /تم حفظ البيع مركزيًا/)
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+const engine = fs.readFileSync(new URL('../src/services/saleEngine.js', import.meta.url), 'utf8')
 const safeCheck = fs.readFileSync(new URL('../src/services/safeSystemCheck.js', import.meta.url), 'utf8')
 const cache = fs.readFileSync(new URL('../src/services/localSalesCache.js', import.meta.url), 'utf8')
-assert.match(app, /persistLocalSaleAfterCentralReadback\(sale, markSaleSynced\)/)
+assert.match(app, /saleEngine\.sell\(/)
+assert.match(engine, /localCacheWarning/)
 assert.match(app, /امتلأت ذاكرة الجهاز المحلية/)
 assert.match(app, /إعادة المحاولة بعد الفحص/)
 assert.match(app, /modal === 'storage-quota'/)
@@ -88,6 +90,7 @@ assert.match(safeCheck, /storage-quota/)
 assert.match(safeCheck, /cleanupOversizedLocalCaches/)
 assert.match(cache, /SALES_CACHE_MAX_ROWS = 50/)
 assert.match(cache, /pos101\.syncQueue/) // protected key
+assert.match(cache, /pos101\.currentSaleRetry/) // current retry payload is protected
 
 console.log('QUOTA_ERROR_CAUGHT_TEST=PASS')
 console.log('CENTRAL_SALE_NOT_FAILED_BY_CACHE_TEST=PASS')

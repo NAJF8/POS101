@@ -493,11 +493,30 @@ const saleItemsLength = sale => Array.isArray(sale?.items)
 
 const saleReadbackRequiredFieldsMatch = (expected, actual) => Boolean(actual
   && saleIdOf(expected) === saleIdOf(actual)
+  && String(expected?.operationKey || expected?.operation_key || '') === String(actual?.operationKey || actual?.operation_key || '')
   && String(expected?.orderNumber ?? '') === String(actual?.orderNumber ?? actual?.order_number ?? '')
   && String(expected?.businessDate || '') === String(actual?.businessDate || '')
   && String(expected?.operationalDayId || '') === String(actual?.operationalDayId || actual?.operational_day_id || '')
   && Number(expected?.total ?? expected?.subtotal) === Number(actual?.total ?? actual?.subtotal)
-  && saleItemsLength(expected) === saleItemsLength(actual))
+  && saleItemsLength(expected) === saleItemsLength(actual)
+  && String(actual?.status || '').toLowerCase() === 'completed')
+
+// The sale engine uses these read-only adapters for its retry preflight. They
+// intentionally expose no write path; all writes remain in
+// saveCentralSaleImmediately, which performs the final day/identity/readback
+// guards before returning.
+export const readCentralSaleById = async saleId => {
+  await requireRole('cashier-sync')
+  const id = String(saleId || '').trim()
+  if (!id) return null
+  const snapshot = await get(ref(db, `pos101_sales/${id}`))
+  return snapshot.exists() ? { ...snapshot.val(), id, saleId: saleIdOf(snapshot.val()) || id } : null
+}
+
+export const readCentralSalesForSaleEngine = async () => {
+  await requireRole('cashier-sync')
+  return centralValues(await get(salesRef()))
+}
 
 // Normal online checkout uses this direct path. It performs the identity and
 // order-number collision reads before one idempotent write, then requires a
@@ -1415,7 +1434,7 @@ export const allocateCentralOrderNumber = async ({ operationalDayId, businessDat
   if (!readBack.exists() || Number(readBack.val()?.lastOrderNumberAllocated) !== allocated || Number(readBack.val()?.nextOrderNumber) <= allocated) {
     throw Object.assign(new Error('تعذر التحقق من رقم الطلب المركزي بعد التخصيص.'), { code: 'ORDER_NUMBER_READBACK_FAILED' })
   }
-  return { orderNumber: allocated, operationalDayId: dayId, businessDate: String(readBack.val()?.businessDate || businessDate || '') }
+  return { orderNumber: allocated, reserved: true, operationalDayId: dayId, businessDate: String(readBack.val()?.businessDate || businessDate || '') }
 }
 
 export const getCentralSyncState = () => ({ initialSyncCompleted: readInitialSyncCompleted() })

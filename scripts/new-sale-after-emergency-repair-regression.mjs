@@ -6,18 +6,19 @@ const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import
 const worker = fs.readFileSync(new URL('../src/services/cashierQueueWorker.js', import.meta.url), 'utf8')
 const locks = fs.readFileSync(new URL('../src/services/syncLockManager.js', import.meta.url), 'utf8')
 const queue = fs.readFileSync(new URL('../src/services/salesSyncQueue.js', import.meta.url), 'utf8')
+const engine = fs.readFileSync(new URL('../src/services/saleEngine.js', import.meta.url), 'utf8')
 
-assert.match(app, /enqueueSale\(sale\)/)
+assert.match(app, /saleEngine\.sell\(/)
 assert.match(app, /recoverStaleEmergencyRepairFlag\(\)/)
 assert.match(app, /runNewSaleSyncDiagnostic/)
 assert.match(worker, /recoverStaleEmergencyRepairFlag/)
 assert.match(locks, /STALE_EMERGENCY_REPAIR_FLAG_CLEARED=YES/)
 assert.match(locks, /SYNC_LOCK_HEARTBEAT_STALE_MS/)
 assert.match(sync, /pos101_sales\/\$\{saleIdOf\(sale\)\}/)
-assert.ok(sync.indexOf('const readBack = await get(saleRef)\n    if (!readBack?.exists()') < sync.indexOf('markSaleSynced(sale)\n'), 'readback must precede local synced status')
+assert.ok(sync.indexOf('const readBack = await get(saleRef)\n  if (!readBack.exists()') < sync.indexOf('return { sale: { ...readBack.val(), id }'), 'readback must precede local return')
 assert.match(queue, /sameSaleIdentity\(entry\.sale, sale\)/)
-assert.match(app, /const stableSaleId = activeOrder\.saleId \|\| crypto\.randomUUID\(\)/)
-assert.match(app, /orderNumber: centralOrder\.orderNumber/)
+assert.match(engine, /makeId\('sale'\)/)
+assert.match(engine, /orderNumber: prepared\.orderNumber|orderNumber: allocation\?\.orderNumber/)
 assert.match(sync, /centralSaleMatches\(sale, readBack\.val\(\)\)/)
 
 console.log(JSON.stringify({

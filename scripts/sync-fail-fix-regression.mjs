@@ -43,7 +43,9 @@ assert.equal(nextCentralOrderNumber({ day: { nextOrderNumber: 1124 }, centralSal
 
 const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
-assert.match(app, /allocateCentralOrderNumber\(/)
+const engine = fs.readFileSync(new URL('../src/services/saleEngine.js', import.meta.url), 'utf8')
+assert.match(engine, /allocateOrderNumber: allocateCentralOrderNumber/)
+assert.match(engine, /allocation\?\.orderNumber/)
 assert.doesNotMatch(app, /orderNumber:\s*nextNumber/)
 assert.match(sync, /reconcileSalesQueue\(beforeCentral/)
 assert.match(sync, /findActiveOrderNumberCollision\(sale, beforeCentral\)/)

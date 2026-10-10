@@ -6,7 +6,7 @@ export const STORAGE_PROBE_KEY = 'pos101.storageProbe'
 const PROTECTED_KEYS = new Set([
   'pos101.session', 'pos101.orders', 'pos101.syncQueue', 'pos101.accSaleSyncQueue', 'pos101.salesQuarantine',
   'pos101.syncQueue.quarantine', 'pos101.deviceId', 'pos101.operationalDay', 'pos101.localOperationalDayStale',
-  'pos101.localClosedByCentral', 'pos101.staleDetectedAt', 'pos101.updateReload',
+  'pos101.localClosedByCentral', 'pos101.staleDetectedAt', 'pos101.updateReload', 'pos101.currentSaleRetry',
 ])
 
 const text = value => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value).trim() : ''
