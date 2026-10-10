@@ -28,12 +28,13 @@ import { canonicalSalesForOperationalDay, reconcileCanonicalSales } from './serv
 import { calculateSettlement } from './services/financialCenter.js'
 import KioskActivation from './components/KioskActivation.jsx'
 import SalesBackupRecovery from './components/SalesBackupRecovery.jsx'
+import PendingSaleStatusDialog from './components/PendingSaleStatusDialog.jsx'
 import { clearFinancialPinUnlock, isFinancialPinUnlocked, saveFinancialPinUnlock, verifyCashierPin } from './services/cashierPin.js'
 import { createCashierQueueWorker } from './services/cashierQueueWorker.js'
 import { buildCartItem, normalizeCartItems, normalizeOrder, safeNumber } from './services/cartItem.js'
 import { buildRealOptionsAddTest, prepareCartAdd } from './services/cartPipeline.js'
 import { isQuotaExceededError, persistLocalSaleAfterCentralReadback, writeSalesCache } from './services/localSalesCache.js'
-import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
+import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -121,6 +122,8 @@ export default function App() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncLabel, setSyncLabel] = useState('المزامنة جاهزة')
   const [saleSyncWarning, setSaleSyncWarning] = useState('')
+  const [pendingSaleDialog, setPendingSaleDialog] = useState(null)
+  const [pendingSaleActionBusy, setPendingSaleActionBusy] = useState(false)
   const [syncAuthStatus, setSyncAuthStatus] = useState(null)
   const [saleSyncStatus, setSaleSyncStatus] = useState(() => readSaleSyncStatus())
   const [cashierSyncPhase, setCashierSyncPhase] = useState('idle')
@@ -282,6 +285,51 @@ export default function App() {
       setSafeCheckState({ running: false, result: { status: 'fail', checks: [{ name: 'safe-check', status: 'fail', message: error?.message || 'تعذر الفحص' }], warnings: [], errors: [error?.message || 'SAFE_CHECK_FAILED'] }, onClose: () => setSafeCheckState(state => ({ ...state, result: null })) })
     }
   }, [session, operationalDay, activeOrder, orders, active, centralProducts, centralSales, pendingPayment, modal, discountPresets])
+
+  const checkPendingSale = useCallback(async () => {
+    if (pendingSaleActionBusy) return
+    setPendingSaleActionBusy(true)
+    try {
+      const result = await inspectPendingSaleCentralStatus({ reconcile: true })
+      const entries = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
+      setPendingSaleDialog({ entries, check: result })
+      if (result.reconciled > 0 && result.remaining === 0) {
+        setSaleSyncWarning('الطلب موجود مركزيًا وتمت تسوية الحالة المحلية')
+        setCashierSyncPhase('saved')
+      }
+    } catch (error) {
+      setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: { firebaseRead: 'FAIL', error: error?.message || String(error) } })
+    } finally {
+      setPendingSaleActionBusy(false)
+    }
+  }, [pendingSaleActionBusy])
+
+  const retryPendingSale = useCallback(async () => {
+    if (pendingSaleActionBusy) return
+    setPendingSaleActionBusy(true)
+    try {
+      // The read is mandatory. The queue worker performs the same central
+      // identity/readback guards before any write when the sale is missing.
+      const before = await inspectPendingSaleCentralStatus({ reconcile: true })
+      if (before.firebaseRead === 'FAIL') throw Object.assign(new Error(before.error || 'تعذر فحص Firebase قبل إعادة الرفع.'), { code: before.errorCode || 'PENDING_READ_FAILED' })
+      if (before.duplicateFound) {
+        setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: before })
+        return
+      }
+      if (before.remaining > 0) await runCashierCentralSyncNow()
+      const after = await inspectPendingSaleCentralStatus({ reconcile: true })
+      const entries = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
+      setPendingSaleDialog({ entries, check: entries.length ? after : { ...after, status: 'RESOLVED', reconciled: after.reconciled || 1, remaining: 0 } })
+      if (!entries.length) {
+        setSaleSyncWarning('تم رفع الطلب مركزيًا')
+        setCashierSyncPhase('saved')
+      }
+    } catch (error) {
+      setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: { firebaseRead: 'FAIL', error: error?.message || String(error), errorCode: error?.code || 'RETRY_FAILED' } })
+    } finally {
+      setPendingSaleActionBusy(false)
+    }
+  }, [pendingSaleActionBusy])
 
   const runRealOptionsAddTest = useCallback(() => {
     const safeProducts = [...new Map([...products, ...centralProducts].map(product => [String(product?.id), product])).values()]
@@ -897,6 +945,11 @@ export default function App() {
       },
       onDiagnostic: payload => {
         window.__POS101_QUEUE_WORKER_STATUS__ = payload
+        setPendingSaleDialog(current => {
+          if (!current) return current
+          const entries = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
+          return entries.length ? { ...current, entries } : { ...current, entries: [], check: { ...(current.check || {}), status: 'RESOLVED', remaining: 0, reconciled: 1 } }
+        })
         window.dispatchEvent(new CustomEvent('pos101-sync-worker-diagnostic', { detail: payload }))
       },
     })
@@ -1148,6 +1201,10 @@ export default function App() {
       const localCacheResult = persistLocalSaleAfterCentralReadback(sale, markSaleSynced)
       if (!localCacheResult.localCacheOk) recordSafeUiError('CENTRAL_SALE_LOCAL_CACHE', new Error(localCacheResult.warning), { saleId: sale.saleId })
       setSaleSyncWarning(localCacheResult.warning)
+      if (!localCacheResult.localCacheOk) {
+        setCashierSyncPhase('pending')
+        setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: null })
+      }
       if (autoPrint) await requestSalePrint(sale)
       setOrders(v => v.map((o, i) => i === active ? blankOrder(o.id) : o))
       setPendingPayment(null)
@@ -1179,7 +1236,8 @@ export default function App() {
         enqueueSale(sale, { error })
         const reason = error?.code ? `${error.code}: ${error?.message || 'خطأ غير معروف'}` : (error?.message || String(error))
         setCashierSyncPhase('pending')
-        setSaleSyncWarning('تعذر تثبيت الطلب مركزيًا. تحقق من الإنترنت أو أبلغ المدير.\nيوجد طلب محفوظ مؤقتًا وسيُعاد رفعه تلقائيًا.')
+        setSaleSyncWarning('الطلب محفوظ بانتظار المزامنة\nلم يتم تأكيد الطلب مركزيًا بسبب الاتصال. لا تعيد البيع. سيتم رفع الطلب تلقائيًا عند عودة الاتصال.')
+        setPendingSaleDialog({ entries: readPendingSaleDiagnostics().filter(row => row.type === 'sale_write'), check: null })
         console.warn('POS101_IMMEDIATE_SALE_SYNC_PENDING', error?.code || error?.message || String(error))
         void processSaleSyncQueue({ reason: 'sale-write-failure' }).catch(retryError => console.warn('POS101_SALE_FAILURE_RETRY_ERROR', retryError?.code || retryError?.message || String(retryError)))
       } catch (queueError) {
@@ -1686,6 +1744,7 @@ export default function App() {
 
       {/* Receipt – display:none in normal mode, shown only @media print */}
       {printSale && <Receipt sale={printSale} />}
+      {pendingSaleDialog && <PendingSaleStatusDialog entries={pendingSaleDialog.entries} check={pendingSaleDialog.check} busy={pendingSaleActionBusy} onCheck={checkPendingSale} onRetry={retryPendingSale} onClose={() => setPendingSaleDialog(null)} />}
       {printMessage && <div className="print-status" role="status">
         <span>{printMessage.text}</span>
         <button type="button" onClick={() => { setPrintMessage(null); setPrintSale(printMessage.sale) }}>إعادة طباعة</button>

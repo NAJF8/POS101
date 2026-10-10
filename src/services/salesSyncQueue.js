@@ -538,11 +538,55 @@ export const readPendingSaleDiagnostics = () => readRawSaleQueue()
     total: Number(entry.sale?.total ?? entry.sale?.subtotal ?? entry.total ?? 0),
     businessDate: entry.sale?.businessDate || entry.businessDate || '',
     operationalDayId: entry.sale?.operationalDayId || entry.operationalDayId || '',
+    createdAt: entry.sale?.createdAt || entry.createdAt || null,
+    cashierId: entry.sale?.cashierId || entry.sale?.shiftId || '',
+    cashierName: entry.sale?.cashierNameSnapshot || entry.sale?.seller || '',
+    paymentMethod: entry.sale?.paymentMethod || entry.sale?.payment?.method || entry.paymentType || '',
+    items: Array.isArray(entry.sale?.items) ? entry.sale.items.map(item => ({
+      id: item?.id || item?.productId || item?.name || '',
+      name: item?.displayName || item?.name || '',
+      quantity: Number(item?.quantity || 0),
+      price: Number(item?.price ?? item?.unitPrice ?? 0),
+    })) : [],
     lastAttemptAt: entry.lastAttemptAt || null,
     attempts: Number(entry.attemptCount ?? entry.attempts ?? 0),
     lastError: entry.lastError || entry.sale?.syncError || '',
     status: entry.status || 'pending',
   }))
+
+export const inspectPendingSalesAgainstCentral = (centralSales = []) => {
+  const central = Array.isArray(centralSales) ? centralSales : []
+  return readRawSaleQueue()
+    .filter(entry => isSaleEntry(entry) && pendingStatus(entry?.status))
+    .map(entry => {
+      const sale = entry.sale || entry
+      const saleId = text(saleIdOf(sale))
+      const operationKey = text(operationKeyOf(sale))
+      const orderNumber = text(sale?.orderNumber ?? entry.orderNumber)
+      const exactMatches = central.filter(remote => salePayloadMatches(sale, remote))
+      const identityMatches = central.filter(remote => {
+        const sameId = saleId && text(saleIdOf(remote)) === saleId
+        const sameOperation = operationKey && text(operationKeyOf(remote)) === operationKey
+        const sameOrder = orderNumber && text(remote?.orderNumber) === orderNumber
+        return sameId || sameOperation || sameOrder
+      })
+      const duplicate = exactMatches.length > 1 || identityMatches.length > 1
+      const status = duplicate ? 'DUPLICATE' : exactMatches.length === 1 ? 'EXISTS_ONCE' : 'MISSING'
+      return {
+        saleId,
+        operationKey,
+        orderNumber: sale?.orderNumber ?? entry.orderNumber ?? null,
+        total: Number(sale?.total ?? sale?.subtotal ?? entry.total ?? 0),
+        businessDate: sale?.businessDate || entry.businessDate || '',
+        operationalDayId: sale?.operationalDayId || entry.operationalDayId || '',
+        createdAt: sale?.createdAt || entry.createdAt || null,
+        status,
+        exactMatchCount: exactMatches.length,
+        identityMatchCount: identityMatches.length,
+        firebaseSale: exactMatches.length === 1 ? exactMatches[0] : null,
+      }
+    })
+}
 
 const centralIdentity = sale => ({
   saleId: saleIdOf(sale),
@@ -564,11 +608,12 @@ export const reconcileSalesAgainstCentral = centralSales => {
     if ((centralSales || []).some(remote => salePayloadMatches(sale, remote))) reconciledIds.add(saleIdOf(sale))
   }
   if (!reconciledIds.size) return { reconciled: 0, remaining: readPendingSaleCount() }
-  writeJson(SALES_KEY, sales.map(sale => reconciledIds.has(saleIdOf(sale))
+  const cacheWrite = writeJson(SALES_KEY, sales.map(sale => reconciledIds.has(saleIdOf(sale))
     ? { ...sale, syncStatus: 'synced', centralVerified: true, centralVerifiedAt: Date.now(), syncConfirmedAt: Date.now(), syncSource: 'firebase-readback' }
     : sale))
+  if (cacheWrite?.ok === false) return { reconciled: 0, remaining: readPendingSaleCount(), cacheWrite, queuePreserved: true }
   writeJson(QUEUE_KEY, queue.filter(entry => !isSaleEntry(entry) || !reconciledIds.has(saleIdOf(entry.sale))))
-  return { reconciled: reconciledIds.size, remaining: readPendingSaleCount() }
+  return { reconciled: reconciledIds.size, remaining: readPendingSaleCount(), cacheWrite, queuePreserved: false }
 }
 
 export const pendingSale = (sale, error) => ({
@@ -686,6 +731,9 @@ export const markSaleSynced = (sale, syncConfirmedAt = Date.now()) => {
     ? sales.map((row, rowIndex) => rowIndex === index ? { ...row, ...synced } : row)
     : sales.some(row => saleIdOf(row) === saleId) ? sales : [...sales, synced]
   const cacheWrite = writeJson(SALES_KEY, nextSales)
+  if (cacheWrite?.ok === false) {
+    return { saleId, centralVerified: false, cacheWrite, queuePreserved: true }
+  }
   writeJson(QUEUE_KEY, readJson(QUEUE_KEY, []).filter(entry => {
     if (entry?.expense || entry?.kind === 'expense' || entry?.type === 'expense') return true
     const queuedSale = entry?.sale || entry

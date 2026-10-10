@@ -81,6 +81,8 @@
     ,"test:cashier-local-state": "node scripts/cashier-local-state-regression.mjs"
     ,"test:cart-options-real-flow": "node scripts/cart-options-real-flow-regression.mjs"
     ,"test:localstorage-quota": "node scripts/localstorage-quota-regression.mjs"
+    ,"test:pending-sale-retry": "node scripts/pending-sale-retry-regression.mjs"
+    ,"test:safe-system-check": "node scripts/safe-system-check-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

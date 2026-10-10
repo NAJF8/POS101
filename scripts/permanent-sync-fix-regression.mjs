@@ -10,7 +10,7 @@ const queue = read('src/services/salesSyncQueue.js')
 const diagnostic = read('src/services/endDayDiagnostic.js')
 
 const saleWrite = app.indexOf('await saveCentralSaleImmediately(sale)')
-const saleMark = app.indexOf('markSaleSynced(sale)', saleWrite)
+const saleMark = app.indexOf('persistLocalSaleAfterCentralReadback(sale, markSaleSynced)', saleWrite)
 const salePrint = app.indexOf('requestSalePrint(sale)', saleWrite)
 assert.ok(saleWrite >= 0 && saleWrite < saleMark && saleMark < salePrint)
 assert.equal(app.indexOf('enqueueSale(sale, { dispatchEvent: false })', saleWrite), -1)

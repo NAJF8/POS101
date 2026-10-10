@@ -28,7 +28,7 @@ import { calculateCashboxBalance, calculateEndDayCashAnalysis, calculateSettleme
 import { getKioskDeviceRecord, getOrCreateKioskDeviceRecord, saveKioskIdentity, signKioskChallenge, signatureToBase64Url } from './kioskAuth.js'
 import { createPinSalt, hashCashierPin } from './cashierPin.js'
 import { verifySystemAdminCode } from './systemAdminCode.js'
-import { classifyCentralSale, financialFingerprint, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, markSaleVoidedCentral, quarantineSale, readRawSaleQueue, readSaleQueue, readVoidUpdateQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
+import { classifyCentralSale, financialFingerprint, inspectPendingSalesAgainstCentral, isManualReviewQuarantined, isSaleSyncEligible, isVoidedSale, KNOWN_MANUAL_REVIEW_REASON_1056, KNOWN_MANUAL_REVIEW_SALE_1056, markSaleAttempt, markSaleSynced, markSaleVoidedCentral, quarantineSale, readPendingSaleDiagnostics, readRawSaleQueue, readSaleQueue, readVoidUpdateQueue, readSalesQuarantine, reconcileLocalQueueAgainstCentral, reconcileSalesAgainstCentral, reconcileSalesQueue, resolveLegacyExpenseQueueEntries, resolveVoidedSaleLocally, restoreManualReviewQuarantineMarker, retainQueuedSale, salePayloadMatches } from './salesSyncQueue.js'
 import { buildOrderNumberDuplicateReport, findActiveOrderNumberCollision, nextCentralOrderNumber } from './orderNumberAllocation.js'
 import { getReportSalesForOperationalDay, isReportableSale, readLocalSales } from './reportSales.js'
 import { reconcilePreCloseSales } from './preCloseReconciliation.js'
@@ -281,7 +281,7 @@ const centralSaleMatches = (expected, actual) => Boolean(
 
 // Read-only operator diagnostic for the exact "sale completed but warning
 // returned" failure. It never writes Firebase or localStorage.
-export const runNewSaleSyncDiagnostic = async ({ businessDate = '2026-10-08' } = {}) => {
+export const runNewSaleSyncDiagnostic = async ({ businessDate = readLocalOperationalDay()?.businessDate || new Date().toISOString().slice(0, 10) } = {}) => {
   const localSales = readSales().filter(sale => String(sale?.businessDate || '') === String(businessDate))
   const latestSale = [...localSales].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0] || null
   const queue = readRawSaleQueue()
@@ -325,6 +325,48 @@ export const runNewSaleSyncDiagnostic = async ({ businessDate = '2026-10-08' } =
   console.info('POS101_NEW_SALE_SYNC_DIAGNOSTIC', result)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('pos101-new-sale-sync-diagnostic', { detail: result }))
   return result
+}
+
+// Read the complete pending-sale queue against the current central snapshot.
+// A retry is allowed only after this read proves that the sale is missing, and
+// a local queue row is resolved only after an exact Firebase payload match.
+export const inspectPendingSaleCentralStatus = async ({ reconcile = true } = {}) => {
+  const pendingBefore = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
+  if (!pendingBefore.length) return { firebaseRead: 'NOT_NEEDED', pendingCount: 0, items: [], reconciled: 0, remaining: 0, authReady: Boolean(auth?.currentUser?.uid), networkOnline: typeof navigator === 'undefined' || navigator.onLine !== false }
+  try {
+    await requireRole('cashier-sync')
+    const snapshot = await get(salesRef())
+    const centralSales = centralValues(snapshot)
+    const items = inspectPendingSalesAgainstCentral(centralSales)
+    const duplicate = items.some(item => item.status === 'DUPLICATE')
+    const resolved = !duplicate && reconcile ? reconcileSalesAgainstCentral(centralSales) : { reconciled: 0, remaining: pendingBefore.length, queuePreserved: true }
+    const pendingAfter = readPendingSaleDiagnostics()
+    return {
+      firebaseRead: 'PASS',
+      pendingCount: pendingBefore.length,
+      items,
+      centralCount: centralSales.length,
+      reconciled: resolved.reconciled || 0,
+      remaining: pendingAfter.length,
+      queuePreserved: resolved.queuePreserved === true,
+      authReady: Boolean(auth?.currentUser?.uid),
+      networkOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
+      duplicateFound: duplicate,
+      centralSales,
+    }
+  } catch (error) {
+    return {
+      firebaseRead: 'FAIL',
+      pendingCount: pendingBefore.length,
+      items: [],
+      reconciled: 0,
+      remaining: pendingBefore.length,
+      authReady: Boolean(auth?.currentUser?.uid),
+      networkOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
+      errorCode: error?.code || 'FIREBASE_READ_FAILED',
+      error: error?.message || String(error),
+    }
+  }
 }
 
 const requireRole = async expectedRole => {

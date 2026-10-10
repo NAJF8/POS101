@@ -1,6 +1,6 @@
 import { getKioskDeviceRecord } from './kioskAuth.js'
 import { kioskAuthStatus, loadCentralProducts, readCentralExpensesForReports, readCentralOperationalDay, readCentralSalesForReports, readLocalOperationalDay } from './posCentralSync.js'
-import { readRawSaleQueue, readSalesQuarantine } from './salesSyncQueue.js'
+import { inspectPendingSalesAgainstCentral, readPendingSaleDiagnostics, readRawSaleQueue, readSalesQuarantine, reconcileSalesAgainstCentral } from './salesSyncQueue.js'
 import { BUILD_SHA, VERSION_MANIFEST_PATH, validateDeployMeta } from './versionUpdate.js'
 import { cleanupOversizedLocalCaches, inspectLocalStorage, testLocalStorageWrite } from './localSalesCache.js'
 
@@ -146,11 +146,14 @@ const itemIsValid = item => Boolean(item && safeText(item.productId || item.id |
 const queueSummary = () => {
   const raw = readRawSaleQueue()
   const quarantine = readSalesQuarantine()
+  const pendingSales = readPendingSaleDiagnostics()
   const rows = Array.isArray(raw) ? raw : []
   return {
     saleWriteCount: rows.filter(row => row?.kind !== 'void_update').length,
     voidUpdateCount: rows.filter(row => row?.kind === 'void_update').length,
     failedCount: rows.filter(row => row?.status === 'failed' || row?.lastError).length,
+    pendingSaleDiagnostics: pendingSales,
+    pendingSaleCount: pendingSales.filter(row => row.type === 'sale_write').length,
     quarantineCount: Array.isArray(quarantine) ? quarantine.length : 0,
     malformedCount: rows.filter(row => !row || typeof row !== 'object').length,
   }
@@ -171,8 +174,36 @@ const checkBundle = async () => {
 }
 
 export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder, orders, active, centralProducts, products = [], centralSales, pendingPayment, modal, saleInFlight, onRepairOrder, onRepairDay, onRepairPayment, buildCartItemFn, normalizeOrderFn, prepareCartAddFn, calculateTotalsFn, paymentSummaryFn }) => {
+  const pendingSalesBeforeCheck = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
   const results = await runIndependentChecks([
     ['bundle', checkBundle],
+    ['pending-sales', async () => {
+      const pending = readPendingSaleDiagnostics().filter(row => row.type === 'sale_write')
+      if (!pending.length) return { status: 'pass', message: 'لا توجد مبيعات محفوظة بانتظار الرفع', details: { pendingCount: 0, firebaseRead: 'NOT_NEEDED', items: [] } }
+      let readSales = null
+      let firebaseRead = 'NOT_STARTED'
+      let readError = ''
+      if (!readSales) {
+        try {
+          readSales = await readCentralSalesForReports()
+          firebaseRead = 'PASS'
+        } catch (error) {
+          firebaseRead = 'FAIL'
+          readError = safeErrorMessage(error)
+        }
+      }
+      if (!Array.isArray(readSales)) return { status: 'warn', message: 'يوجد طلب محفوظ بانتظار الرفع؛ تعذر فحص Firebase الآن', details: { pendingCount: pending.length, firebaseRead, readError, items: [] } }
+      const items = inspectPendingSalesAgainstCentral(readSales)
+      const duplicate = items.some(item => item.status === 'DUPLICATE')
+      const exists = items.filter(item => item.status === 'EXISTS_ONCE').length
+      const missing = items.filter(item => item.status === 'MISSING').length
+      const reconciliation = !duplicate && exists ? reconcileSalesAgainstCentral(readSales) : { reconciled: 0, remaining: pending.length, queuePreserved: true }
+      return {
+        status: duplicate ? 'fail' : 'warn',
+        message: duplicate ? 'يوجد خطر تكرار؛ لم تتم أي إعادة محاولة' : exists && !missing ? 'تم العثور على الطلب مركزيًا؛ تمت تسوية الحالة المحلية دون كتابة مركزية جديدة' : 'يوجد طلب محفوظ بانتظار الرفع',
+        details: { pendingCount: pending.length, firebaseRead, readError, items, duplicateRisk: duplicate, exactMatches: exists, missingCount: missing, safeRetry: !duplicate, reconciled: reconciliation.reconciled || 0, remaining: reconciliation.remaining, queuePreserved: reconciliation.queuePreserved === true },
+      }
+    }],
     ['storage-quota', async () => {
       const before = inspectLocalStorage()
       const probe = testLocalStorageWrite()
@@ -181,10 +212,10 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
       const after = inspectLocalStorage()
       const riskCleared = !after.quotaRisk || after.salesBytes < before.salesBytes
       return {
-        status: before.quotaRisk && !riskCleared ? 'warn' : 'pass',
-        message: before.quotaRisk ? (riskCleared ? 'تم تنظيف كاش المبيعات الآمن' : 'ذاكرة المبيعات المحلية كبيرة وسيتم تنظيف الكاش الآمن') : 'استخدام ذاكرة الجهاز المحلية ضمن الحد الآمن',
+        status: pendingSalesBeforeCheck.length || (before.quotaRisk && !riskCleared) ? 'warn' : 'pass',
+        message: pendingSalesBeforeCheck.length ? 'يوجد طلب محفوظ بانتظار الرفع؛ تم الحفاظ على الطابور والبيانات المحلية' : before.quotaRisk ? (riskCleared ? 'تم تنظيف كاش المبيعات الآمن' : 'ذاكرة المبيعات المحلية كبيرة وسيتم تنظيف الكاش الآمن') : 'استخدام ذاكرة الجهاز المحلية ضمن الحد الآمن',
         repaired: cleanup.cleanedKeys.length > 0,
-        details: { before, after, centralReadable, tinyWriteProbe: probe, cleanedKeys: cleanup.cleanedKeys, preservedKeys: cleanup.preservedKeys, fullSalesCacheDisabled: !after.fullSalesCachePresent },
+        details: { before, after, centralReadable, tinyWriteProbe: probe, cleanedKeys: cleanup.cleanedKeys, preservedKeys: cleanup.preservedKeys, pendingSaleCount: pendingSalesBeforeCheck.length, pendingSaleIds: pendingSalesBeforeCheck.map(row => row.saleId).filter(Boolean), pendingQueuePreserved: true, fullSalesCacheDisabled: !after.fullSalesCachePresent },
       }
     }],
     ['activation', async () => {
@@ -273,6 +304,7 @@ export const runSafeSystemCheck = async ({ session, operationalDay, activeOrder,
     lastProductClicked: typeof window !== 'undefined' ? window.__POS101_LAST_PRODUCT_CLICKED__ || null : null,
     lastModalProduct: typeof window !== 'undefined' ? window.__POS101_LAST_MODAL_PRODUCT__ || null : null,
     queueSummary: results.find(result => result.name === 'queues')?.details || null,
+    pendingSaleCheck: results.find(result => result.name === 'pending-sales')?.details || null,
     warnings: warnings.map(result => `${result.name}: ${result.message}`),
     errors: fail.map(result => `${result.name}: ${result.message}`),
     safety: { firebaseWrites: 0, salesCreated: 0, queueDeletes: 0, localStorageWiped: false },

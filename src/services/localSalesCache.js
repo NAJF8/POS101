@@ -56,7 +56,9 @@ export const compactSalesCache = (sales, { maxRows = SALES_CACHE_MAX_ROWS } = {}
   const rows = Array.isArray(sales) ? sales.filter(row => row && saleId(row)) : []
   // A small pending sale may retain its payload locally for recovery; the
   // completed/history cache is always summarized and capped.
-  const pending = rows.filter(isPending).slice(0, 50)
+  // Pending rows are never capped here: the queue owns the retry identity, but
+  // the ledger must still retain every pending payload until readback resolves it.
+  const pending = rows.filter(isPending)
   const verified = rows.filter(row => !isPending(row)).sort(sortNewest).slice(0, maxRows).map(summarizeSaleForCache)
   return [...pending, ...verified]
 }
@@ -122,7 +124,8 @@ export const cleanupOversizedLocalCaches = ({ storage = globalThis.localStorage,
       storage?.setItem?.(SALES_CACHE_KEY, JSON.stringify(compacted))
       cleanedKeys.push(SALES_CACHE_KEY)
     } catch {
-      try { storage?.removeItem?.(SALES_CACHE_KEY); cleanedKeys.push(SALES_CACHE_KEY) } catch { /* never throw cleanup */ }
+      // A quota failure is not permission to delete the ledger. Leave the
+      // original value in place so pending sale payloads remain recoverable.
     }
   }
   for (const row of before.oversizedKeys) {
