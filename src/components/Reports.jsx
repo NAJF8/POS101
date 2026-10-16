@@ -277,7 +277,12 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   // thermal payloads. No report can silently fall back to the current day.
   const reportSales = useMemo(() => getReportSalesForPeriod({ localSales: sales, centralSales, operationalDays: reportOperationalDays, from: periodFrom, to: periodTo, currentOperationalDay: operationalDay }), [sales, centralSales, reportOperationalDays, periodFrom, periodTo, operationalDay])
   const filteredSales = useMemo(() => reportSales, [reportSales])
-  const selectedClosedDay = useMemo(() => periodFrom === periodTo ? reportOperationalDays.find(day => day?.status === 'closed' && String(day.businessDate) === periodFrom) : null, [reportOperationalDays, periodFrom, periodTo])
+  const selectedClosedDay = useMemo(() => {
+    const currentDayIsOpen = operationalDay?.status === 'open' && String(operationalDay?.businessDate || '') === periodFrom
+    return periodFrom === periodTo && !currentDayIsOpen
+      ? reportOperationalDays.find(day => day?.status === 'closed' && String(day.businessDate) === periodFrom)
+      : null
+  }, [reportOperationalDays, periodFrom, periodTo, operationalDay?.status, operationalDay?.businessDate])
   const storedSettlement = useMemo(() => selectedClosedDay ? (Array.isArray(settlements) ? settlements : []).find(row => String(row?.operationalDayId || '') === String(selectedClosedDay.id || selectedClosedDay.operationalDayId || '') || String(row?.businessDate || '') === periodFrom) : null, [selectedClosedDay, settlements, periodFrom])
   const postCloseDrift = Boolean(storedSettlement && (Number(storedSettlement.orderCount || 0) !== filteredSales.length || Number(storedSettlement.sales || 0) !== filteredSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)))
   const reportSource = selectedClosedDay ? 'firebase-central' : 'merged-safe'

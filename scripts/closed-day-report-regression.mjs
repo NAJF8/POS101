@@ -28,4 +28,17 @@ assert.equal(comprehensive.electronicSales, 32510)
 
 const settlement = calculateSettlement({ sales: rows, expenses: [{ amount: 190000 }], transactions: [{ type: 'withdrawal', amount: 12000 }] })
 assert.deepEqual({ orderCount: settlement.orderCount, sales: settlement.sales, cashSales: settlement.cashSales, electronicSales: settlement.electronicSales, expectedCash: settlement.expectedCash }, { orderCount: 33, sales: 329510, cashSales: 297000, electronicSales: 32510, expectedCash: 95000 })
+
+const reopenedDayId = 'reopened-day'
+const reopenedSale = { id: 'reopened-sale', operationalDayId: reopenedDayId, businessDate, subtotal: 7000, discount: 0, total: 7000, paymentMethod: 'cash' }
+const sameDateRows = getReportSalesForPeriod({
+  localSales: [],
+  centralSales: [...centralSales, reopenedSale],
+  operationalDays: [...days, { id: 'earlier-closed-day', operationalDayId: 'earlier-closed-day', businessDate, status: 'closed' }, { id: reopenedDayId, operationalDayId: reopenedDayId, businessDate, status: 'open' }],
+  from: businessDate,
+  to: businessDate,
+  currentOperationalDay: { id: reopenedDayId, businessDate, status: 'open' },
+})
+assert.deepEqual(sameDateRows.map(row => row.id), ['reopened-sale'])
+assert.equal(sameDateRows.reduce((sum, row) => sum + row.total, 0), 7000)
 console.log('CLOSED_DAY_REPORT_REGRESSION=PASS')

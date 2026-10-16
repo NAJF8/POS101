@@ -114,6 +114,23 @@ const centralClosedSalesForDate = (centralSales, date, days) => {
   })
 }
 
+const salesForOpenDate = ({ localSales, centralSales, date, openId }) => {
+  const rows = [
+    ...(Array.isArray(localSales) ? localSales : []),
+    ...(Array.isArray(centralSales) ? centralSales : []),
+  ].filter(sale => {
+    if (!isReportableSale(sale) || businessDateForSale(sale) !== date) return false
+    const id = saleOperationalDayId(sale)
+    return !id || id === openId
+  })
+  const merged = new Map()
+  rows.forEach((sale, index) => {
+    const identity = String(sale?.saleId || sale?.id || sale?.operationKey || sale?.orderNumber || `${date}:${sale?.createdAt || index}`)
+    merged.set(identity, sale)
+  })
+  return [...merged.values()]
+}
+
 export const getReportSalesForOperationalDay = ({ centralSales = [], operationalDayId = '', businessDate = '' } = {}) => {
   const id = String(operationalDayId || '').trim()
   const date = String(businessDate || '').trim()
@@ -152,14 +169,12 @@ export const getReportSalesForPeriod = ({ localSales = [], centralSales = [], op
   const result = []
   for (const date of dates) {
     const closedDays = days.filter(day => day.businessDate === date && day.status === 'closed')
-    if (closedDays.length) result.push(...centralClosedSalesForDate(centralSales, date, days))
-    else if (openId && currentOperationalDay?.businessDate === date) {
-      const localRows = (Array.isArray(localSales) ? localSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date)
-      const centralRows = (Array.isArray(centralSales) ? centralSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date)
-      const merged = new Map()
-      for (const sale of localRows) merged.set(String(sale?.saleId || sale?.id || sale?.operationKey || sale?.orderNumber || ''), sale)
-      for (const sale of centralRows) merged.set(String(sale?.saleId || sale?.id || sale?.operationKey || sale?.orderNumber || ''), sale)
-      result.push(...merged.values())
+    // The active operational day is authoritative for its business date even
+    // when an earlier close/reopen left one or more closed rows on that date.
+    if (openId && currentOperationalDay?.businessDate === date) {
+      result.push(...salesForOpenDate({ localSales, centralSales, date, openId }))
+    } else if (closedDays.length) {
+      result.push(...centralClosedSalesForDate(centralSales, date, days))
     } else {
       result.push(...(Array.isArray(centralSales) ? centralSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date))
     }
