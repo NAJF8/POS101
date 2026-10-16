@@ -147,6 +147,7 @@ export default function App() {
   const [centralPendingDiagnosticsBusy, setCentralPendingDiagnosticsBusy] = useState(false)
   const [centralPendingDiagnosticsReport, setCentralPendingDiagnosticsReport] = useState(null)
   const [centralSales, setCentralSales] = useState([])
+  const [centralSalesReadError, setCentralSalesReadError] = useState('')
   const [pendingTables, setPendingTables] = useState([])
   const [centralOperationalDays, setCentralOperationalDays] = useState([])
   const centralListener = useRef(null)
@@ -530,6 +531,7 @@ export default function App() {
       productListener.current = null
       setCentralProducts([])
       setCentralSales([])
+      setCentralSalesReadError('')
       setCentralOperationalDays([])
       setOperationalDayCentralReady(!user || !isOperationalDayUser(user) ? false : false)
       setPendingTables([])
@@ -572,13 +574,22 @@ export default function App() {
       }
        if (!user) return
        void readCentralSalesForReports().then(rows => {
-         if (centralAuth()?.currentUser?.uid === user.uid) setCentralSales(rows)
-       }).catch(error => console.error('CENTRAL_SALES_REPORT_READ_ERROR', error))
+         if (centralAuth()?.currentUser?.uid === user.uid) {
+           setCentralSales(rows)
+           setCentralSalesReadError('')
+         }
+       }).catch(error => {
+         console.error('CENTRAL_SALES_REPORT_READ_ERROR', error)
+         if (centralAuth()?.currentUser?.uid === user.uid) setCentralSalesReadError(error?.message || 'تعذر قراءة مبيعات Firebase المركزية.')
+       })
        centralListener.current = subscribeCentralSales(({ centralSales: receivedSales, centralCount, mergedSales }) => {
          if (receivedSales) setCentralSales(receivedSales)
          if (mergedSales) setAdminCentralSales(mergedSales)
+         setCentralSalesReadError('')
         setSyncAuthStatus(current => current?.ok ? { ...current, centralCount } : current)
-      }, user)
+      }, user, error => {
+        if (centralAuth()?.currentUser?.uid === user.uid) setCentralSalesReadError(error?.message || 'تعذر الاشتراك في مبيعات Firebase المركزية.')
+      })
       if (isCentralCashierUser(user)) {
         window.dispatchEvent(new Event('auth-ready'))
       }
@@ -1603,6 +1614,7 @@ export default function App() {
           cashboxTransactions={cashboxTransactions}
           staff={staff}
           salesOverride={adminReady ? adminCentralSales : null}
+          centralSalesReadError={centralSalesReadError}
           products={catalogProducts}
           categories={catalogCategories}
           onNavigate={requestView}
@@ -1617,7 +1629,7 @@ export default function App() {
       {currentView === 'expense-entry' && session && (
         <Expenses session={session} operationalDay={operationalDay} staff={staff} onNavigate={requestView} />
       )}
-      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} operationalDays={centralOperationalDays} settlements={settlements} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} onBeforePrint={syncBeforeReportPrint} />}
+      {currentView === 'reports-captain' && session && <Reports session={session} operationalDay={operationalDay} centralSales={centralSales} centralSalesReadError={centralSalesReadError} operationalDays={centralOperationalDays} settlements={settlements} cashboxTransactions={cashboxTransactions} staff={staff} products={catalogProducts} categories={catalogCategories} initialReportType="captain" onNavigate={requestView} onBeforePrint={syncBeforeReportPrint} />}
 
       {currentView === 'backup-recovery' && backupRecoveryVisible && (
         <section className="settings-page backup-recovery-route" dir="rtl">

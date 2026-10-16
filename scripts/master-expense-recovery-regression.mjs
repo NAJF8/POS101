@@ -56,7 +56,12 @@ assert.equal(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad', year: 
 assert.equal(classifyRecoveryCandidates([{ id: 'central-duplicate', amount: 99, businessDate: '2026-10-02' }], [{ id: 'central-duplicate', amount: 1, businessDate: '2026-01-01' }])[0].decision, 'DUPLICATE')
 
 const expensesSource = fs.readFileSync(new URL('../src/components/Expenses.jsx', import.meta.url), 'utf8')
-assert.match(expensesSource, /مزامنة واسترجاع كل المصاريف/)
+// Recovery is an admin/service concern, not a destructive cashier-facing
+// button. The Expenses screen must expose the read-only central/merged
+// diagnostic instead of the retired "recover all" action.
+assert.doesNotMatch(expensesSource, /مزامنة واسترجاع كل المصاريف/)
+assert.match(expensesSource, /المصدر المركزي للتقارير هو Firebase RTDB/)
+assert.match(expensesSource, /Pending:/)
 assert.doesNotMatch(expensesSource, /placeholder=\{['"]2026-10-02 \| 5000/)
 
 const currentLedgerOnly = new Map([['pos101.expenses', JSON.stringify([{ amount: 1000, date: '27/09/2026', notes: 'test old expense' }])]])

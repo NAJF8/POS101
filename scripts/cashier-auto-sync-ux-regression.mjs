@@ -32,7 +32,9 @@ assert.match(app, /'firebase-reconnect'/)
 assert.match(sync, /const readBack = await get\(saleRef\)/)
 assert.match(queue, /export const enqueueSale/)
 assert.match(queue, /export const enqueueVoidUpdate/)
-assert.match(operationalDay, /توجد عملية غير مكتملة، سيتم المحاولة تلقائيًا/)
+assert.match(operationalDay, /preCloseGuard\.message/)
+assert.match(operationalDay, /يوجد طلب غير مثبت لهذا اليوم/)
+assert.match(operationalDay, /فشل تحقق المطابقة المالية/)
 
 console.log(JSON.stringify({
   CASHIER_SYNC_BUTTONS_HIDDEN: 'PASS',

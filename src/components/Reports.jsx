@@ -182,7 +182,7 @@ class ReportsErrorBoundary extends React.Component {
   }
 }
 
-function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, onBeforePrint, directThermalReady = false, salesOverride = null, centralSales = [], operationalDays = [], settlements = [], settlementCorrections = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
+function ReportsView({ onNavigate, session, operationalDay = null, onDirectThermalPrint, onBeforePrint, directThermalReady = false, salesOverride = null, centralSales = [], centralSalesReadError = '', operationalDays = [], settlements = [], settlementCorrections = [], cashboxTransactions = [], staff = [], products = [], categories = [], initialReportType = null }) {
   const [reportType, setReportType] = useState(initialReportType)
   const [employeeQuery, setEmployeeQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -277,10 +277,17 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   // thermal payloads. No report can silently fall back to the current day.
   const reportSales = useMemo(() => getReportSalesForPeriod({ localSales: sales, centralSales, operationalDays: reportOperationalDays, from: periodFrom, to: periodTo, currentOperationalDay: operationalDay }), [sales, centralSales, reportOperationalDays, periodFrom, periodTo, operationalDay])
   const filteredSales = useMemo(() => reportSales, [reportSales])
-  const selectedClosedDay = useMemo(() => periodFrom === periodTo ? reportOperationalDays.find(day => day?.status === 'closed' && String(day.businessDate) === periodFrom) : null, [reportOperationalDays, periodFrom, periodTo])
+  const selectedClosedDay = useMemo(() => {
+    const currentDayIsOpen = operationalDay?.status === 'open' && String(operationalDay?.businessDate || '') === periodFrom
+    return periodFrom === periodTo && !currentDayIsOpen
+      ? reportOperationalDays.find(day => day?.status === 'closed' && String(day.businessDate) === periodFrom)
+      : null
+  }, [reportOperationalDays, periodFrom, periodTo, operationalDay?.status, operationalDay?.businessDate])
   const storedSettlement = useMemo(() => selectedClosedDay ? (Array.isArray(settlements) ? settlements : []).find(row => String(row?.operationalDayId || '') === String(selectedClosedDay.id || selectedClosedDay.operationalDayId || '') || String(row?.businessDate || '') === periodFrom) : null, [selectedClosedDay, settlements, periodFrom])
   const postCloseDrift = Boolean(storedSettlement && (Number(storedSettlement.orderCount || 0) !== filteredSales.length || Number(storedSettlement.sales || 0) !== filteredSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)))
   const reportSource = selectedClosedDay ? 'firebase-central' : 'merged-safe'
+  const centralSalesUnavailable = Boolean(centralSalesReadError)
+  const centralSalesErrorMessage = centralSalesReadError ? `تعذر قراءة مبيعات Firebase المركزية: ${centralSalesReadError}` : ''
   const filteredExpenses = useMemo(() => {
     const normalized = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row, { operationalDayDates: expenseOperationalDayDates })).filter(isActiveExpense)
     const currentDayId = periodFrom === periodTo && String((selectedClosedDay || operationalDay)?.id || '')
@@ -448,6 +455,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const renderReportCards = () => (
     <div className="reports-container" dir="rtl">
       <div className="reports-main">
+        {centralSalesUnavailable && <div className="settings-notice form-error" role="alert" data-testid="central-sales-read-error">{centralSalesErrorMessage} لم يتم اعتبار الصفر نتيجة مالية. أعد المحاولة بعد عودة الاتصال والصلاحية.</div>}
         {expenseReadError && <div className="settings-notice" role="alert">{expenseReadError}</div>}
         {(session?.status === 'admin-readonly' || ['admin', 'manager', 'super_admin'].includes(session?.role)) && <details className="report-card expense-diagnostic" data-testid="expense-report-diagnostic"><summary>EXPENSE_REPORT_DIAGNOSTIC</summary><pre>{JSON.stringify({ businessDate: periodFrom, operationalDayId: operationalDay?.id || '', shiftType: 'all', cashierId: session?.cashierId || session?.shiftId || '', firebaseExpenseCount: expenseRealtimeMeta.firebaseExpenseCount, localExpenseCount: expenses.length, activeExpenseCount: expenses.filter(isActiveExpense).length, deletedExpenseCount: expenses.filter(row => !isActiveExpense(row)).length, drawerExpenseTotal: sumExpenses(filteredExpenses.filter(isCashboxExpense)), adminExpenseTotal: sumExpenses(filteredExpenses.filter(row => !isCashboxExpense(row))), reportExpenseTotal: sumExpenses(filteredExpenses), lastUpdatedExpenseId: expenseRealtimeMeta.lastUpdatedExpenseId, lastRealtimeUpdateAt: expenseRealtimeMeta.lastRealtimeUpdateAt, REPORT_RECALCULATED: 'YES' }, null, 2)}</pre></details>}
         <div className="reports-header">
@@ -974,6 +982,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
 
     return (
       <div className="report-view-container" dir="rtl">
+        {centralSalesUnavailable && <div className="settings-notice form-error" role="alert" data-testid="central-sales-read-error">{centralSalesErrorMessage} لم يتم اعتبار الصفر نتيجة مالية. أعد المحاولة بعد عودة الاتصال والصلاحية.</div>}
         <div className="report-view-header non-printable">
           <button className="outline-btn" onClick={() => setReportType(null)}>العودة للتقارير</button>
           <div className="report-print-actions" style={{ display: 'flex', gap: '0.5rem' }}>

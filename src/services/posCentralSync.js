@@ -1938,7 +1938,7 @@ const readAndMergeAdminSales = async () => {
 
 export const runAdminCentralRefresh = readAndMergeAdminSales
 
-export const subscribeCentralSales = (callback, authenticatedUser = auth?.currentUser) => {
+export const subscribeCentralSales = (callback, authenticatedUser = auth?.currentUser, onError = null) => {
   let active = true
   let stop = () => {}
   if (!configured || !db || !authenticatedUser || !active) return () => { active = false }
@@ -1951,10 +1951,14 @@ export const subscribeCentralSales = (callback, authenticatedUser = auth?.curren
     try { merged = mergeCentralSalesLocally(centralSales) } catch (error) { console.error('CENTRAL_SALES_MERGE_ERROR', error) }
     callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
   }
+  const reportError = error => {
+    console.error('CENTRAL_SALES_READ_ERROR', error)
+    onError?.(error)
+  }
   stop = onValue(salesRef(), snapshot => {
     publish(snapshot)
-  }, error => console.error('CENTRAL_SALES_SUBSCRIBE_ERROR', error))
-  void get(salesRef()).then(snapshot => { if (active) publish(snapshot) }).catch(error => console.error('CENTRAL_SALES_READ_ERROR', error))
+  }, error => reportError(error))
+  void get(salesRef()).then(snapshot => { if (active) publish(snapshot) }).catch(error => reportError(error))
   return () => { active = false; stop() }
 }
 

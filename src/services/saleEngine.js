@@ -257,7 +257,7 @@ export const createSaleEngine = (overrides = {}) => {
   let inFlight = null
   let retryPayload = readRetry(storage)
 
-  if (typeof window !== 'undefined') window.addEventListener('pos101-sale-retry-resolved', event => {
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('pos101-sale-retry-resolved', event => {
     const resolved = event.detail || {}
     if (!retryPayload || (resolved.saleId && idOf(retryPayload.sale) !== String(resolved.saleId)) || (resolved.operationKey && operationOf(retryPayload.sale) !== String(resolved.operationKey))) return
     retryPayload = null
