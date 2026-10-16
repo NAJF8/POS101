@@ -50,7 +50,7 @@ const syncSource = fs.readFileSync(new URL('../src/services/salesSyncQueue.js', 
 assert.match(reportSource, /CAPTAIN_REPORT_DIAGNOSTIC/)
 assert.match(reportSource, /CAPTAIN_REPORT_RENDER_DIAGNOSTIC/)
 assert.match(reportSource, /captainReportData/)
-assert.match(reportSource, /printWindow\.print\(\)/)
+assert.match(reportSource, /window\.print\(\)/)
 assert.match(reportSource, /captain-report-print-a4/)
 assert.match(reportSource, /matchesEmployee\(row, selectedCaptain\)/)
 assert.match(reportSource, /businessDateOf\(row\)/)

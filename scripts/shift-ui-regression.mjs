@@ -6,6 +6,7 @@ const dialogs = fs.readFileSync(new URL('../src/components/Dialogs.jsx', import.
 const header = fs.readFileSync(new URL('../src/components/Header.jsx', import.meta.url), 'utf8')
 const reports = fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8')
 const expenses = fs.readFileSync(new URL('../src/components/Expenses.jsx', import.meta.url), 'utf8')
+const saleEngine = fs.readFileSync(new URL('../src/services/saleEngine.js', import.meta.url), 'utf8')
 
 assert.match(dialogs, /بدء الشفت \$\{shift\.shiftType === 'morning'/)
 assert.match(dialogs, /data-testid="shift-end-report"/)
@@ -18,7 +19,8 @@ assert.match(reports, /تقرير الشفت المسائي/)
 assert.match(reports, /تقرير نهاية اليوم/)
 assert.match(app, /const activeShift = Boolean\(session\?\.shiftId/)
 assert.match(app, /const sellingBlocked = !activeShift/)
-assert.match(app, /shiftType: session\.shiftType \|\| session\.shiftId/)
+assert.match(app, /shiftType: cashier\.shiftType \|\| cashier\.shiftId/)
+assert.match(saleEngine, /shiftType: prepared\.session\.shiftType \|\| prepared\.session\.shiftId/)
 assert.match(expenses, /shiftType: session\?\.shiftType \|\| shiftForNow\(\)\.shiftType/)
 
 console.log('SHIFT_START_UI_VISIBLE=PASS')
