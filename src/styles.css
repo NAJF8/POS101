@@ -1930,9 +1930,14 @@ input, textarea, select { cursor: text; }
   body[data-printing-report="true"][data-print-format="a4"] { page: report-a4; }
   body[data-printing-report="true"][data-print-format="thermal"] { page: report-thermal; }
   body[data-printing-report="true"] > #root > .app-shell { display: block !important; position: static !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
+  /* Reports renders .report-view-container as the direct child of .app-shell.
+     The generic print rule above hides every non-receipt direct child, so the
+     report view itself must be explicitly restored here. */ 
+  body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .report-view-container,
   body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .reports-container,
-  body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .reports-container .report-view-container,
-  body[data-printing-report="true"] > #root > .app-shell > .admin-central-readonly { display: block !important; }
+  body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .report-view-container .reports-container,
+  body[data-printing-report="true"] > #root > .app-shell > .admin-central-readonly,
+  body[data-printing-report="true"] > #root > .app-shell > .admin-central-readonly .report-view-container { display: block !important; }
   body[data-printing-report="true"] * { visibility: hidden !important; }
   body[data-printing-report="true"] .report-view-container,
   body[data-printing-report="true"] .report-view-container * { visibility: visible !important; }
