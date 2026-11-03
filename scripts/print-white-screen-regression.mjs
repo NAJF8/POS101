@@ -7,7 +7,7 @@ const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
 
 assert.match(reports, /const printReport = async \(format\) => \{[\s\S]*?window\.print\(\)/)
 assert.doesNotMatch(reports, /const printReport = async \(format\) => \{[\s\S]*?window\.open\(/)
-assert.match(reports, /void onBeforePrint\?\.\(\)\.catch\(/)
+assert.match(reports, /Promise\.resolve\(onBeforePrint\?\.\(\)\)\.catch\(/)
 assert.match(reports, /REPORT_PRINT_SYNC_BLOCKED/)
 assert.match(reports, /document\.body\.dataset\.printingReport = 'true'/)
 assert.match(reports, /document\.body\.dataset\.printFormat = format === 'a4' \? 'a4' : 'thermal'/)
