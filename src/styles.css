@@ -1881,7 +1881,12 @@ input, textarea, select { cursor: text; }
   @page { margin: 0; size: 80mm auto; }
   html, body, #root { width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; box-sizing: border-box !important; }
   body > #root > .app-shell { display: block !important; position: static !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; box-sizing: border-box !important; }
-  body > #root > .app-shell > :not(.receipt-sheet) { display: none !important; }
+  body:not([data-printing-report="true"]) > #root > .app-shell > :not(.receipt-sheet) { display: none !important; }
+
+  /* Report printing uses named pages so A4 and 80mm never inherit the
+     thermal receipt's global 80mm @page rule. */
+  @page report-a4 { size: A4 portrait; margin: 12mm; }
+  @page report-thermal { size: 80mm auto; margin: 0; }
   body * { visibility: hidden !important; }
   body .receipt-sheet, body .receipt-sheet * { visibility: visible !important; }
   body .receipt-sheet { display: block !important; position: static !important; box-sizing: border-box !important; width: 70mm !important; max-width: 70mm !important; height: auto !important; min-height: 0 !important; margin: 0 auto !important; padding: 1.5mm 0 4mm !important; color: #000 !important; background: #fff !important; font-family: Tahoma, 'Arial Unicode MS', sans-serif !important; font-size: 10.5pt !important; font-weight: 600 !important; line-height: 1.3 !important; direction: rtl !important; break-after: avoid-page !important; page-break-after: avoid !important; transform: none !important; overflow: visible !important; }
@@ -1922,6 +1927,8 @@ input, textarea, select { cursor: text; }
   /* Reports print in place. Keep the report paper visible while hiding only
      the POS shell; this avoids navigating to a blank popup document. */
   body[data-printing-report="true"] { background: #fff !important; color: #000 !important; }
+  body[data-printing-report="true"][data-print-format="a4"] { page: report-a4; }
+  body[data-printing-report="true"][data-print-format="thermal"] { page: report-thermal; }
   body[data-printing-report="true"] > #root > .app-shell { display: block !important; position: static !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
   body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .reports-container,
   body[data-printing-report="true"] > #root > .app-shell.reports-app-shell > .reports-container .report-view-container,
