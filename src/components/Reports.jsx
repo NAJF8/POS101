@@ -411,10 +411,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
       void Promise.resolve(onBeforePrint?.()).catch(error => {
         console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error))
       })
-    } catch (error) {
-      console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error))
-    }
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const images = [...paper.querySelectorAll('img')]
       await Promise.all(images.map(image => {
         if (image.complete) return image.decode ? image.decode().catch(() => {}) : Promise.resolve()
