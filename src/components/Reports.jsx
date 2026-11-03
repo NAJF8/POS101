@@ -408,7 +408,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     // best-effort and runs in the background so a Firebase/auth problem cannot
     // suppress the browser print dialog.
     try {
-      void onBeforePrint?.().catch(error => {
+      void Promise.resolve(onBeforePrint?.()).catch(error => {
         console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error))
       })
     } catch (error) {
