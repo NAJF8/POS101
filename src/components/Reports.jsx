@@ -406,7 +406,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     // Printing must never be blocked by the optional central sync.
     // The report already renders from the current in-memory dataset; sync is
     // best-effort and runs in the background so a Firebase/auth problem cannot
-    // suppress the browser print dialog.
+    // suppress the browser print dialog. Keep this path independent of sync failures.
     try {
       void Promise.resolve(onBeforePrint?.()).catch(error => {
         console.warn('REPORT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error))
