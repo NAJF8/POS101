@@ -20,7 +20,7 @@ const cashAmount = value => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-// `discount` is the sale's canonical cash amount.  The details object records
+// `discount` is the sale's canonical cash amount. The details object records
 // how that amount was chosen (amount, percent, Baly, or Toters), so it must
 // only be used as a fallback for legacy rows that do not have `discount`.
 export const actualCashDiscountOf = sale => {
@@ -32,10 +32,29 @@ export const actualCashDiscountOf = sale => {
     sale?.discountDetails?.value,
     sale?.discount?.value,
     order?.discount?.value,
+    order?.discountDetails?.value,
+    order?.discount,
+    order?.discountAmount,
+    order?.discount_amount,
   ]
   for (const value of values) {
     const parsed = cashAmount(value)
-    if (parsed !== null) return parsed
+    if (parsed !== null && parsed > 0) return parsed
+  }
+  const details = (sale?.discountDetails && typeof sale.discountDetails === 'object')
+    ? sale.discountDetails
+    : (order?.discount && typeof order.discount === 'object')
+      ? order.discount
+      : (sale?.discount && typeof sale.discount === 'object')
+        ? sale.discount
+        : null
+  if (details && (details.kind === 'baly' || details.kind === 'toters' || details.kind === 'percent')) {
+    const subtotal = numberValue(sale?.subtotal ?? order.subtotal ?? (numberValue(sale?.total ?? order.total) > 0 ? sale.total : 0))
+    const rawInput = Number(details.input)
+    const pct = details.kind === 'baly' ? 26 : details.kind === 'toters' ? 25 : rawInput
+    if (subtotal > 0 && pct > 0) {
+      return Math.round(subtotal * pct / 100)
+    }
   }
   return 0
 }
@@ -70,15 +89,30 @@ export const normalizeSale = sale => {
   const order = sale?.order || {}
   const payment = sale?.payment || {}
   const discount = actualCashDiscountOf(sale)
-  const subtotal = firstValue(sale?.subtotal, order.subtotal, sale?.total, sale?.total_after_discount, 0)
-  const total = firstValue(sale?.total, sale?.total_after_discount, sale?.net_total, numberValue(subtotal) - numberValue(discount), 0)
+  const explicitSubtotal = firstValue(sale?.subtotal, order.subtotal, sale?.gross, sale?.gross_amount)
+  const explicitTotal = firstValue(sale?.total, sale?.total_after_discount, sale?.net_total)
+  const itemsSubtotal = (Array.isArray(sale?.items) ? sale.items : Array.isArray(order.items) ? order.items : [])
+    .reduce((sum, item) => sum + (numberValue(item?.price ?? item?.unitPrice, 0) * numberValue(item?.quantity, 1)), 0)
+
+  const subtotal = explicitSubtotal !== undefined
+    ? numberValue(explicitSubtotal)
+    : itemsSubtotal > 0
+      ? itemsSubtotal
+      : explicitTotal !== undefined && discount > 0
+        ? numberValue(explicitTotal) + discount
+        : numberValue(explicitTotal, 0)
+
+  const total = explicitTotal !== undefined
+    ? numberValue(explicitTotal)
+    : Math.max(0, subtotal - discount)
+
   return {
     ...sale,
     id: firstValue(sale?.id, sale?.saleId),
     createdAt: dateValue(firstValue(sale?.createdAt, sale?.created_at, sale?.timestamp, sale?.date)),
-    subtotal: numberValue(subtotal),
+    subtotal,
     discount,
-    total: numberValue(total),
+    total,
     service: numberValue(firstValue(sale?.service, sale?.service_charge, sale?.serviceCharge, 0)),
     paymentMethod: firstValue(sale?.paymentMethod, sale?.payment_method, payment.method, 'cash'),
     shift: firstValue(sale?.shift, sale?.shiftName, sale?.shift_id),
@@ -205,5 +239,17 @@ export const getReportSalesForPeriod = ({ localSales = [], centralSales = [], op
       result.push(...(Array.isArray(centralSales) ? centralSales : []).filter(sale => isReportableSale(sale) && businessDateForSale(sale) === date))
     }
   }
-  return result
+
+  const mergedSales = new Map()
+  for (const rawSale of result) {
+    const sale = normalizeSale(rawSale)
+    const key = String(sale?.saleId || sale?.id || sale?.operationKey || `${sale?.businessDate}:${sale?.orderNumber || sale?.createdAt}`)
+    if (!mergedSales.has(key)) {
+      mergedSales.set(key, sale)
+    } else {
+      const existing = mergedSales.get(key)
+      mergedSales.set(key, { ...existing, ...sale, discount: Math.max(existing.discount, sale.discount) })
+    }
+  }
+  return [...mergedSales.values()]
 }

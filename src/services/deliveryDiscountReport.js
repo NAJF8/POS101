@@ -1,16 +1,30 @@
 import { actualCashDiscountOf, businessDateForSale, isReportableSale, normalizeSale, numberValue } from './reportSales.js'
 
-const sourceText = value => String(value ?? '').trim().toLocaleLowerCase()
+const sourceText = value => String(value ?? '').trim().toLowerCase()
 const sourceFields = sale => [
-  sale?.deliverySource, sale?.source, sale?.orderSource, sale?.channel, sale?.orderChannel,
-  sale?.order?.deliverySource, sale?.order?.source, sale?.order?.orderSource, sale?.order?.channel,
-  sale?.order?.orderType, sale?.orderType,
+  sale?.discountDetails?.kind,
+  sale?.discount?.kind,
+  sale?.order?.discount?.kind,
+  sale?.order?.discountDetails?.kind,
+  sale?.deliverySource,
+  sale?.source,
+  sale?.orderSource,
+  sale?.channel,
+  sale?.orderChannel,
+  sale?.order?.deliverySource,
+  sale?.order?.source,
+  sale?.order?.orderSource,
+  sale?.order?.channel,
+  sale?.order?.orderType,
+  sale?.orderType,
 ]
 
 export const deliverySourceOf = sale => {
-  const value = sourceFields(sale).map(sourceText).find(Boolean) || ''
-  if (/(baly|bly|بلي|بلى)/i.test(value)) return 'baly'
-  if (/(toters|totter|توترز|توتـرز|تويترز)/i.test(value)) return 'toters'
+  const values = sourceFields(sale).map(sourceText).filter(Boolean)
+  for (const value of values) {
+    if (/(baly|bly|بلي|بلى)/i.test(value)) return 'baly'
+    if (/(toters|totter|توترز|توتـرز|تويترز)/i.test(value)) return 'toters'
+  }
   return ''
 }
 

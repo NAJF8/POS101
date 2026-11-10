@@ -40,12 +40,14 @@ const rowShiftType = row => expenseShiftType(row)
 export const buildShiftReport = ({ sales = [], expenses = [], transactions = [], businessDate = '', operationalDayId = '', shiftType } = {}) => {
   const daySales = (Array.isArray(sales) ? sales : []).filter(sale => {
     if (businessDate && text(sale?.businessDate) !== text(businessDate)) return false
-    if (operationalDayId && text(sale?.operationalDayId || sale?.operational_day_id) !== text(operationalDayId)) return false
+    const saleDayId = text(sale?.operationalDayId || sale?.operational_day_id)
+    if (operationalDayId && saleDayId && saleDayId !== text(operationalDayId)) return false
     return true
   })
   const dayExpenses = (Array.isArray(expenses) ? expenses : []).map(row => normalizeExpense(row)).filter(expense => {
     if (businessDate && text(expense?.businessDate) !== text(businessDate)) return false
-    if (operationalDayId && text(expense?.operationalDayId) !== text(operationalDayId)) return false
+    const expenseDayId = text(expense?.operationalDayId)
+    if (operationalDayId && expenseDayId && expenseDayId !== text(operationalDayId)) return false
     return isActiveExpense(expense)
   })
   const shiftSales = daySales.filter(sale => saleShiftType(sale).value === shiftType)
@@ -53,7 +55,8 @@ export const buildShiftReport = ({ sales = [], expenses = [], transactions = [],
   const moneyOutRows = buildMoneyOutLedger({ expenses, transactions }).filter(row => {
     if (!row.includeInReports || row.reportBucket === 'ignored') return false
     if (businessDate && text(row.businessDate) !== text(businessDate)) return false
-    if (operationalDayId && text(row.original?.operationalDayId || row.original?.operational_day_id) !== text(operationalDayId)) return false
+    const rowDayId = text(row.original?.operationalDayId || row.original?.operational_day_id)
+    if (operationalDayId && rowDayId && rowDayId !== text(operationalDayId)) return false
     return rowShiftType(row.original).value === shiftType
   })
   const withdrawalRows = moneyOutRows.filter(row => row.reportBucket === 'withdrawal').map(row => row.original)

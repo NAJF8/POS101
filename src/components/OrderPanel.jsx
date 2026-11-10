@@ -12,7 +12,7 @@ export default function OrderPanel({
   const itemsAreaRef = useRef(null)
   const items = normalizeCartItems(order?.items)
   const subtotal = items.reduce((s, i) => s + safeNumber(i.price * i.quantity, 0), 0)
-  const discountVal = safeNumber(discount, 0)
+  const discountVal = safeNumber(discount ?? order?.discount?.value, 0)
   const total = Math.max(0, subtotal - discountVal)
 
   useEffect(() => {
@@ -107,7 +107,7 @@ export default function OrderPanel({
             <span>{formatNumber(subtotal)} <small>د.ع</small></span>
           </div>
           <div className="total-line discount-val">
-            <span className="label">الخصم</span>
+            <span className="label">الخصومات</span>
             <span>{formatNumber(discountVal)} <small>د.ع</small></span>
           </div>
           <div className="divider" />

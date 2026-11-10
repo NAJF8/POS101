@@ -12,7 +12,7 @@ const amount = value => {
 // the same financial contract without reading localStorage again.
 export const calculateComprehensiveSummary = (sales = [], expenses = [], transactions = [], endDay = null) => {
   const normalizedExpenses = expenses.map(normalizeExpense)
-  const grossSales = sales.reduce((sum, sale) => sum + amount(sale.subtotal ?? sale.total), 0)
+  const grossSales = sales.reduce((sum, sale) => sum + amount(sale.subtotal ?? (amount(sale.total) + actualCashDiscountOf(sale))), 0)
   const discounts = sales.reduce((sum, sale) => sum + actualCashDiscountOf(sale), 0)
   const electronicSales = sales.reduce((sum, sale) => {
     const method = sale.paymentMethod || sale.payment?.method

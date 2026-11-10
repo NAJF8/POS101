@@ -614,7 +614,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     
     // Aggregation logic
     const aggregateSales = (sList) => {
-      const gross = sList.reduce((acc, s) => acc + numberValue(s.subtotal), 0)
+      const gross = sList.reduce((acc, s) => acc + numberValue(s.subtotal ?? (numberValue(s.total) + actualCashDiscountOf(s))), 0)
       const discounts = sList.reduce((acc, s) => acc + actualCashDiscountOf(s), 0)
       
       // Calculate refunds explicitly from adjustments

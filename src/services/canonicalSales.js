@@ -1,3 +1,5 @@
+import { actualCashDiscountOf } from './reportSales.js'
+
 const text = value => String(value ?? '').trim()
 const amount = value => Number.isFinite(Number(value)) ? Number(value) : 0
 
@@ -6,8 +8,8 @@ export const operationKeyOf = sale => text(sale?.operationKey || sale?.operation
 export const saleDayIdOf = sale => text(sale?.operationalDayId || sale?.operational_day_id || sale?.shiftId || sale?.shift_id)
 export const saleBusinessDateOf = sale => text(sale?.businessDate || sale?.business_date)
 export const salePaymentMethodOf = sale => text(sale?.paymentMethod || sale?.payment_method || sale?.payment?.method)
-export const saleGrossOf = sale => amount(sale?.gross ?? sale?.subtotal ?? sale?.total)
-export const saleDiscountOf = sale => amount(sale?.discount ?? sale?.discount_amount)
+export const saleGrossOf = sale => amount(sale?.gross ?? sale?.subtotal ?? (amount(sale?.total) + actualCashDiscountOf(sale)))
+export const saleDiscountOf = sale => actualCashDiscountOf(sale)
 export const saleNetOf = sale => amount(sale?.net ?? sale?.total ?? sale?.total_after_discount ?? sale?.subtotal) || saleGrossOf(sale) - saleDiscountOf(sale)
 export const isCanonicalSaleEligible = sale => {
   const status = text(sale?.status).toLowerCase()
