@@ -419,6 +419,18 @@ const outflowSummary = summarizeCashOutflowReport(outflowRows)
 assert.equal(outflowSummary.normalBusinessExpensesTotal, 335000) // 135,000 shop expenses + 200,000 paid salary, counted ONCE
 assert.equal(sumExpenses(categoryExpenses.filter(isRegularExpense)), 335000)
 
+// Verify 'safe' ("من القاصة") fundingSource: appears in reports and does NOT deduct from POS cashbox
+const safeExpense = { id: 'exp-safe-1', category: 'القهوة', amount: 50000, businessDate: '2026-10-15', fundingSource: 'safe', description: 'شراء بن من القاصة' }
+const outflowWithSafe = normalizeCashOutflowReport({
+  expenses: [...categoryExpenses, safeExpense],
+  transactions: [aliPayment1MirrorTx],
+  staff: employees,
+})
+const safeOutflowRow = outflowWithSafe.find(r => r.id === 'exp-safe-1')
+assert.ok(safeOutflowRow, 'Safe expense must appear in outflow report')
+assert.equal(safeOutflowRow.fundingSource, 'safe')
+assert.equal(safeOutflowRow.sourceLabel, 'من القاصة')
+
 // ============================================================================
 // 4. FINANCIAL IMMUNITY CHECK: FREE MATERIALS DO NOT ALTER ANY SALE / DISCOUNT / REPORT NUMBER
 // ============================================================================
@@ -458,6 +470,11 @@ const compSummary = calculateComprehensiveSummary(sampleSales, categoryExpenses,
 assert.equal(compSummary.grossSales, 30000)
 assert.equal(compSummary.discounts, 5200)
 assert.equal(compSummary.netAfterDiscount, 24800)
+
+const compSummaryWithSafe = calculateComprehensiveSummary(sampleSales, [...categoryExpenses, safeExpense], [aliPayment1MirrorTx], null)
+assert.equal(compSummaryWithSafe.expenses, compSummary.expenses + 50000)
+assert.equal(compSummaryWithSafe.cashboxExpenses, compSummary.cashboxExpenses)
+assert.equal(compSummaryWithSafe.netCashAfterAll, compSummary.netCashAfterAll)
 assert.equal(compSummary.cashSales, 24800)
 // Expenses in comprehensive summary: 135,000 + 200,000 (paid salary) = 335,000. Free material cost (11,400) is NOT in expenses!
 assert.equal(compSummary.expenses, 335000)

@@ -1,4 +1,4 @@
-import { fundingSourceLabel } from './expenseReporting.js'
+import { fundingSourceLabel, normalizeFundingSource } from './expenseReporting.js'
 import { employeeCodeOf, employeeNameOf, matchEmployeeRecord } from './employeeReport.js'
 import { buildMoneyOutLedger } from './moneyOutClassifier.js'
 
@@ -14,7 +14,8 @@ export const normalizeCashOutflowReport = ({ expenses = [], transactions = [], s
       const person = matchEmployeeRecord(sourceRow, staff)
       const salary = row.reportBucket === 'salary'
       const withdrawal = row.reportBucket === 'withdrawal'
-      const fundingSource = row.cashboxImpact === 'admin' ? 'management' : row.cashboxImpact === 'drawer' ? 'cashbox' : ''
+      const rawSource = normalizeFundingSource(sourceRow.fundingSource ?? sourceRow.paymentSource)
+      const fundingSource = row.cashboxImpact === 'admin' ? (rawSource === 'safe' ? 'safe' : 'management') : row.cashboxImpact === 'drawer' ? 'cashbox' : ''
       return { id: text(sourceRow.id || sourceRow.transactionId) || `${row.source}:${row.recordId}`, source: withdrawal ? 'withdrawal' : 'expense', sourceType: text(sourceRow.type || sourceRow.transactionType) || row.reportBucket, sourceLabel: fundingSource ? fundingSourceLabel(fundingSource) : '', fundingSource, typeLabel: withdrawal ? 'سحوبات' : (salary ? 'راتب' : text(sourceRow.category || sourceRow.expenseCategory) || 'أخرى'), amount: amount(row.amount), employeeId: text(person?.id || row.employeeId), employeeName: text(person?.name || row.employeeName || employeeNameOf(sourceRow) || 'غير محدد'), employeeCode: text(person?.code || row.employeeCode || employeeCodeOf(sourceRow)), description: descriptionOf(sourceRow), notes: text(sourceRow.notes || sourceRow.description), businessDate: row.businessDate, createdAt: sourceRow.createdAt || sourceRow.created_at || sourceRow.timestamp || sourceRow.date || 0, operationalDayId: text(sourceRow.operationalDayId || sourceRow.operational_day_id || sourceRow.shiftId), shiftType: text(sourceRow.shiftType || sourceRow.shift_type), shiftLabel: text(sourceRow.shiftLabel), original: sourceRow }
     })
   return rows.sort((left, right) => `${left.businessDate}|${left.createdAt}|${left.id}`.localeCompare(`${right.businessDate}|${right.createdAt}|${right.id}`))

@@ -4,10 +4,11 @@ const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/
 const firstValue = (...values) => values.find(value => value !== undefined && value !== null && value !== '')
 
 export const LEGACY_EXPENSE_DEFAULT = 'cashbox'
-export const normalizeFundingSource = value => ['management'].includes(String(value || '').trim().toLowerCase()) ? 'management' : LEGACY_EXPENSE_DEFAULT
-export const fundingSourceLabel = value => normalizeFundingSource(value) === 'management' ? 'من الإدارة' : 'من الصندوق'
+export const normalizeFundingSource = value => { const clean = String(value || '').trim().toLowerCase(); if (['management', 'من الإدارة', 'من الادارة'].includes(clean)) return 'management'; if (['safe', 'vault', 'من القاصة', 'القاصة'].includes(clean)) return 'safe'; return LEGACY_EXPENSE_DEFAULT }
+export const fundingSourceLabel = value => { const source = normalizeFundingSource(value); return source === 'management' ? 'من الإدارة' : source === 'safe' ? 'من القاصة' : 'من الصندوق' }
 export const isCashboxExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'cashbox'
-export const isManagementExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'management'
+export const isSafeExpense = expense => normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource) === 'safe'
+export const isManagementExpense = expense => ['management', 'safe'].includes(normalizeFundingSource(expense?.fundingSource ?? expense?.paymentSource))
 // The management list is the source ledger.  Report-only withdrawal
 // classification, and legacy boolean markers without an explicit deletion
 // audit, must not hide a row from that list.

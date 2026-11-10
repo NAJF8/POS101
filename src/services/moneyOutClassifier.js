@@ -35,10 +35,12 @@ const cashboxImpactOf = row => {
   const rawValues = [row?.fundingSource, row?.paymentSource, row?.payment_source, row?.paidFrom, row?.paid_from, row?.sourceType].filter(value => value !== undefined && value !== null && text(value) !== '')
   if (!rawValues.length) return { cashboxImpact: 'drawer', warning: false, reason: 'legacy_cashbox_default' }
   const markers = rawValues.map(normalized)
-  const admin = markers.some(marker => marker === 'management' || marker.includes('admin') || marker.includes('from admin') || marker.includes('من الإدارة') || marker.includes('من الادارة'))
-  const drawer = markers.some(marker => marker === 'cashbox' || marker === 'cash drawer' || marker === 'drawer' || marker.includes('from cashbox') || marker.includes('from drawer') || marker.includes('الصندوق'))
-  const unknown = markers.filter(marker => !admin && !drawer || (admin && !['management'].includes(marker) && !marker.includes('admin') && !marker.includes('من الإدارة') && !marker.includes('من الادارة')) || (drawer && !['cashbox', 'cash drawer', 'drawer'].includes(marker) && !marker.includes('from cashbox') && !marker.includes('from drawer') && !marker.includes('الصندوق')))
-  if (admin && !drawer && unknown.length === 0) return { cashboxImpact: 'admin', warning: false, reason: 'management_source' }
+  const isAdminMarker = marker => ['management', 'safe', 'vault'].includes(marker) || marker.includes('admin') || marker.includes('from admin') || marker.includes('من الإدارة') || marker.includes('من الادارة') || marker.includes('من القاصة') || marker.includes('القاصة')
+  const isDrawerMarker = marker => ['cashbox', 'cash drawer', 'drawer'].includes(marker) || marker.includes('from cashbox') || marker.includes('from drawer') || marker.includes('الصندوق')
+  const admin = markers.some(isAdminMarker)
+  const drawer = markers.some(isDrawerMarker)
+  const unknown = markers.filter(marker => !admin && !drawer || (admin && !isAdminMarker(marker)) || (drawer && !isDrawerMarker(marker)))
+  if (admin && !drawer && unknown.length === 0) return { cashboxImpact: 'admin', warning: false, reason: markers.some(m => m === 'safe' || m === 'vault' || m.includes('القاصة')) ? 'safe_source' : 'management_source' }
   if (drawer && !admin && unknown.length === 0) return { cashboxImpact: 'drawer', warning: false, reason: 'drawer_source' }
   return { cashboxImpact: 'none', warning: true, reason: `unknown_or_conflicting_funding_source:${rawValues.map(text).join('|')}` }
 }
