@@ -756,6 +756,172 @@ export function PrintMenu({ enabled, settings, thermalStatus, onClose, onChange,
   )
 }
 
+/* ── Free Material Consumption Dialog (Gift / Hospitality / Loyalty) ── */
+export function FreeMaterialDialog({ cartItems = [], products = [], onClose, onConfirm }) {
+  const initialLines = React.useMemo(() => {
+    const normalized = normalizeCartItems(cartItems)
+    if (normalized.length > 0) {
+      return normalized.map(item => ({
+        productId: String(item.productId || item.id || ''),
+        name: item.displayName || item.name || '',
+        category: item.category || 'عام',
+        quantity: Number(item.quantity || 1),
+        cost: item.cost ?? null
+      }))
+    }
+    return []
+  }, [cartItems])
+
+  const [type, setType] = React.useState('gift')
+  const [recipientName, setRecipientName] = React.useState('')
+  const [note, setNote] = React.useState('')
+  const [lines, setLines] = React.useState(initialLines)
+  const [selectedProductId, setSelectedProductId] = React.useState('')
+  const [selectedQty, setSelectedQty] = React.useState(1)
+  const [error, setError] = React.useState('')
+
+  const availableProducts = React.useMemo(
+    () => (Array.isArray(products) ? products : []).filter(p => p && p.enabled !== false && p.name),
+    [products]
+  )
+
+  const addProductLine = () => {
+    const prod = availableProducts.find(p => String(p.id) === String(selectedProductId))
+    const qty = Math.max(1, Number(selectedQty) || 1)
+    if (!prod) return
+    setLines(prev => {
+      const idx = prev.findIndex(l => String(l.productId) === String(prod.id))
+      if (idx >= 0) {
+        return prev.map((l, i) => i === idx ? { ...l, quantity: l.quantity + qty } : l)
+      }
+      return [...prev, {
+        productId: String(prod.id),
+        name: prod.displayName || prod.name,
+        category: prod.category || 'عام',
+        quantity: qty,
+        cost: prod.cost ?? null
+      }]
+    })
+  }
+
+  const updateLineQty = (index, delta) => {
+    setLines(prev => prev.map((line, i) => i === index ? { ...line, quantity: Math.max(1, line.quantity + delta) } : line))
+  }
+
+  const removeLine = index => {
+    setLines(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const submit = () => {
+    if (!lines.length) {
+      setError('اختر مادة واحدة على الأقل لتسجيل العملية المجانية.')
+      return
+    }
+    setError('')
+    onConfirm({
+      type,
+      recipientName: type === 'hospitality' ? recipientName.trim() : '',
+      items: lines,
+      note: note.trim()
+    })
+  }
+
+  const typeCards = [
+    { key: 'gift', title: 'هدية (Gift)', desc: 'خروج مادة مجانية كهدية (بدون أثر مالي على المبيعات)' },
+    { key: 'hospitality', title: 'ضيافة (Hospitality)', desc: 'ضيافة مع إمكانية تحديد اسم الشخص أو الجهة' },
+    { key: 'loyalty', title: 'ولاء (Loyalty)', desc: 'مكافأة ولاء مجانية (حركة مخزون مستقلة)' }
+  ]
+
+  return (
+    <Dialog onClose={onClose} className="discount-dialog free-material-dialog">
+      <button className="close" onClick={onClose}><Icon name="x" /></button>
+      <div className="dialog-heading">
+        <h2>تسجيل مواد مجانية (هدية / ضيافة / ولاء)</h2>
+        <p>حركة استهلاك مواد ومخزون مستقلة — لا تُسجل كمبيعة ولا كخصم ولا تغيّر إيرادات الصندوق.</p>
+      </div>
+      <div className="discount-cards" role="group" aria-label="نوع المادة المجانية">
+        {typeCards.map(card => (
+          <button
+            key={card.key}
+            type="button"
+            className={`discount-card ${type === card.key ? 'selected' : ''}`}
+            aria-pressed={type === card.key}
+            onClick={() => setType(card.key)}
+          >
+            <b>{card.title}</b>
+            <small>{card.desc}</small>
+          </button>
+        ))}
+      </div>
+
+      {type === 'hospitality' && (
+        <label className="discount-input" style={{ marginTop: '0.75rem' }}>
+          <span>اسم الشخص / الجهة (اختياري)</span>
+          <input
+            type="text"
+            value={recipientName}
+            onChange={e => setRecipientName(e.target.value)}
+            placeholder="مثال: شركة X أو ضيف الإدارة"
+          />
+        </label>
+      )}
+
+      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+        <label style={{ flex: 1 }}>
+          <span>إضافة مادة من القائمة</span>
+          <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} style={{ width: '100%' }}>
+            <option value="">اختر المادة...</option>
+            {availableProducts.map(p => (
+              <option key={p.id} value={p.id}>{p.displayName || p.name} ({p.category || 'عام'})</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ width: '90px' }}>
+          <span>الكمية</span>
+          <input type="number" min="1" value={selectedQty} onChange={e => setSelectedQty(e.target.value)} />
+        </label>
+        <button type="button" className="secondary-action" onClick={addProductLine} disabled={!selectedProductId}>إضافة</button>
+      </div>
+
+      <div className="history-lines" style={{ marginTop: '0.75rem', maxHeight: '180px', overflowY: 'auto' }}>
+        {lines.length === 0 ? (
+          <p style={{ textAlign: 'center', opacity: 0.7 }}>لا توجد مواد مختارة بعد.</p>
+        ) : (
+          lines.map((line, idx) => (
+            <div key={`${line.productId}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.35rem 0' }}>
+              <span><b>{line.name}</b> <small>({line.category})</small></span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <button type="button" className="secondary-action" onClick={() => updateLineQty(idx, -1)}>-</button>
+                <b dir="ltr">{formatNumber(line.quantity)}</b>
+                <button type="button" className="secondary-action" onClick={() => updateLineQty(idx, 1)}>+</button>
+                <button type="button" className="secondary-action" onClick={() => removeLine(idx)}>حذف</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <label className="discount-input" style={{ marginTop: '0.5rem' }}>
+        <span>ملاحظة (اختياري)</span>
+        <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="ملاحظة إضافية" />
+      </label>
+
+      <div className="discount-summary" aria-label="ملخص الأثر المالي">
+        <div><span>المدفوع من الزبون (customerPaid)</span><b dir="ltr">0 د.ع</b></div>
+        <div><span>الأثر على المبيعات والخصومات</span><b dir="ltr">0 د.ع</b></div>
+        <div><span>نوع حركة المخزون</span><strong dir="ltr">{type === 'gift' ? 'GIFT' : type === 'hospitality' ? 'HOSPITALITY' : 'LOYALTY'}</strong></div>
+      </div>
+
+      {error && <small className="discount-validation" role="alert">{error}</small>}
+
+      <div className="dialog-actions">
+        <button type="button" className="secondary-action" onClick={onClose}>إلغاء</button>
+        <button type="button" className="primary-action" onClick={submit} disabled={lines.length === 0}>تسجيل المادة المجانية</button>
+      </div>
+    </Dialog>
+  )
+}
+
 /* ── Base Dialog ── */
 function Dialog({ children, onClose, className = '' }) {
   return (

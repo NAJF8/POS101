@@ -4,7 +4,7 @@ import { formatMoney, formatNumber } from '../utils.js'
 import { categoryId, productNames } from '../data/menu'
 
 const fallbackImage = `${import.meta.env.BASE_URL}assets/branding/101-logo-transparent.png`
-const emptyForm = { id: '', name: '', english: '', category: '', price: '', image: '', enabled: true, productType: 'parent', parentProductId: '' }
+const emptyForm = { id: '', name: '', english: '', category: '', price: '', cost: '', image: '', enabled: true, productType: 'parent', parentProductId: '' }
 
 const prepareProductImage = file => new Promise((resolve, reject) => {
   if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
@@ -45,7 +45,7 @@ function ProductImage({ product, className = '' }) {
 
 function ProductForm({ product, products, categories, onClose, onSave }) {
   const [form, setForm] = useState(() => product
-    ? { ...emptyForm, ...product, productType: product.parentProductId ? 'child' : 'parent', price: String(product.price ?? '') }
+    ? { ...emptyForm, ...product, productType: product.parentProductId ? 'child' : 'parent', price: String(product.price ?? ''), cost: product.cost !== undefined && product.cost !== null ? String(product.cost) : '' }
     : { ...emptyForm, category: categories[0] || '' })
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(form.image || fallbackImage)
@@ -72,6 +72,7 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
         ...form,
         name,
         price,
+        cost: String(form.cost ?? '').trim() !== '' && Number.isFinite(Number(form.cost)) && Number(form.cost) > 0 ? Number(form.cost) : null,
         productType: form.productType === 'child' ? 'child' : 'parent',
         parentProductId: form.productType === 'child' ? String(form.parentProductId) : '',
         category: form.productType === 'child' ? parent.category : form.category,
@@ -97,6 +98,7 @@ function ProductForm({ product, products, categories, onClose, onSave }) {
         <label>الاسم بالإنجليزية<input value={form.english || ''} onChange={e => set('english', e.target.value)} /></label>
         {form.productType === 'child' ? <label>المنتج الرئيسي *<select value={form.parentProductId || ''} onChange={e => set('parentProductId', e.target.value)}><option value="">اختر المنتج الرئيسي</option>{products.filter(item => !item.parentProductId && String(item.id) !== String(product?.id)).map(item => <option key={item.id} value={item.id}>{productNames(item).arabic || item.name}</option>)}</select><small className="product-form-hint">سيُحفظ المنتج الفرعي داخل قسم المنتج الرئيسي.</small></label> : <label>القسم *<select value={form.category} onChange={e => set('category', e.target.value)}>{categories.map(category => <option key={category}>{category}</option>)}</select></label>}
         <label>السعر (د.ع) *<input dir="ltr" type="number" min="0" step="1" value={form.price} onChange={e => set('price', e.target.value)} /></label>
+        <label>التكلفة الفعلية (د.ع - اختياري)<input dir="ltr" type="number" min="0" step="1" placeholder="تُترك فارغة إن لم تتوفر" value={form.cost ?? ''} onChange={e => set('cost', e.target.value)} /></label>
       </div>
       <label className="product-image-picker">صورة المنتج<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={chooseImage} /><span>اختيار صورة من الجهاز</span></label>
       <div className="product-image-preview"><img src={preview} alt="معاينة صورة المنتج" onError={e => { e.currentTarget.src = fallbackImage }} /><span>معاينة قبل الحفظ</span></div>
@@ -111,7 +113,7 @@ export default function Settings({ products, categories, canWrite, canManageStaf
   const [editing, setEditing] = useState(null)
   const [notice, setNotice] = useState('')
   const [discountForm, setDiscountForm] = useState(() => ({ baly: String(discountPresets.baly), toters: String(discountPresets.toters) }))
-  const [staffForm, setStaffForm] = useState({ id: '', name: '', code: '', role: 'cashier', active: true, canSell: true })
+  const [staffForm, setStaffForm] = useState({ id: '', name: '', code: '', role: 'cashier', active: true, canSell: true, fixedMonthlySalary: '' })
   const sorted = useMemo(() => products.slice().sort((a, b) => Number(b.enabled !== false) - Number(a.enabled !== false) || String(a.name).localeCompare(String(b.name), 'ar')), [products])
   const save = async product => { await onSave(product); setNotice('تم حفظ المنتج وتحديث الكاشير عند اتصاله.'); window.setTimeout(() => setNotice(''), 4000) }
   const toggle = product => save({ ...product, enabled: product.enabled === false }).catch(error => setNotice(error?.message || 'تعذر حفظ حالة المنتج.'))
@@ -127,13 +129,13 @@ export default function Settings({ products, categories, canWrite, canManageStaf
     window.setTimeout(() => setNotice(''), 4000)
   }
   const ensureStaffAccess = async () => canManageStaff || Boolean(await onStaffSignIn?.())
-  const saveStaff = async event => { event.preventDefault(); if (!staffForm.name.trim() || !await ensureStaffAccess()) return; await onSaveStaff?.({ ...staffForm, name: staffForm.name.trim(), code: staffForm.code.trim() }); setStaffForm({ id: '', name: '', code: '', role: 'cashier', active: true, canSell: true }) }
-  const editStaff = async row => { if (await ensureStaffAccess()) setStaffForm({ id: row.id, name: row.name, code: row.code || '', role: row.role, active: row.active !== false, canSell: row.canSell !== false }) }
+  const saveStaff = async event => { event.preventDefault(); if (!staffForm.name.trim() || !await ensureStaffAccess()) return; const fixedMonthlySalary = Number.isFinite(Number(staffForm.fixedMonthlySalary)) && Number(staffForm.fixedMonthlySalary) >= 0 ? Number(staffForm.fixedMonthlySalary) : 0; await onSaveStaff?.({ ...staffForm, name: staffForm.name.trim(), code: staffForm.code.trim(), fixedMonthlySalary }); setStaffForm({ id: '', name: '', code: '', role: 'cashier', active: true, canSell: true, fixedMonthlySalary: '' }) }
+  const editStaff = async row => { if (await ensureStaffAccess()) setStaffForm({ id: row.id, name: row.name, code: row.code || '', role: row.role, active: row.active !== false, canSell: row.canSell !== false, fixedMonthlySalary: row.fixedMonthlySalary ? String(row.fixedMonthlySalary) : '' }) }
   const toggleStaff = async row => { if (await ensureStaffAccess()) await onSaveStaff?.({ ...row, active: row.active === false }) }
   const currentStaff = staff.filter(row => row.active !== false)
   const previousStaff = staff.filter(row => row.active === false)
   const roleLabel = { cashier: 'كاشير', employee: 'موظف', manager: 'مدير' }
-  const staffRow = row => <div className={`staff-settings-row ${row.active === false ? 'is-disabled' : ''}`} key={row.id}><div><b>{row.name}</b><small>{row.code || 'بدون كود'} · {roleLabel[row.role] || roleLabel.employee} · {row.canSell === false ? 'لا يظهر ككابتن' : 'يظهر ككابتن'}{row.active === false && row.deactivatedAt ? ` · عُطّل ${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date(row.deactivatedAt))}` : ''}</small></div><button type="button" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy} onClick={() => editStaff(row)}>تعديل</button><button type="button" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy} onClick={() => toggleStaff(row)}>{row.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button></div>
+  const staffRow = row => <div className={`staff-settings-row ${row.active === false ? 'is-disabled' : ''}`} key={row.id}><div><b>{row.name}</b><small>{row.code || 'بدون كود'} · {roleLabel[row.role] || roleLabel.employee} · {row.canSell === false ? 'لا يظهر ككابتن' : 'يظهر ككابتن'}{Number(row.fixedMonthlySalary) > 0 ? ` · الراتب الثابت: ${formatNumber(row.fixedMonthlySalary)} د.ع` : ''}{row.active === false && row.deactivatedAt ? ` · عُطّل ${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date(row.deactivatedAt))}` : ''}</small></div><button type="button" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy} onClick={() => editStaff(row)}>تعديل</button><button type="button" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy} onClick={() => toggleStaff(row)}>{row.active === false ? 'إعادة تفعيل' : 'تعطيل'}</button></div>
   return <section className="settings-page" dir="rtl">
     <div className="settings-heading"><div><button type="button" className="back-link" onClick={() => onNavigate('dashboard')}><Icon name="arrow" size={18} /> الرئيسية</button><h1>الإعدادات</h1><p>إدارة المنتجات والموظفين</p></div><span className="settings-lock">{canWrite ? 'إدارة مصرح بها' : 'قراءة فقط'}</span></div>
     {canAccessBackupRecovery && <section className="settings-card backup-recovery-entry"><div className="settings-card-heading"><div><h2>فحص واسترداد نسخة المبيعات</h2><p>الفحص والنسخ الاحتياطي متاحان للجميع؛ الإصلاح يحتاج صلاحية إدارة.</p></div><button type="button" className="primary-action" onClick={() => onNavigate('backup-recovery')}>فتح الأداة</button></div></section>}
@@ -151,7 +153,7 @@ export default function Settings({ products, categories, canWrite, canManageStaf
       </div>
       <button className="primary-action" type="submit">حفظ الخصومات</button>
     </form>
-    <section className="settings-card staff-management-card"><div className="settings-card-heading"><div><h2>إدارة الموظفين</h2><p>التعطيل يحافظ على السجلات القديمة، وأهلية الكابتن تخص اختيار البائع فقط.</p></div></div><form className="staff-settings-form" onSubmit={saveStaff}><input value={staffForm.name} onChange={e => setStaffForm(v => ({ ...v, name: e.target.value }))} placeholder="اسم الموظف" required /><input value={staffForm.code} onChange={e => setStaffForm(v => ({ ...v, code: e.target.value }))} placeholder="الكود" /><select value={staffForm.role} onChange={e => setStaffForm(v => ({ ...v, role: e.target.value }))}><option value="cashier">كاشير</option><option value="employee">موظف</option><option value="manager">مدير</option></select><label className="staff-seller-toggle"><input type="checkbox" checked={staffForm.canSell} onChange={e => setStaffForm(v => ({ ...v, canSell: e.target.checked }))} /> يظهر ككابتن في البيع</label><button className="primary-action" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy}>{staffAuthBusy ? 'جارٍ تسجيل الدخول…' : (staffForm.id ? 'حفظ التعديل' : 'إضافة موظف')}</button></form>{!canManageStaff && <div className="settings-readonly"><p>{staffAuthError || 'يلزم تسجيل الدخول بحساب POS المصرح لإدارة الموظفين.'}</p>{!staffAuthError && <button type="button" className="secondary-action" onClick={onStaffSignIn} disabled={staffAuthBusy}>{staffAuthBusy ? 'جارٍ تسجيل الدخول…' : 'تسجيل دخول'}</button>}</div>}<h3 className="staff-section-title">الموظفون الحاليون</h3><div className="staff-settings-list">{currentStaff.length ? currentStaff.map(staffRow) : <p className="settings-readonly">لا يوجد موظفون حاليون.</p>}</div><h3 className="staff-section-title">الموظفون السابقون</h3><div className="staff-settings-list">{previousStaff.length ? previousStaff.map(staffRow) : <p className="settings-readonly">لا يوجد موظفون سابقون.</p>}</div></section>
+    <section className="settings-card staff-management-card"><div className="settings-card-heading"><div><h2>إدارة الموظفين</h2><p>التعطيل يحافظ على السجلات القديمة، وأهلية الكابتن تخص اختيار البائع فقط.</p></div></div><form className="staff-settings-form" onSubmit={saveStaff}><input value={staffForm.name} onChange={e => setStaffForm(v => ({ ...v, name: e.target.value }))} placeholder="اسم الموظف" required /><input value={staffForm.code} onChange={e => setStaffForm(v => ({ ...v, code: e.target.value }))} placeholder="الكود" /><input type="number" min="0" step="1000" dir="ltr" value={staffForm.fixedMonthlySalary ?? ''} onChange={e => setStaffForm(v => ({ ...v, fixedMonthlySalary: e.target.value }))} placeholder="الراتب الثابت (د.ع)" /><select value={staffForm.role} onChange={e => setStaffForm(v => ({ ...v, role: e.target.value }))}><option value="cashier">كاشير</option><option value="employee">موظف</option><option value="manager">مدير</option></select><label className="staff-seller-toggle"><input type="checkbox" checked={staffForm.canSell} onChange={e => setStaffForm(v => ({ ...v, canSell: e.target.checked }))} /> يظهر ككابتن في البيع</label><button className="primary-action" disabled={(!canManageStaff && !onStaffSignIn) || staffAuthBusy}>{staffAuthBusy ? 'جارٍ تسجيل الدخول…' : (staffForm.id ? 'حفظ التعديل' : 'إضافة موظف')}</button></form>{!canManageStaff && <div className="settings-readonly"><p>{staffAuthError || 'يلزم تسجيل الدخول بحساب POS المصرح لإدارة الموظفين.'}</p>{!staffAuthError && <button type="button" className="secondary-action" onClick={onStaffSignIn} disabled={staffAuthBusy}>{staffAuthBusy ? 'جارٍ تسجيل الدخول…' : 'تسجيل دخول'}</button>}</div>}<h3 className="staff-section-title">الموظفون الحاليون</h3><div className="staff-settings-list">{currentStaff.length ? currentStaff.map(staffRow) : <p className="settings-readonly">لا يوجد موظفون حاليون.</p>}</div><h3 className="staff-section-title">الموظفون السابقون</h3><div className="staff-settings-list">{previousStaff.length ? previousStaff.map(staffRow) : <p className="settings-readonly">لا يوجد موظفون سابقون.</p>}</div></section>
     {notice && <p className="settings-notice" role="status">{notice}</p>}
     {editing && <ProductForm product={editing.id ? editing : null} products={products} categories={categories} onClose={() => setEditing(null)} onSave={save} />}
   </section>

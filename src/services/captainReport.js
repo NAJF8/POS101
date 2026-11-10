@@ -10,7 +10,7 @@ const amount = value => { const number = Number(value); return Number.isFinite(n
 const isVoided = row => row?.status === 'voided' || row?.voided === true
 const isClosedSale = row => ['cancelled', 'canceled', 'voided', 'abandoned', 'draft', 'باطل', 'ملغي'].includes(text(row?.status).toLocaleLowerCase('ar-IQ'))
 const salaryCategory = 'راتب'
-const isSalaryRecord = row => text(row?.category || row?.expenseCategory) === salaryCategory
+const isSalaryRecord = row => ['راتب', 'رواتب'].includes(text(row?.category || row?.expenseCategory))
 
 // Compatibility wrapper retained for callers that need the old kind shape.
 // The shared money-out classifier is the source of truth for the decision.

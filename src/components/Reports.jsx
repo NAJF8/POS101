@@ -7,7 +7,7 @@ import { actualCashDiscountOf, getReportSalesForPeriod, readLocalSales, numberVa
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { isActiveExpense, isCashboxExpense, isRegularExpense, isWithdrawalExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
-import { readCentralExpensesForReports, readLocalExpenses, subscribeCentralExpenses } from '../services/posCentralSync.js'
+import { readCentralExpensesForReports, readLocalExpenses, subscribeCentralExpenses, readCentralFreeMaterials, subscribeCentralFreeMaterials } from '../services/posCentralSync.js'
 import { businessDateOf, filterRowsByBusinessDate, isValidDateRange } from '../services/periodReport.js'
 import { buildMaterialsReport } from '../services/materialsReport.js'
 import { buildEmployeeReport, filterEmployeeSummaries, matchesEmployee } from '../services/employeeReport.js'
@@ -16,6 +16,7 @@ import { filterCashOutflowReport, normalizeCashOutflowReport, summarizeCashOutfl
 import { buildManagementPaymentsReport } from '../services/managementPaymentsReport.js'
 import { buildDeliveryDiscountReport, deliverySourceLabel } from '../services/deliveryDiscountReport.js'
 import { buildEndDayShiftReport, buildShiftReport } from '../services/shiftReports.js'
+import { buildFreeMaterialsReport, readLocalFreeMaterials } from '../services/freeMaterialService.js'
 
 const EMPTY_PERIOD_DATASET = { valid: false, sales: [], expenses: [], transactions: [], daily: [], employees: [], summary: { grossSales: 0, cashSales: 0, electronicSales: 0, expensesTotal: 0, withdrawals: 0, deposits: 0, adjustments: 0, orderCount: 0, averageOrder: 0, netCash: 0, beforeBalance: 0, endBalance: 0 } }
 const format = formatMoney
@@ -232,6 +233,20 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     return normalizeExpense(expense, { operationalDayDates })
   })
   const [expenses, setExpenses] = useState(() => readLocalExpenses().map(normalizeExpense))
+  const [localFreeMaterials, setLocalFreeMaterials] = useState(() => readLocalFreeMaterials())
+  const [centralFreeMaterials, setCentralFreeMaterials] = useState([])
+  useEffect(() => {
+    let active = true
+    const refreshLocalFree = () => setLocalFreeMaterials(readLocalFreeMaterials())
+    window.addEventListener('pos101-free-materials-updated', refreshLocalFree)
+    void readCentralFreeMaterials().then(records => { if (active) setCentralFreeMaterials(records) })
+    const stopFreeRealtime = subscribeCentralFreeMaterials(records => { if (active) setCentralFreeMaterials(records) })
+    return () => {
+      active = false
+      window.removeEventListener('pos101-free-materials-updated', refreshLocalFree)
+      stopFreeRealtime?.()
+    }
+  }, [])
   useEffect(() => {
     let active = true
     let refreshTimer = null
@@ -313,6 +328,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const filteredCashOutflows = useMemo(() => filterCashOutflowReport(normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter), [normalizedCashOutflows, periodFrom, periodTo, expenseTypeFilter])
   const managementReport = useMemo(() => buildManagementPaymentsReport({ expenses, transactions: cashboxTransactions, staff, from: periodFrom, to: periodTo, type: managementTypeFilter }), [expenses, cashboxTransactions, staff, periodFrom, periodTo, managementTypeFilter])
   const deliveryDiscountReport = useMemo(() => buildDeliveryDiscountReport(filteredSales, { from: periodFrom, to: periodTo, source: deliverySourceFilter }), [filteredSales, periodFrom, periodTo, deliverySourceFilter])
+  const freeMaterialsReport = useMemo(() => buildFreeMaterialsReport({ centralRecords: centralFreeMaterials, localRecords: localFreeMaterials, from: periodFrom, to: periodTo }), [centralFreeMaterials, localFreeMaterials, periodFrom, periodTo])
   const shiftReports = useMemo(() => ({
     morning: buildShiftReport({ sales: filteredSales, expenses: filteredExpenses, transactions: filteredTransactions, businessDate: periodFrom, operationalDayId: (selectedClosedDay || operationalDay)?.id || '', shiftType: 'morning' }),
     evening: buildShiftReport({ sales: filteredSales, expenses: filteredExpenses, transactions: filteredTransactions, businessDate: periodFrom, operationalDayId: (selectedClosedDay || operationalDay)?.id || '', shiftType: 'evening' }),
@@ -452,7 +468,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const printReportDirect = async () => {
     if (!directThermalReady || !onDirectThermalPrint) return
     try { await onBeforePrint?.() } catch (error) { console.warn('REPORT_DIRECT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
-    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات Baly وToters', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
+    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات Baly وToters', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', 'free-materials': 'تقرير المواد المجانية', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)
       : undefined
@@ -534,6 +550,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <b>تقرير مبيعات الكابتن</b>
             <small>مبيعات الكباتن ضمن الفترة المختارة</small>
           </button>
+          <button className="report-card-btn" onClick={() => setReportType('free-materials')} data-testid="free-materials-report-card">
+            <Icon name="box" size={40} />
+            <b>تقرير المواد المجانية</b>
+            <small>هدايا وضيافة وولاء والتكلفة إن توفرت</small>
+          </button>
           <button className="report-card-btn" onClick={openEmployeeReport} data-testid="employee-report-card">
             <Icon name="user" size={40} />
             <b>تقرير الموظفين</b>
@@ -549,11 +570,11 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const money = value => format(value)
     const employeeTable = (rows = visibleEmployeeSummaries) => <>
       <table className="print-table employee-report-table employee-summary-a4" data-testid="employee-summary-table">
-      <thead><tr><th>الموظف</th><th>الكود</th><th>المبيعات</th><th>الطلبات</th><th>المصاريف</th><th>الرواتب</th><th>السحوبات</th><th>الإجمالي</th></tr></thead>
+      <thead><tr><th>الموظف</th><th>الكود</th><th>المبيعات</th><th>الطلبات</th><th>المصاريف</th><th>الراتب المستحق</th><th>الرواتب المدفوعة</th><th>المتبقي من الراتب</th><th>السحوبات</th><th>الإجمالي</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.employee.id} onClick={() => setSelectedEmployeeId(String(row.employee.id))} className="employee-report-row" tabIndex="0" onKeyDown={event => { if (event.key === 'Enter') setSelectedEmployeeId(String(row.employee.id)) }}>
-        <td>{row.employee.name}</td><td>{row.employee.code || '—'}</td><td className="number-cell">{money(row.salesTotal)}</td><td className="number-cell">{formatNumber(row.ordersCount)}</td><td className="number-cell">{money(row.expensesTotal)}</td><td className="number-cell">{money(row.salaryTotal)}</td><td className="number-cell">{money(row.withdrawalsTotal)}</td><td className="number-cell">{money(row.employeeTotal)}</td>
-      </tr>)}{!rows.length && <tr><td colSpan="8">لا توجد بيانات للموظفين ضمن الفترة المحددة</td></tr>}
-      <tr className="summary-highlight"><td colSpan="2">الإجمالي</td><td className="number-cell">{money(employeeDataset.total.salesTotal)}</td><td className="number-cell">{formatNumber(employeeDataset.total.ordersCount)}</td><td className="number-cell">{money(employeeDataset.total.expensesTotal)}</td><td className="number-cell">{money(employeeDataset.total.salaryTotal)}</td><td className="number-cell">{money(employeeDataset.total.withdrawalsTotal)}</td><td className="number-cell">{money(employeeDataset.total.employeeTotal)}</td></tr></tbody>
+        <td>{row.employee.name}</td><td>{row.employee.code || '—'}</td><td className="number-cell">{money(row.salesTotal)}</td><td className="number-cell">{formatNumber(row.ordersCount)}</td><td className="number-cell">{money(row.expensesTotal)}</td><td className="number-cell">{money(row.salaryDue ?? row.fixedMonthlySalary ?? 0)}</td><td className="number-cell">{money(row.salaryTotal)}</td><td className="number-cell">{money(row.salaryRemaining ?? 0)}</td><td className="number-cell">{money(row.withdrawalsTotal)}</td><td className="number-cell">{money(row.employeeTotal)}</td>
+      </tr>)}{!rows.length && <tr><td colSpan="10">لا توجد بيانات للموظفين ضمن الفترة المحددة</td></tr>}
+      <tr className="summary-highlight"><td colSpan="2">الإجمالي</td><td className="number-cell">{money(employeeDataset.total.salesTotal)}</td><td className="number-cell">{formatNumber(employeeDataset.total.ordersCount)}</td><td className="number-cell">{money(employeeDataset.total.expensesTotal)}</td><td className="number-cell">{money(employeeDataset.total.salaryDueTotal ?? 0)}</td><td className="number-cell">{money(employeeDataset.total.salaryTotal)}</td><td className="number-cell">{money(employeeDataset.total.salaryRemainingTotal ?? 0)}</td><td className="number-cell">{money(employeeDataset.total.withdrawalsTotal)}</td><td className="number-cell">{money(employeeDataset.total.employeeTotal)}</td></tr></tbody>
       </table>
       <div className="employee-summary-thermal" aria-label="ملخص الموظفين الحراري">
         {rows.map(row => <article className="employee-thermal-card" key={`thermal-${row.employee.id}`}>
@@ -567,10 +588,10 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const detailRows = (rows, columns, empty) => <table className="print-table"><thead><tr>{columns.map(column => <th key={column.label}>{column.label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.id || `${row.businessDate}-${index}`}>{columns.map(column => <td key={column.label} className={column.number ? 'number-cell' : ''}>{column.value(row, index)}</td>)}</tr>)}{!rows.length && <tr><td colSpan={columns.length}>{empty}</td></tr>}<tr className="summary-row"><td colSpan={Math.max(1, columns.length - 1)}>الإجمالي</td><td className="number-cell">{money(rows.reduce((total, row) => total + Number(row.amount ?? row.total ?? row.subtotal ?? 0), 0))}</td></tr></tbody></table>
     const printContent = summary ? <>
       <h3>ملخص الموظف: {summary.employee.name}</h3>
-      <table className="print-table report-summary"><tbody><tr><td>إجمالي المبيعات</td><td className="number-cell">{money(summary.salesTotal)}</td></tr><tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(summary.ordersCount)}</td></tr><tr><td>مبيعات نقدية</td><td className="number-cell">{money(summary.cashSales)}</td></tr><tr><td>مبيعات إلكترونية</td><td className="number-cell">{money(summary.electronicSales)}</td></tr><tr><td>إجمالي المصاريف</td><td className="number-cell">{money(summary.expensesTotal)}</td></tr><tr><td>إجمالي الرواتب</td><td className="number-cell">{money(summary.salaryTotal)}</td></tr><tr><td>إجمالي السحوبات</td><td className="number-cell">{money(summary.withdrawalsTotal)}</td></tr><tr className="summary-highlight"><td>إجمالي المبالغ على الموظف</td><td className="number-cell">{money(summary.employeeTotal)}</td></tr></tbody></table>
+      <table className="print-table report-summary"><tbody><tr><td>إجمالي المبيعات</td><td className="number-cell">{money(summary.salesTotal)}</td></tr><tr><td>عدد الطلبات</td><td className="number-cell">{formatNumber(summary.ordersCount)}</td></tr><tr><td>مبيعات نقدية</td><td className="number-cell">{money(summary.cashSales)}</td></tr><tr><td>مبيعات إلكترونية</td><td className="number-cell">{money(summary.electronicSales)}</td></tr><tr><td>إجمالي المصاريف</td><td className="number-cell">{money(summary.expensesTotal)}</td></tr><tr><td>الراتب الثابت / المستحق</td><td className="number-cell">{money(summary.salaryDue ?? summary.fixedMonthlySalary ?? 0)}</td></tr><tr><td>إجمالي الرواتب المدفوعة</td><td className="number-cell">{money(summary.salaryTotal)}</td></tr><tr><td>المتبقي من الراتب</td><td className="number-cell">{money(summary.salaryRemaining ?? 0)}</td></tr><tr><td>إجمالي السحوبات</td><td className="number-cell">{money(summary.withdrawalsTotal)}</td></tr><tr className="summary-highlight"><td>إجمالي المبالغ على الموظف</td><td className="number-cell">{money(summary.employeeTotal)}</td></tr></tbody></table>
       <h3>المبيعات</h3>{detailRows(summary.sales, [{ label: 'رقم الطلب', value: row => row.orderNumber || row.id || '—' }, { label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الوقت', value: row => formatTime(row.createdAt || row.timestamp) }, { label: 'الدفع', value: row => (row.paymentMethod || row.payment?.method) === 'electronic' ? 'إلكتروني' : 'نقدي' }, { label: 'المبلغ', value: row => money(row.total ?? row.subtotal), number: true }], 'لا توجد مبيعات')}
       <h3>المصاريف</h3>{detailRows(summary.expenses, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المصدر', value: row => row.fundingSource === 'management' ? 'من الإدارة' : 'من الصندوق' }, { label: 'النوع', value: row => row.category || '—' }, { label: 'الوصف', value: row => row.description || row.notes || '—' }, { label: 'المبلغ', value: row => money(row.amount), number: true }], 'لا توجد مصاريف')}
-      <h3>الرواتب</h3>{detailRows(summary.salary, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظات', value: row => row.notes || row.description || '—' }], 'لا توجد رواتب')}
+      <h3>الرواتب</h3>{detailRows(summary.salary, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الوقت', value: row => row.time || (row.createdAt ? formatTime(row.createdAt) : '—') }, { label: 'فترة الراتب', value: row => row.payrollPeriod || String(businessDateOf(row) || '').slice(0, 7) || '—' }, { label: 'بواسطة', value: row => row.createdBy || row.cashierNameSnapshot || '—' }, { label: 'رقم العملية', value: row => row.transactionId || row.id || '—' }, { label: 'الملاحظات', value: row => row.note || row.notes || row.description || '—' }, { label: 'المبلغ', value: row => money(row.amount), number: true }], 'لا توجد رواتب')}
       <h3>السحوبات</h3>{detailRows(summary.withdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المصدر', value: row => row.fundingSource === 'management' ? 'من الإدارة' : 'من الصندوق' }, { label: 'المبلغ', value: row => money(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }], 'لا توجد سحوبات')}
     </> : employeeTable()
     return <div className="report-view-container employee-report-view" dir="rtl">
@@ -606,6 +627,55 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const summary = <><h3>ملخص</h3><table className="print-table report-summary" data-testid="captain-report-summary"><tbody><tr><td>إجمالي المبيعات</td><td className="number-cell">{format(totals.totalSales)}</td></tr><tr><td>إجمالي المصاريف</td><td className="number-cell">{format(totals.businessExpensesTotal)}</td></tr><tr><td>إجمالي السحوبات</td><td className="number-cell">{format(totals.withdrawalsTotal)}</td></tr><tr><td>إجمالي الرواتب</td><td className="number-cell">{format(totals.salariesTotal)}</td></tr><tr><td>النقدي</td><td className="number-cell">{format(totals.cashSales)}</td></tr><tr><td>الإلكتروني</td><td className="number-cell">{format(totals.electronicSales)}</td></tr><tr className="summary-highlight"><td>الصافي</td><td className="number-cell">{format(totals.net)}</td></tr></tbody></table></>
     const content = <>{captainSections.includes('sales') && <><h3>المبيعات</h3>{detailRows(captainReportData.matchedSales, [{ label: 'رقم الطلب', value: row => row.orderNumber || row.id || '—' }, { label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الوقت', value: row => formatTime(row.createdAt || row.timestamp) }, { label: 'الدفع', value: row => (row.paymentMethod || row.payment?.method) === 'electronic' ? 'إلكتروني' : 'نقدي' }, { label: 'المبلغ', value: row => format(row.total ?? row.subtotal), number: true }], 'لا توجد مبيعات')}{<p className="captain-sales-kpis">الطلبات: {formatNumber(totals.ordersCount)} · نقدي: {format(totals.cashSales)} · إلكتروني: {format(totals.electronicSales)}</p>}</>}{captainSections.includes('expenses') && <><h3>المصاريف</h3>{detailRows(captainReportData.matchedExpenses, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'الفئة', value: row => row.category || '—' }, { label: 'الوصف', value: row => row.description || row.notes || '—' }, { label: 'المبلغ', value: row => format(row.amount), number: true }], 'لا توجد مصاريف مرتبطة')}</>}{captainSections.includes('withdrawals') && <><h3>السحوبات</h3>{detailRows(captainReportData.matchedWithdrawals, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => format(row.amount), number: true }, { label: 'الملاحظة', value: row => row.note || row.notes || row.description || '—' }], 'لا توجد سحوبات مرتبطة')}</>}{captainSections.includes('salary') && <><h3>الرواتب</h3>{detailRows(captainReportData.matchedSalaries, [{ label: 'التاريخ', value: row => businessDateOf(row) }, { label: 'المبلغ', value: row => format(row.amount), number: true }, { label: 'الملاحظات', value: row => row.notes || row.description || '—' }, { label: 'businessDate', value: row => row.businessDate || businessDateOf(row) }], 'لا توجد رواتب مرتبطة')}</>}</>
     return <div className="report-view-container captain-report-view" dir="rtl"><div className="report-view-header non-printable"><button className="outline-btn" onClick={() => setCaptainStage('selection')}>تعديل الاختيار</button><div className="report-print-actions"><button className="primary-action" type="button" data-testid="captain-report-print-thermal" onClick={() => printReport('thermal')}>طباعة حرارية 80mm</button><button className="outline-btn" type="button" data-testid="captain-report-print-a4" onClick={() => printReport('a4')}>طباعة A4 / PDF</button></div></div><div className="report-paper" data-testid="captain-report-paper"><div className="report-paper-header"><h2>تقرير الكابتن: {selectedCaptain?.name || '—'}</h2><p>الكود: {selectedCaptain?.code || '—'}</p><p>من {periodFrom} إلى {periodTo}</p></div>{summary}{content}{(session?.status === 'admin-readonly' || ['admin', 'manager', 'super_admin'].includes(session?.role)) && captainReportDiagnostic && <details className="report-card expense-diagnostic non-printable" data-testid="captain-report-diagnostic"><summary>CAPTAIN_REPORT_RENDER_DIAGNOSTIC</summary><pre>{JSON.stringify(captainReportDiagnostic, null, 2)}</pre>{captainReportDiagnostic.matchedSalesCount === 0 && <p>ALI_102_MATCHING_SALES_COUNT=0 — available cashier keys: {captainReportDiagnostic.unmatchedCashierKeys.join('، ') || 'لا توجد'}</p>}</details>}</div></div>
+  }
+
+  const renderFreeMaterialsSection = () => {
+    const giftSection = freeMaterialsReport.gift
+    const hospitalitySection = freeMaterialsReport.hospitality
+    const loyaltySection = freeMaterialsReport.loyalty
+    const formatCostCell = row => row.costKnown && row.knownTotalCost > 0 ? format(row.knownTotalCost) : 'غير محددة'
+    return (
+      <section className="materials-section free-materials-report-section" data-testid="free-materials-report-section">
+        <h3>المواد المجانية (هدية / ضيافة / ولاء — حركة مخزون بدون أثر على المبيعات أو الصندوق)</h3>
+        <h4>هدايا</h4>
+        <table className="print-table" data-testid="free-materials-gift-table">
+          <thead><tr><th>ت</th><th>المادة</th><th>الكمية</th><th>التكلفة إن توفرت</th></tr></thead>
+          <tbody>
+            {giftSection.items.map((item, idx) => <tr key={`gift-${item.productId}-${idx}`}><td>{formatNumber(idx + 1)}</td><td>{item.name}</td><td>{formatNumber(item.quantity)}</td><td className="number-cell">{formatCostCell(item)}</td></tr>)}
+            {!giftSection.items.length && <tr><td colSpan="4">لا توجد هدايا مسجلة ضمن الفترة المحددة</td></tr>}
+            <tr className="summary-row"><td colSpan="2">مجموع الهدايا ({formatNumber(giftSection.operationsCount)} عملية)</td><td>{formatNumber(giftSection.totalQuantity)}</td><td className="number-cell">{giftSection.knownTotalCost > 0 ? format(giftSection.knownTotalCost) : '—'}</td></tr>
+          </tbody>
+        </table>
+        <h4>ضيافة</h4>
+        <table className="print-table" data-testid="free-materials-hospitality-table">
+          <thead><tr><th>ت</th><th>المادة</th><th>الكمية</th><th>اسم الشخص / الجهة</th><th>التكلفة إن توفرت</th></tr></thead>
+          <tbody>
+            {hospitalitySection.byRecipient.map((entry, idx) => <tr key={`hosp-${entry.id}-${idx}`}><td>{formatNumber(idx + 1)}</td><td>{entry.items.map(item => item.name).join('، ')}</td><td>{entry.items.map(item => `${item.name} × ${formatNumber(item.quantity)}`).join(' | ')}</td><td>{entry.recipientName || 'غير محدد'}</td><td className="number-cell">{entry.costKnown && entry.totalCost != null ? format(entry.totalCost) : 'غير محددة'}</td></tr>)}
+            {!hospitalitySection.byRecipient.length && <tr><td colSpan="5">لا توجد ضيافة مسجلة ضمن الفترة المحددة</td></tr>}
+            <tr className="summary-row"><td colSpan="2">مجموع الضيافة ({formatNumber(hospitalitySection.operationsCount)} عملية)</td><td>{formatNumber(hospitalitySection.totalQuantity)}</td><td>—</td><td className="number-cell">{hospitalitySection.knownTotalCost > 0 ? format(hospitalitySection.knownTotalCost) : '—'}</td></tr>
+          </tbody>
+        </table>
+        <h4>ولاء</h4>
+        <table className="print-table" data-testid="free-materials-loyalty-table">
+          <thead><tr><th>ت</th><th>المادة</th><th>الكمية</th><th>التكلفة إن توفرت</th></tr></thead>
+          <tbody>
+            {loyaltySection.items.map((item, idx) => <tr key={`loyalty-${item.productId}-${idx}`}><td>{formatNumber(idx + 1)}</td><td>{item.name}</td><td>{formatNumber(item.quantity)}</td><td className="number-cell">{formatCostCell(item)}</td></tr>)}
+            {!loyaltySection.items.length && <tr><td colSpan="4">لا يوجد ولاء مسجل ضمن الفترة المحددة</td></tr>}
+            <tr className="summary-row"><td colSpan="2">مجموع الولاء ({formatNumber(loyaltySection.operationsCount)} عملية)</td><td>{formatNumber(loyaltySection.totalQuantity)}</td><td className="number-cell">{loyaltySection.knownTotalCost > 0 ? format(loyaltySection.knownTotalCost) : '—'}</td></tr>
+          </tbody>
+        </table>
+        <table className="print-table report-summary" data-testid="free-materials-summary-table">
+          <tbody>
+            <tr><td>هدية ({formatNumber(giftSection.operationsCount)} عملية)</td><td className="number-cell">هدية: {formatNumber(giftSection.totalQuantity)} مادة</td></tr>
+            <tr><td>ضيافة ({formatNumber(hospitalitySection.operationsCount)} عملية)</td><td className="number-cell">ضيافة: {formatNumber(hospitalitySection.totalQuantity)} مادة</td></tr>
+            <tr><td>ولاء ({formatNumber(loyaltySection.operationsCount)} عملية)</td><td className="number-cell">ولاء: {formatNumber(loyaltySection.totalQuantity)} مواد</td></tr>
+            <tr><td>إجمالي كمية المواد المجانية</td><td className="number-cell">{formatNumber(freeMaterialsReport.totals.totalQuantity)}</td></tr>
+            <tr><td>إجمالي التكلفة المعروفة للمواد المجانية (غير مضافة للمصاريف النقدية)</td><td className="number-cell">{freeMaterialsReport.totals.knownTotalCost > 0 ? format(freeMaterialsReport.totals.knownTotalCost) : 'غير محددة'}</td></tr>
+            <tr><td>الأثر المالي على المبيعات / الخصومات / الصندوق</td><td className="number-cell">{format(0)}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    )
   }
 
   const renderPrintableReport = () => {
@@ -829,6 +899,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         </table>
 
         {/* ── Product Details Section ── */}
+        {renderFreeMaterialsSection()}
         <h3>تفاصيل المبيعات</h3>
         <table className="print-table thermal-product-table">
           <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
@@ -889,6 +960,9 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         {!materials.sections.length && <table className="print-table"><tbody><tr><td>لا توجد مبيعات</td></tr></tbody></table>}
         <table className="print-table report-summary materials-grand-total" data-testid="materials-grand-total"><tbody><tr className="summary-highlight"><td>الإجمالي العام</td><td>{formatNumber(materials.grandQuantity)}</td><td>{format(materials.grandTotal)}</td></tr></tbody></table>
       </>
+    } else if (reportType === 'free-materials') {
+      title = 'تقرير المواد المجانية'
+      content = renderFreeMaterialsSection()
     } else if (reportType === 'expenses') {
       title = 'تقرير المصاريف والسحوبات'
       const cashOutflowSummary = summarizeCashOutflowReport(filteredCashOutflows)

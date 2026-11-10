@@ -14,7 +14,7 @@ const rowType = row => normalized(first(row?.type, row?.transactionType, row?.mo
 const rowCategory = row => normalized(first(row?.category, row?.expenseCategory))
 const isSalaryMarker = row => {
   const marker = `${rowCategory(row)} ${normalized(row?.type)}`
-  return marker.includes('راتب') || marker.includes('salary')
+  return marker.includes('راتب') || marker.includes('رواتب') || marker.includes('salary')
 }
 const idOf = row => text(first(row?.id, row?.expenseId, row?.transactionId, row?.sourceRefId))
 const linkedExpenseIdOf = row => text(first(row?.linkedExpenseId, row?.sourceRefId, row?.expenseId))

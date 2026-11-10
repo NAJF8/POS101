@@ -2600,6 +2600,7 @@ const normalizeProduct = (value, id) => ({
   category: String(value?.category || '').trim(),
   categoryId: value?.categoryId || value?.category_id || value?.category || '',
   price: Number(value?.price ?? 0),
+  cost: value?.cost !== undefined && value?.cost !== null && value?.cost !== '' && Number.isFinite(Number(value.cost)) && Number(value.cost) > 0 ? Number(value.cost) : null,
   image: value?.image || value?.imageUrl || value?.image_url || value?.photoUrl || value?.photo_url || null,
   enabled: value?.enabled !== false,
   productType: value?.productType || (value?.parentProductId ? 'child' : 'parent'),
@@ -2674,6 +2675,7 @@ export const normalizeStaff = (value, id) => ({
   role: ['cashier', 'employee', 'manager'].includes(value?.role) ? value.role : 'employee',
   active: value?.active !== false,
   canSell: normalizeStaffCanSell(value),
+  fixedMonthlySalary: Number.isFinite(Number(value?.fixedMonthlySalary)) && Number(value?.fixedMonthlySalary) >= 0 ? Number(value.fixedMonthlySalary) : 0,
   deactivatedAt: value?.deactivatedAt || null,
 })
 
@@ -3095,3 +3097,61 @@ export const saveFinancialAudit = async ({ action, entityType, entityId, before 
 }
 export const readFinancialAudit = async () => { await financialUser(false); return objectValues(await get(financialPath(auditPath))) }
 
+// Free Materials & Inventory Movements (gift, hospitality, loyalty).
+// Deliberately isolated from pos101_sales, pos101_expenses, and pos101_cashbox_transactions.
+const freeMaterialsPath = 'pos101_free_materials'
+const inventoryMovementsPath = 'pos101_inventory_movements'
+
+export const saveCentralFreeMaterial = async record => {
+  if (!configured || !db) return null
+  const user = await financialUser(true)
+  const id = String(record?.id || '').trim()
+  if (!id) throw new Error('معرف العملية المجانية مطلوب.')
+  const updates = {
+    [`${freeMaterialsPath}/${id}`]: {
+      ...record,
+      id,
+      customerPaid: 0,
+      salesImpact: 0,
+      discountImpact: 0,
+      revenueImpact: 0,
+      expenseImpact: 0,
+      updatedByUid: user.uid,
+      updatedAt: Date.now(),
+    },
+  }
+  const movements = Array.isArray(record?.inventoryMovements) ? record.inventoryMovements : []
+  for (const mov of movements) {
+    const movId = String(mov?.id || '').trim()
+    if (movId) {
+      updates[`${inventoryMovementsPath}/${movId}`] = {
+        ...mov,
+        id: movId,
+        freeMaterialId: id,
+        updatedByUid: user.uid,
+      }
+    }
+  }
+  await update(ref(db), updates)
+  const readBack = await get(financialPath(`${freeMaterialsPath}/${id}`))
+  return readBack.exists() ? readBack.val() : record
+}
+
+export const readCentralFreeMaterials = async () => {
+  if (!configured || !db) return []
+  await financialUser(false)
+  return objectValues(await get(financialPath(freeMaterialsPath)))
+}
+
+export const subscribeCentralFreeMaterials = (callback, onError = error => console.error('FREE_MATERIALS_SUBSCRIBE_ERROR', error)) => {
+  let active = true
+  let stop = () => {}
+  if (configured && db && auth?.currentUser) {
+    stop = onValue(
+      financialPath(freeMaterialsPath),
+      snapshot => { if (active) callback(objectValues(snapshot)) },
+      error => onError(error)
+    )
+  }
+  return () => { active = false; stop() }
+}

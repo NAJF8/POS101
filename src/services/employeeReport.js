@@ -113,8 +113,21 @@ export const buildEmployeeReport = ({ staff = [], sales = [], expenses = [], tra
     const kind = row.reportBucket === 'salary' ? 'salary' : row.reportBucket === 'withdrawal' ? 'withdrawal' : 'expense'
     add(row.original, kind, amount(row.amount))
   })
-  const summaries = [...rows.values()].map(summary => ({ ...summary, employeeTotal: summary.expensesTotal + summary.salaryTotal + summary.withdrawalsTotal })).sort((a, b) => b.salesTotal - a.salesTotal || b.employeeTotal - a.employeeTotal || text(a.employee.name).localeCompare(text(b.employee.name), 'ar'))
-  return { summaries, total: summaries.reduce((result, row) => ({ salesTotal: result.salesTotal + row.salesTotal, cashSales: result.cashSales + row.cashSales, electronicSales: result.electronicSales + row.electronicSales, ordersCount: result.ordersCount + row.ordersCount, expensesTotal: result.expensesTotal + row.expensesTotal, salaryTotal: result.salaryTotal + row.salaryTotal, withdrawalsTotal: result.withdrawalsTotal + row.withdrawalsTotal, employeeTotal: result.employeeTotal + row.employeeTotal }), { salesTotal: 0, cashSales: 0, electronicSales: 0, ordersCount: 0, expensesTotal: 0, salaryTotal: 0, withdrawalsTotal: 0, employeeTotal: 0 }) }
+  const summaries = [...rows.values()].map(summary => {
+    const fixedMonthlySalary = Math.max(0, amount(summary.employee?.fixedMonthlySalary ?? summary.employee?.monthlySalary ?? 0))
+    const salaryDue = fixedMonthlySalary
+    const salaryPaid = summary.salaryTotal
+    const salaryRemaining = Math.max(0, salaryDue - salaryPaid)
+    return {
+      ...summary,
+      fixedMonthlySalary,
+      salaryDue,
+      salaryPaid,
+      salaryRemaining,
+      employeeTotal: summary.expensesTotal + summary.salaryTotal + summary.withdrawalsTotal
+    }
+  }).sort((a, b) => b.salesTotal - a.salesTotal || b.employeeTotal - a.employeeTotal || text(a.employee.name).localeCompare(text(b.employee.name), 'ar'))
+  return { summaries, total: summaries.reduce((result, row) => ({ salesTotal: result.salesTotal + row.salesTotal, cashSales: result.cashSales + row.cashSales, electronicSales: result.electronicSales + row.electronicSales, ordersCount: result.ordersCount + row.ordersCount, expensesTotal: result.expensesTotal + row.expensesTotal, salaryTotal: result.salaryTotal + row.salaryTotal, salaryDueTotal: result.salaryDueTotal + row.salaryDue, salaryPaidTotal: result.salaryPaidTotal + row.salaryPaid, salaryRemainingTotal: result.salaryRemainingTotal + row.salaryRemaining, withdrawalsTotal: result.withdrawalsTotal + row.withdrawalsTotal, employeeTotal: result.employeeTotal + row.employeeTotal }), { salesTotal: 0, cashSales: 0, electronicSales: 0, ordersCount: 0, expensesTotal: 0, salaryTotal: 0, salaryDueTotal: 0, salaryPaidTotal: 0, salaryRemainingTotal: 0, withdrawalsTotal: 0, employeeTotal: 0 }) }
 }
 
 export const filterEmployeeSummaries = (summaries, query = '') => {

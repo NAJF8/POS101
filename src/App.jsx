@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Header from './components/Header'
 import ProductGrid from './components/ProductGrid'
 import OrderPanel from './components/OrderPanel'
-import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, FinancialPinDialog, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu } from './components/Dialogs'
+import { ProductOptions, VariantModal, OrderType, TableSelection, Payment, QuickCash, DiscountDialog, OpenOrders, History, ReturnDialog, Receipt, ShiftLogin, FinancialPinDialog, SellerSelection, CashierMenu, ConfirmDialog, PrintMenu, FreeMaterialDialog } from './components/Dialogs'
 import PendingTables from './components/PendingTables.jsx'
 import SavePendingTableDialog from './components/SavePendingTableDialog.jsx'
 import OrderHistoryMenu from './components/OrderHistoryMenu'
@@ -38,6 +38,8 @@ import { writeSalesCache } from './services/localSalesCache.js'
 import { BACKUP_RECOVERY_OWNER_APPROVAL_ENABLED, TEMP_OPEN_ONE_BUTTON_REPAIR, inspectBackupSales, inspectPendingSaleCentralStatus, markBackupSaleReadbackLocally, readCentralPendingSaleDiagnostics, reconcileCentralPendingSaleDiagnostics, recoverBackupSale, runOneClickSyncRepair } from './services/posCentralSync.js'
 import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemCheck.js'
 import { saleEngine } from './services/saleEngine.js'
+import { recordFreeMaterial } from './services/freeMaterialService.js'
+import { saveCentralFreeMaterial } from './services/posCentralSync.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -1437,6 +1439,30 @@ export default function App() {
     setCentralProducts(current => [...current.filter(item => String(item.id) !== String(saved.id)), saved])
     return saved
   }, [])
+  const handleRecordFreeMaterial = useCallback(async ({ type, recipientName, items, note }) => {
+    const { record } = recordFreeMaterial({
+      type,
+      recipientName,
+      items,
+      products: catalogProducts,
+      businessDate: operationalDay?.businessDate || '',
+      operationalDayId: operationalDay?.id || '',
+      shiftId: session?.shiftId || '',
+      shiftType: session?.shiftType || session?.shiftId || '',
+      shiftLabel: session?.shiftLabel || '',
+      cashierId: session?.cashierId || session?.shiftId || '',
+      cashierName: session?.name || session?.shiftName || '',
+      createdBy: session?.name || session?.shiftName || '',
+      note,
+    })
+    void saveCentralFreeMaterial(record).catch(() => {})
+    if (activeOrder?.items?.length) clearCart()
+    setModal(null)
+    showCashierToast(`تم تسجيل ${record.typeLabel} بنجاح (بدون أثر مالي على المبيعات)`)
+    window.dispatchEvent(new CustomEvent('pos101-free-materials-updated'))
+    return record
+    return saved
+  }, [])
 
   const cashierSyncState = useMemo(() => {
     if (cashierSyncPhase === 'saving') return { state: 'saving', label: 'جاري الحفظ...' }
@@ -1548,7 +1574,7 @@ export default function App() {
       {currentView === 'settings' && (session || adminReady || staffManagerReady) && (
         <Settings products={catalogProducts} categories={catalogCategories} canWrite={productManagerReady} canManageStaff={staffManagerReady} canAccessBackupRecovery={backupRecoveryVisible} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSave={saveProduct} onNavigate={requestView} discountPresets={discountPresets} onSaveDiscountPresets={setDiscountPresets} staff={staff} onSaveStaff={saveCentralStaff} />
       )}
-      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
+      {currentView === 'employees' && (session || adminReady || staffManagerReady) && <Employees staff={staff} expenses={readLocalExpenses()} transactions={cashboxTransactions} canWrite={staffManagerReady} onStaffSignIn={ensureStaffAuth} staffAuthBusy={staffAuthBusy} staffAuthError={staffAuthError} onSaveStaff={saveCentralStaff} onSaveStaffPin={savePin} onNavigate={requestView} />}
       {currentView === 'cashbox' && (session || adminReady) && <FinancialCenter transactions={cashboxTransactions} centralSales={centralSales} cashboxSales={centralSales} operationalDays={centralOperationalDays} operationalDay={operationalDay} settlements={settlements} settlementCorrections={settlementCorrections} onSaveSettlementCorrection={saveSettlementCorrection} onSaveTransaction={saveCashboxTransaction} onUpdateTransaction={updateCashboxTransaction} onVoidTransaction={voidCashboxTransaction} onSaveCashCount={saveCashCount} onNavigate={setCurrentView} adminDiagnostic={Boolean(adminReady && !session)} />}
 
       {currentView === 'orders' && (session || adminReady) && (
@@ -1576,6 +1602,7 @@ export default function App() {
             onEdit={i => (setSelected(i), setModal('options'))}
             onContinue={() => setModal('orderType')}
             onSavePending={() => setModal('save-pending-table')}
+            onFreeMaterial={() => setModal('free-material')}
             onHold={hold}
             onDiscount={() => setModal('discount')}
             discount={activeDiscount}
@@ -1682,6 +1709,7 @@ export default function App() {
       {modal === 'quickCash' && <QuickCash total={total} onClose={() => setModal(null)} onSuccess={initiateComplete} />}
       {modal === 'seller-selection' && <SellerSelection staff={staff} staffStatus={staffStatus} saleSyncWarning={saleSyncWarning} retrySellerName={lastSellerName.current} onClose={() => setModal(null)} onSelect={finalizeSale} />}
       {modal === 'discount' && <DiscountDialog subtotal={subtotal} current={activeOrder.discount} discountPresets={discountPresets} onClose={() => setModal(null)} onApply={applyDiscount} />}
+      {modal === 'free-material' && <FreeMaterialDialog cartItems={activeOrder.items} products={catalogProducts} onClose={() => setModal(null)} onConfirm={handleRecordFreeMaterial} />}
       {modal === 'openOrders' && <OpenOrders orders={orders} onClose={() => setModal(null)} onSelect={openOrder} onHistory={history} />}
       {modal === 'single-history' && <History order={selected} onClose={() => setModal(null)} onReturn={() => setModal('return')} onAdd={() => setModal('add-existing')} onPrint={print} onReprint={print} />}
       {modal === 'return' && <ReturnDialog order={selected} onClose={() => setModal('single-history')} onConfirm={recordAdjustment} />}

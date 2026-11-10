@@ -7,7 +7,7 @@ import { normalizeCartItems, getOptionLabel, getSizeLabel, getAdditionLabel, saf
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
   onContinue, onHold, onDiscount, onClear, discount,
-  onPrintMenu, onReturn, onSavePending, disabled, scrollRequest
+  onPrintMenu, onReturn, onSavePending, onFreeMaterial, disabled, scrollRequest
 }) {
   const itemsAreaRef = useRef(null)
   const items = normalizeCartItems(order?.items)
@@ -135,6 +135,12 @@ export default function OrderPanel({
         <button className="btn-pending-table" type="button" onClick={onSavePending} disabled={!items.length}>
           حفظ كطاولة معلقة
         </button>
+
+        {onFreeMaterial && (
+          <button className="btn-pending-table" type="button" onClick={onFreeMaterial} data-testid="free-material-btn">
+            مواد مجانية (هدية / ضيافة / ولاء)
+          </button>
+        )}
 
         <button className="btn-cancel-order" onClick={onClear} disabled={!items.length}>
           <Icon name="trash" size={18} />
