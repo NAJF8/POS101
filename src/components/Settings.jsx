@@ -119,11 +119,11 @@ export default function Settings({ products, categories, canWrite, canManageStaf
     event.preventDefault()
     const next = { baly: Number(discountForm.baly), toters: Number(discountForm.toters) }
     if (![next.baly, next.toters].every(value => Number.isFinite(value) && value >= 0 && value <= 100)) {
-      setNotice('يجب أن تكون خصومات بلي وتوترز بين 0 و100.')
+      setNotice('يجب أن تكون خصومات Baly وToters بين 0 و100.')
       return
     }
     onSaveDiscountPresets?.(next)
-    setNotice('تم حفظ خصومات بلي وتوترز على جهاز الكاشير.')
+    setNotice('تم حفظ خصومات Baly وToters على جهاز الكاشير.')
     window.setTimeout(() => setNotice(''), 4000)
   }
   const ensureStaffAccess = async () => canManageStaff || Boolean(await onStaffSignIn?.())
@@ -144,10 +144,10 @@ export default function Settings({ products, categories, canWrite, canManageStaf
       </article> })}</div>
     </section>
     <form className="settings-card cashier-discounts-card" onSubmit={saveDiscounts}>
-      <div className="settings-card-heading"><div><h2>خصومات بلي وتوترز</h2><p>تُحفظ محلياً على جهاز الكاشير ولا تغيّر المبيعات السابقة.</p></div></div>
+      <div className="settings-card-heading"><div><h2>خصومات Baly وToters</h2><p>تُحفظ محلياً على جهاز الكاشير ولا تغيّر المبيعات السابقة.</p></div></div>
       <div className="discount-presets-grid">
-        <label>خصم بلي (%)<input type="number" min="0" max="100" step="1" value={discountForm.baly} onChange={e => setDiscountForm(v => ({ ...v, baly: e.target.value }))} /></label>
-        <label>خصم توترز (%)<input type="number" min="0" max="100" step="1" value={discountForm.toters} onChange={e => setDiscountForm(v => ({ ...v, toters: e.target.value }))} /></label>
+        <label>خصم Baly (%)<input type="number" min="0" max="100" step="1" value={discountForm.baly} onChange={e => setDiscountForm(v => ({ ...v, baly: e.target.value }))} /></label>
+        <label>خصم Toters (%)<input type="number" min="0" max="100" step="1" value={discountForm.toters} onChange={e => setDiscountForm(v => ({ ...v, toters: e.target.value }))} /></label>
       </div>
       <button className="primary-action" type="submit">حفظ الخصومات</button>
     </form>

@@ -1,5 +1,6 @@
 import { isCashboxExpense, isManagementExpense, isRegularExpense, normalizeExpense, sumExpenses } from './expenseReporting.js'
 import { calculateEndDayCashAnalysis, calculateSettlement, hasActualCash, toMoneyNumber } from './financialCenter.js'
+import { actualCashDiscountOf } from './reportSales.js'
 
 const amount = value => {
   const numeric = Number(value)
@@ -12,7 +13,7 @@ const amount = value => {
 export const calculateComprehensiveSummary = (sales = [], expenses = [], transactions = [], endDay = null) => {
   const normalizedExpenses = expenses.map(normalizeExpense)
   const grossSales = sales.reduce((sum, sale) => sum + amount(sale.subtotal ?? sale.total), 0)
-  const discounts = sales.reduce((sum, sale) => sum + amount(sale.discount), 0)
+  const discounts = sales.reduce((sum, sale) => sum + actualCashDiscountOf(sale), 0)
   const electronicSales = sales.reduce((sum, sale) => {
     const method = sale.paymentMethod || sale.payment?.method
     return sum + (method === 'electronic' ? amount(sale.total) : 0)

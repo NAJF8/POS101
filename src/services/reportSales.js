@@ -14,6 +14,32 @@ export const numberValue = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+const cashAmount = value => {
+  if (value === null || value === undefined || value === '' || typeof value === 'object') return null
+  const parsed = numberValue(value, NaN)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+// `discount` is the sale's canonical cash amount.  The details object records
+// how that amount was chosen (amount, percent, Baly, or Toters), so it must
+// only be used as a fallback for legacy rows that do not have `discount`.
+export const actualCashDiscountOf = sale => {
+  const order = sale?.order || {}
+  const values = [
+    sale?.discount,
+    sale?.discountAmount,
+    sale?.discount_amount,
+    sale?.discountDetails?.value,
+    sale?.discount?.value,
+    order?.discount?.value,
+  ]
+  for (const value of values) {
+    const parsed = cashAmount(value)
+    if (parsed !== null) return parsed
+  }
+  return 0
+}
+
 // End of report sales helpers.
 export const dateValue = value => {
   if (value === null || value === undefined || value === '') return 0
@@ -43,7 +69,7 @@ const firstValue = (...values) => values.find(value => value !== undefined && va
 export const normalizeSale = sale => {
   const order = sale?.order || {}
   const payment = sale?.payment || {}
-  const discount = firstValue(sale?.discount, sale?.discount_amount, order.discount?.value, 0)
+  const discount = actualCashDiscountOf(sale)
   const subtotal = firstValue(sale?.subtotal, order.subtotal, sale?.total, sale?.total_after_discount, 0)
   const total = firstValue(sale?.total, sale?.total_after_discount, sale?.net_total, numberValue(subtotal) - numberValue(discount), 0)
   return {
@@ -51,7 +77,7 @@ export const normalizeSale = sale => {
     id: firstValue(sale?.id, sale?.saleId),
     createdAt: dateValue(firstValue(sale?.createdAt, sale?.created_at, sale?.timestamp, sale?.date)),
     subtotal: numberValue(subtotal),
-    discount: numberValue(discount),
+    discount,
     total: numberValue(total),
     service: numberValue(firstValue(sale?.service, sale?.service_charge, sale?.serviceCharge, 0)),
     paymentMethod: firstValue(sale?.paymentMethod, sale?.payment_method, payment.method, 'cash'),

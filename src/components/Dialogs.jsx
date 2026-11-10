@@ -267,8 +267,8 @@ export function DiscountDialog({ subtotal, current, discountPresets = { baly: 26
   const cards = [
     { kind: 'amount', title: 'مبلغ ثابت', note: 'أدخل مبلغ الخصم بالدينار' },
     { kind: 'percent', title: 'نسبة مئوية', note: 'أدخل نسبة الخصم بنفسك' },
-    { kind: 'baly', title: 'بلي', note: `خصم ${discountPresets.baly}%` },
-    { kind: 'toters', title: 'توترز', note: `خصم ${discountPresets.toters}%` }
+    { kind: 'baly', title: 'Baly', note: `خصم ${discountPresets.baly}%` },
+    { kind: 'toters', title: 'Toters', note: `خصم ${discountPresets.toters}%` }
   ]
   return (
     <Dialog onClose={onClose} className="discount-dialog">

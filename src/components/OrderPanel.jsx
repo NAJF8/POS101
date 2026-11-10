@@ -6,13 +6,13 @@ import { normalizeCartItems, getOptionLabel, getSizeLabel, getAdditionLabel, saf
 
 export default function OrderPanel({ 
   order, updateQuantity, removeItem, onEdit, 
-  onContinue, onHold, onDiscount, onClear, 
+  onContinue, onHold, onDiscount, onClear, discount,
   onPrintMenu, onReturn, onSavePending, disabled, scrollRequest
 }) {
   const itemsAreaRef = useRef(null)
   const items = normalizeCartItems(order?.items)
   const subtotal = items.reduce((s, i) => s + safeNumber(i.price * i.quantity, 0), 0)
-  const discountVal = safeNumber(order?.discount?.value, 0)
+  const discountVal = safeNumber(discount, 0)
   const total = Math.max(0, subtotal - discountVal)
 
   useEffect(() => {

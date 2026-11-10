@@ -1,5 +1,6 @@
 import { isActiveExpense, normalizeExpense } from './expenseReporting.js'
 import { buildMoneyOutLedger } from './moneyOutClassifier.js'
+import { actualCashDiscountOf } from './reportSales.js'
 
 const amount = value => {
   const parsed = Number(value)
@@ -62,7 +63,7 @@ export const buildShiftReport = ({ sales = [], expenses = [], transactions = [],
   const cashSales = activeSales.filter(sale => paymentOf(sale) === 'cash').reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
   const electronicSales = activeSales.filter(sale => paymentOf(sale) === 'electronic').reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
   const totalSales = activeSales.reduce((sum, sale) => sum + amount(sale.total ?? sale.subtotal), 0)
-  const discounts = activeSales.reduce((sum, sale) => sum + amount(sale.discount), 0)
+  const discounts = activeSales.reduce((sum, sale) => sum + actualCashDiscountOf(sale), 0)
   const drawerExpenses = moneyOutRows.filter(row => ['business_expense', 'salary'].includes(row.reportBucket) && row.cashboxImpact === 'drawer').reduce((sum, row) => sum + amount(row.amount), 0)
   const withdrawalsTotal = withdrawalRows.reduce((sum, row) => sum + amount(row.amount), 0)
   const voidedCount = shiftSales.filter(saleIsVoided).length

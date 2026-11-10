@@ -3,7 +3,7 @@ import { Icon } from './Icons'
 import { logoDataUri } from '../assets/logo'
 
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
-import { getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
+import { actualCashDiscountOf, getReportSalesForPeriod, readLocalSales, numberValue } from '../services/reportSales'
 import { calculateComprehensiveSummary } from '../services/comprehensiveReport'
 import { isActiveExpense, isCashboxExpense, isRegularExpense, isWithdrawalExpense, normalizeExpense, sumExpenses } from '../services/expenseReporting.js'
 import { calculateCashboxBalance, calculateCashboxDay, getEffectiveSettlement, hasActualCash, toMoneyNumber } from '../services/financialCenter.js'
@@ -352,13 +352,14 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     const rangeWithdrawalExpenses = normalizedRangeExpenses.filter(isWithdrawalExpense)
     const rangeTransactions = filterRowsByBusinessDate(cashboxTransactions, periodFrom, periodTo).filter(row => row?.status !== 'voided' && row?.voided !== true)
     const dailyMap = new Map()
-    const ensureDay = date => { if (!dailyMap.has(date)) dailyMap.set(date, { businessDate: date, sales: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, adjustments: 0, net: 0, orders: 0 }); return dailyMap.get(date) }
-    rangeSales.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.total ?? row.subtotal); day.sales += value; day.orders += 1; if ((row.paymentMethod || row.payment?.method) === 'cash') day.cash += value; if ((row.paymentMethod || row.payment?.method) === 'electronic') day.electronic += value })
+    const ensureDay = date => { if (!dailyMap.has(date)) dailyMap.set(date, { businessDate: date, sales: 0, discounts: 0, cash: 0, electronic: 0, expenses: 0, withdrawals: 0, deposits: 0, adjustments: 0, net: 0, orders: 0 }); return dailyMap.get(date) }
+    rangeSales.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.total ?? row.subtotal); day.sales += value; day.discounts += actualCashDiscountOf(row); day.orders += 1; if ((row.paymentMethod || row.payment?.method) === 'cash') day.cash += value; if ((row.paymentMethod || row.payment?.method) === 'electronic') day.electronic += value })
     rangeExpenses.forEach(row => { ensureDay(businessDateOf(row)).expenses += numberValue(row.amount) })
     rangeTransactions.forEach(row => { const day = ensureDay(businessDateOf(row)); const value = numberValue(row.amount); if (row.type === 'withdrawal') day.withdrawals += value; if (row.type === 'deposit' || row.type === 'return') day.deposits += value; if (row.type === 'adjustment') day.adjustments += numberValue(row.signedAmount ?? row.amount) })
     rangeWithdrawalExpenses.filter(row => !rangeTransactions.some(transaction => String(transaction.linkedExpenseId || transaction.sourceRefId || '') === String(row.id || ''))).forEach(row => { ensureDay(businessDateOf(row)).withdrawals += numberValue(row.amount) })
     const daily = [...dailyMap.values()].sort((a, b) => a.businessDate.localeCompare(b.businessDate)).map(row => ({ ...row, net: row.cash - row.expenses - row.withdrawals + row.deposits + row.adjustments }))
     const grossSales = rangeSales.reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
+    const discounts = rangeSales.reduce((sum, row) => sum + actualCashDiscountOf(row), 0)
     const cashSales = rangeSales.filter(row => (row.paymentMethod || row.payment?.method) === 'cash').reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
     const electronicSales = rangeSales.filter(row => (row.paymentMethod || row.payment?.method) === 'electronic').reduce((sum, row) => sum + numberValue(row.total ?? row.subtotal), 0)
     const expensesTotal = rangeExpenses.reduce((sum, row) => sum + numberValue(row.amount), 0)
@@ -379,7 +380,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     rangeSales.forEach(row => addEmployee(row, numberValue(row.total ?? row.subtotal), 'sale'))
     rangeExpenses.forEach(row => addEmployee(row, numberValue(row.amount), 'expense'))
     rangeTransactions.filter(row => row.type === 'withdrawal').forEach(row => addEmployee(row, numberValue(row.amount), 'withdrawal'))
-    return { valid, sales: rangeSales, expenses: rangeExpenses, transactions: rangeTransactions, daily, employees: [...employeeMap.values()], summary: { grossSales, cashSales, electronicSales, expensesTotal, cashboxExpenses, withdrawals, deposits, adjustments, orderCount: rangeSales.length, averageOrder: rangeSales.length ? grossSales / rangeSales.length : 0, netCash: cashSales - cashboxExpenses - withdrawals + deposits + adjustments, beforeBalance, endBalance } }
+    return { valid, sales: rangeSales, expenses: rangeExpenses, transactions: rangeTransactions, daily, employees: [...employeeMap.values()], summary: { grossSales, discounts, cashSales, electronicSales, expensesTotal, cashboxExpenses, withdrawals, deposits, adjustments, orderCount: rangeSales.length, averageOrder: rangeSales.length ? grossSales / rangeSales.length : 0, netCash: cashSales - cashboxExpenses - withdrawals + deposits + adjustments, beforeBalance, endBalance } }
   }, [periodFrom, periodTo, reportSales, sales, expenses, cashboxTransactions, expenseOperationalDayDates])
 
   const openPeriodReport = () => {
@@ -451,7 +452,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
   const printReportDirect = async () => {
     if (!directThermalReady || !onDirectThermalPrint) return
     try { await onBeforePrint?.() } catch (error) { console.warn('REPORT_DIRECT_PRINT_SYNC_BLOCKED', error?.code || error?.message || String(error)); return }
-    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات بلي وتوترز', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
+    const titleByType = { comprehensive: 'تقرير شامل', period: 'تقرير الفترة', sales: 'تقرير الطلبات / المبيعات', 'delivery-discounts': 'تقرير خصومات Baly وToters', morning: 'تقرير المبيعات - وردية صباحية', evening: 'تقرير المبيعات - وردية مسائية', materials: 'تقرير مبيعات المواد', expenses: 'تقرير المصاريف', management: 'تقرير مدفوعات الإدارة', captain: 'تقرير مبيعات الكابتن' }
     const summary = reportType === 'comprehensive'
       ? calculateComprehensiveSummary(filteredSales, filteredExpenses, filteredTransactions, endDayReport)
       : undefined
@@ -510,7 +511,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
           </button>
           <button className="report-card-btn" onClick={() => setReportType('delivery-discounts')} data-testid="delivery-discount-report-card">
             <Icon name="receipt" size={40} />
-            <b>تقرير خصومات بلي وتوترز</b>
+            <b>تقرير خصومات Baly وToters</b>
             <small>من سجل المبيعات المركزي للفترة المختارة</small>
           </button>
           <button className="report-card-btn" onClick={() => setReportType('materials')}>
@@ -614,7 +615,7 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
     // Aggregation logic
     const aggregateSales = (sList) => {
       const gross = sList.reduce((acc, s) => acc + numberValue(s.subtotal), 0)
-      const discounts = sList.reduce((acc, s) => acc + numberValue(s.discount), 0)
+      const discounts = sList.reduce((acc, s) => acc + actualCashDiscountOf(s), 0)
       
       // Calculate refunds explicitly from adjustments
       const refunds = sList.reduce((acc, s) => {
@@ -729,23 +730,23 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
         </tbody></table>
       </> : shiftRows(report)
     } else if (reportType === 'delivery-discounts') {
-      title = 'تقرير خصومات بلي وتوترز'
+      title = 'تقرير خصومات Baly وToters'
       const total = deliveryDiscountReport.totals.overall
       const summary = source => deliveryDiscountReport.totals[source]
       content = <>
-        <div className="reports-range-toolbar non-printable" aria-label="فلتر مصدر تقرير الخصومات"><label>المصدر<select aria-label="مصدر الخصم" value={deliverySourceFilter} onChange={event => setDeliverySourceFilter(event.target.value)}><option value="all">بلي وتوترز</option><option value="baly">بلي</option><option value="toters">توترز</option></select></label><span>الفترة: {periodFrom} إلى {periodTo}</span></div>
+        <div className="reports-range-toolbar non-printable" aria-label="فلتر مصدر تقرير الخصومات"><label>المصدر<select aria-label="مصدر الخصم" value={deliverySourceFilter} onChange={event => setDeliverySourceFilter(event.target.value)}><option value="all">Baly وToters</option><option value="baly">Baly</option><option value="toters">Toters</option></select></label><span>الفترة: {periodFrom} إلى {periodTo}</span></div>
         <table className="print-table report-summary" data-testid="delivery-discount-summary"><tbody>{['baly', 'toters'].map(source => <tr key={source}><td>{deliverySourceLabel(source)} · الطلبات</td><td className="number-cell">{formatNumber(summary(source).count)}</td><td>{format(summary(source).discount)}</td></tr>)}<tr className="summary-highlight"><td>الإجمالي العام · {formatNumber(total.count)} طلب</td><td className="number-cell">{format(total.discount)}</td><td>{format(total.finalTotal)}</td></tr></tbody></table>
-        <table className="print-table delivery-discount-table" data-testid="delivery-discount-report"><thead><tr><th>businessDate</th><th>رقم الطلب</th><th>المصدر</th><th>قبل الخصم</th><th>الخصم</th><th>%</th><th>بعد الخصم</th><th>الدفع</th><th>الكاشير</th><th>createdAt</th></tr></thead><tbody>{deliveryDiscountReport.rows.map(row => <tr key={row.id}><td>{row.businessDate}</td><td>{row.orderNumber}</td><td>{row.sourceLabel}</td><td className="number-cell">{format(row.originalTotal)}</td><td className="number-cell">{format(row.discount)}</td><td className="number-cell">{row.discountPercent.toFixed(2)}%</td><td className="number-cell">{format(row.finalTotal)}</td><td>{row.paymentMethod === 'cash' ? 'نقدي' : 'إلكتروني'}</td><td>{row.cashier}</td><td>{row.createdAt ? formatDate(row.createdAt) : '—'}</td></tr>)}{!deliveryDiscountReport.rows.length && <tr><td colSpan="10">لا توجد طلبات بلي أو توترز ضمن الفترة المحددة</td></tr>}<tr className="summary-row"><td colSpan="4">الإجمالي</td><td className="number-cell">{format(total.discount)}</td><td>—</td><td className="number-cell">{format(total.finalTotal)}</td><td colSpan="3">{formatNumber(total.count)} طلب</td></tr></tbody></table>
+        <table className="print-table delivery-discount-table" data-testid="delivery-discount-report"><thead><tr><th>businessDate</th><th>رقم الطلب</th><th>المصدر</th><th>قبل الخصم</th><th>الخصم</th><th>%</th><th>بعد الخصم</th><th>الدفع</th><th>الكاشير</th><th>createdAt</th></tr></thead><tbody>{deliveryDiscountReport.rows.map(row => <tr key={row.id}><td>{row.businessDate}</td><td>{row.orderNumber}</td><td>{row.sourceLabel}</td><td className="number-cell">{format(row.originalTotal)}</td><td className="number-cell">{format(row.discount)}</td><td className="number-cell">{row.discountPercent.toFixed(2)}%</td><td className="number-cell">{format(row.finalTotal)}</td><td>{row.paymentMethod === 'cash' ? 'نقدي' : 'إلكتروني'}</td><td>{row.cashier}</td><td>{row.createdAt ? formatDate(row.createdAt) : '—'}</td></tr>)}{!deliveryDiscountReport.rows.length && <tr><td colSpan="10">لا توجد طلبات Baly أو Toters ضمن الفترة المحددة</td></tr>}<tr className="summary-row"><td colSpan="4">الإجمالي</td><td className="number-cell">{format(total.discount)}</td><td>—</td><td className="number-cell">{format(total.finalTotal)}</td><td colSpan="3">{formatNumber(total.count)} طلب</td></tr></tbody></table>
       </>
     } else if (reportType === 'period') {
       title = 'تقرير الفترة'
       const s = periodDataset.summary
-      const kpis = [['إجمالي المبيعات', s.grossSales], ['المبيعات النقدية', s.cashSales], ['المبيعات الإلكترونية', s.electronicSales], ['إجمالي المصاريف', s.expensesTotal], ['سحوبات الصندوق', s.withdrawals], ['إيداعات الصندوق', s.deposits], ['التعديلات', s.adjustments], ['عدد الطلبات', s.orderCount], ['متوسط قيمة الطلب', s.averageOrder], ['صافي النقد', s.netCash], ['رصيد أول الفترة', s.beforeBalance], ['رصيد آخر الفترة', s.endBalance]]
+      const kpis = [['إجمالي المبيعات', s.grossSales], ['إجمالي الخصومات', s.discounts], ['المبيعات النقدية', s.cashSales], ['المبيعات الإلكترونية', s.electronicSales], ['إجمالي المصاريف', s.expensesTotal], ['سحوبات الصندوق', s.withdrawals], ['إيداعات الصندوق', s.deposits], ['التعديلات', s.adjustments], ['عدد الطلبات', s.orderCount], ['متوسط قيمة الطلب', s.averageOrder], ['صافي النقد', s.netCash], ['رصيد أول الفترة', s.beforeBalance], ['رصيد آخر الفترة', s.endBalance]]
       content = <>
         {!periodDataset.valid || (!periodDataset.sales.length && !periodDataset.expenses.length && !periodDataset.transactions.length) ? <p className="settings-notice">{periodDataset.valid ? 'لا توجد بيانات ضمن الفترة المختارة.' : 'من تاريخ يجب أن يكون قبل أو يساوي إلى تاريخ.'}</p> : <>
           <table className="print-table report-summary"><tbody>{kpis.map(([label, value]) => <tr key={label}><td>{label}</td><td className="number-cell">{label === 'عدد الطلبات' ? formatNumber(value) : format(value)}</td></tr>)}</tbody></table>
           <>
-            <h3>التفصيل اليومي</h3><table className="print-table"><thead><tr><th>businessDate</th><th>المبيعات</th><th>نقدي</th><th>إلكتروني</th><th>المصاريف</th><th>السحوبات</th><th>الإيداعات</th><th>الصافي</th><th>الطلبات</th></tr></thead><tbody>{periodDataset.daily.map(row => <tr key={row.businessDate}><td>{row.businessDate}</td><td>{format(row.sales)}</td><td>{format(row.cash)}</td><td>{format(row.electronic)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td><td>{format(row.deposits)}</td><td>{format(row.net)}</td><td>{formatNumber(row.orders)}</td></tr>)}</tbody></table>
+            <h3>التفصيل اليومي</h3><table className="print-table"><thead><tr><th>businessDate</th><th>المبيعات</th><th>الخصومات</th><th>نقدي</th><th>إلكتروني</th><th>المصاريف</th><th>السحوبات</th><th>الإيداعات</th><th>الصافي</th><th>الطلبات</th></tr></thead><tbody>{periodDataset.daily.map(row => <tr key={row.businessDate}><td>{row.businessDate}</td><td>{format(row.sales)}</td><td>{format(row.discounts)}</td><td>{format(row.cash)}</td><td>{format(row.electronic)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td><td>{format(row.deposits)}</td><td>{format(row.net)}</td><td>{formatNumber(row.orders)}</td></tr>)}</tbody></table>
             <h3>تفصيل الموظفين والكاشير</h3><table className="print-table"><thead><tr><th>الاسم</th><th>الطلبات</th><th>المبيعات</th><th>المصاريف</th><th>السحوبات</th></tr></thead><tbody>{periodDataset.employees.map(row => <tr key={row.name}><td>{row.name}</td><td>{formatNumber(row.orders)}</td><td>{format(row.sales)}</td><td>{format(row.expenses)}</td><td>{format(row.withdrawals)}</td></tr>)}</tbody></table>
           </>
         </>}
@@ -840,41 +841,6 @@ function ReportsView({ onNavigate, session, operationalDay = null, onDirectTherm
             <tr className="summary-row"><td colSpan="2">إجمالي الكمية</td><td>{formatNumber(totalProductQty)}</td><td></td></tr>
           </tbody>
         </table>
-
-        {/* ── Gift/Complimentary Items Section ── */}
-        {(() => {
-          const giftItems = new Map()
-          filteredSales.forEach(sale => {
-            if (sale.discount && sale.discount > 0) {
-              const saleItems = sale.items || sale.order?.items || []
-              saleItems.forEach(item => {
-                const row = giftItems.get(item.name) || { quantity: 0, total: 0 }
-                row.quantity += Number(item.quantity || 0)
-                row.total += Number(item.quantity || 0) * Number(item.price || 0)
-                giftItems.set(item.name, row)
-              })
-            }
-          })
-          const giftList = [...giftItems.entries()]
-          const giftQty = giftList.reduce((s, [, r]) => s + r.quantity, 0)
-          const giftAmt = giftList.reduce((s, [, r]) => s + r.total, 0)
-          return <>
-            <h3>تقرير مبيعات الهديا</h3>
-            <table className="print-table thermal-product-table">
-              <thead><tr><th>ت</th><th>اسم المادة</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
-              <tbody>
-                {giftList.map(([name, row], idx) => (
-                  <tr key={name}><td>{formatNumber(idx + 1)}</td><td>{name}</td><td>{formatNumber(row.quantity)}</td><td className="number-cell">{format(row.total)}</td></tr>
-                ))}
-                {!giftList.length && <tr><td colSpan="4">لا توجد هدايا ضمن الفترة المحددة</td></tr>}
-                {giftList.length > 0 && <>
-                  <tr className="summary-row"><td colSpan="2">إجمالي الهدايا</td><td>{formatNumber(giftQty)}</td><td className="number-cell">{format(giftAmt)}</td></tr>
-                  <tr className="summary-row"><td colSpan="2">إجمالي الكمية</td><td>{formatNumber(giftQty)}</td><td></td></tr>
-                </>}
-              </tbody>
-            </table>
-          </>
-        })()}
 
       </>
     } else if (reportType === 'sales') {

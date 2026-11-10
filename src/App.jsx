@@ -1578,6 +1578,7 @@ export default function App() {
             onSavePending={() => setModal('save-pending-table')}
             onHold={hold}
             onDiscount={() => setModal('discount')}
+            discount={activeDiscount}
             onClear={() => setModal('confirm-clear')}
             onPrintMenu={() => setModal('print-menu')}
             onReturn={() => setModal('openOrders')}

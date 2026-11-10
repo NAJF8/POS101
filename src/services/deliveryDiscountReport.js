@@ -1,4 +1,4 @@
-import { businessDateForSale, isReportableSale, normalizeSale, numberValue } from './reportSales.js'
+import { actualCashDiscountOf, businessDateForSale, isReportableSale, normalizeSale, numberValue } from './reportSales.js'
 
 const sourceText = value => String(value ?? '').trim().toLocaleLowerCase()
 const sourceFields = sale => [
@@ -14,7 +14,7 @@ export const deliverySourceOf = sale => {
   return ''
 }
 
-export const deliverySourceLabel = source => source === 'baly' ? 'بلي' : source === 'toters' ? 'توترز' : 'غير محدد'
+export const deliverySourceLabel = source => source === 'baly' ? 'Baly' : source === 'toters' ? 'Toters' : 'غير محدد'
 
 export const buildDeliveryDiscountReport = (sales, { from = '', to = '', source = 'all' } = {}) => {
   const rows = (Array.isArray(sales) ? sales : []).map(normalizeSale).filter(sale => {
@@ -22,7 +22,7 @@ export const buildDeliveryDiscountReport = (sales, { from = '', to = '', source 
     const date = businessDateForSale(sale)
     return isReportableSale(sale) && detected && (!from || date >= from) && (!to || date <= to) && (source === 'all' || detected === source)
   }).map(sale => {
-    const discount = numberValue(sale.discount)
+    const discount = actualCashDiscountOf(sale)
     const finalTotal = numberValue(sale.total)
     const originalTotal = Math.max(0, numberValue(sale.subtotal, finalTotal + discount))
     return {

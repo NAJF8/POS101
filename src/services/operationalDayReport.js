@@ -1,4 +1,5 @@
 import { filterExpensesByOperationalDay as filterNormalizedExpenses } from './expenseReporting.js'
+import { actualCashDiscountOf } from './reportSales.js'
 
 const amount = value => {
   const numeric = Number(value)
@@ -15,7 +16,7 @@ export const calculateOperationalDaySummary = (sales = [], expenses = [], operat
   const daySales = filterSalesByOperationalDay(sales, operationalDayId)
   const dayExpenses = filterExpensesByOperationalDay(expenses, operationalDayId)
   const total = daySales.reduce((sum, sale) => sum + amount(sale.total), 0)
-  const discount = daySales.reduce((sum, sale) => sum + amount(sale.discount), 0)
+  const discount = daySales.reduce((sum, sale) => sum + actualCashDiscountOf(sale), 0)
   const expensesTotal = dayExpenses.reduce((sum, expense) => sum + amount(expense.amount), 0)
   const cash = daySales.reduce((sum, sale) => sum + (sale.paymentMethod === 'cash' ? amount(sale.total) : 0), 0)
   const electronic = daySales.reduce((sum, sale) => sum + (sale.paymentMethod === 'electronic' ? amount(sale.total) : 0), 0)
