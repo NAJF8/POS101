@@ -2036,3 +2036,21 @@ input, textarea, select { cursor: text; }
 .admin-pending-diagnostic-card dt { color: #667085; font-size: 11px; }
 .admin-pending-diagnostic-card dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 700; }
 @media (max-width: 700px) { .admin-pending-diagnostics-head { flex-direction: column; }.admin-pending-diagnostic-card dl { grid-template-columns: 1fr; } }
+
+/* Free Material Dialog Framed Controls & Prominent Note Box */
+.free-material-field-box { padding: 12px 14px; border: 1.5px solid var(--line-strong); border-radius: 12px; background: #f8f6f0; }
+.free-material-picker-box { display: flex; gap: 10px; align-items: flex-end; padding: 12px 14px; border: 1.5px solid var(--line-strong); border-radius: 12px; background: #f8f6f0; }
+.free-material-picker-product { flex: 1; display: grid; gap: 6px; font-weight: 600; color: var(--coffee); min-width: 0; }
+.free-material-picker-qty { width: 96px; display: grid; gap: 6px; font-weight: 600; color: var(--coffee); }
+.free-material-framed-input { width: 100%; min-height: 42px; padding: 8px 12px; border: 1.5px solid #b8b0a4; border-radius: 10px; background: #ffffff; color: var(--coffee); font: inherit; box-shadow: inset 0 1px 2px rgba(0,0,0,.04); transition: border-color .15s, box-shadow .15s; }
+.free-material-framed-input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(64,83,59,.15); }
+.free-material-add-btn { min-height: 42px; padding: 0 18px; border: 1.5px solid var(--green); border-radius: 10px; background: #eef4eb; color: var(--green); font-weight: 700; }
+.free-material-add-btn:disabled { border-color: var(--line-strong); background: #efece6; color: var(--muted); opacity: .65; }
+.free-material-lines-box { max-height: 170px; overflow-y: auto; padding: 10px 14px; border: 1.5px solid var(--line); border-radius: 12px; background: #ffffff; }
+.free-material-line-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.free-material-line-row:last-child { border-bottom: 0; }
+.free-material-note-box { display: grid; gap: 8px; padding: 14px 16px; border: 2px solid #9e9486; border-radius: 14px; background: #f5f2ea; box-shadow: 0 2px 8px rgba(59,48,42,.07); }
+.free-material-note-label { font-size: 14px; font-weight: 700; color: var(--coffee); }
+.free-material-note-input { width: 100%; min-height: 68px; padding: 10px 14px; border: 2px solid var(--green); border-radius: 10px; background: #ffffff; color: var(--coffee); font: inherit; line-height: 1.5; resize: vertical; box-shadow: inset 0 1px 3px rgba(0,0,0,.06); transition: border-color .15s, box-shadow .15s; }
+.free-material-note-input::placeholder { color: #8c847a; }
+.free-material-note-input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(64,83,59,.2); }

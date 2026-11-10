@@ -855,10 +855,11 @@ export function FreeMaterialDialog({ cartItems = [], products = [], onClose, onC
       </div>
 
       {type === 'hospitality' && (
-        <label className="discount-input" style={{ marginTop: '0.75rem' }}>
+        <label className="discount-input free-material-field-box">
           <span>اسم الشخص / الجهة (اختياري)</span>
           <input
             type="text"
+            className="free-material-framed-input"
             value={recipientName}
             onChange={e => setRecipientName(e.target.value)}
             placeholder="مثال: شركة X أو ضيف الإدارة"
@@ -866,29 +867,29 @@ export function FreeMaterialDialog({ cartItems = [], products = [], onClose, onC
         </label>
       )}
 
-      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-        <label style={{ flex: 1 }}>
+      <div className="free-material-picker-box">
+        <label className="free-material-picker-product">
           <span>إضافة مادة من القائمة</span>
-          <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} style={{ width: '100%' }}>
+          <select className="free-material-framed-input" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
             <option value="">اختر المادة...</option>
             {availableProducts.map(p => (
               <option key={p.id} value={p.id}>{p.displayName || p.name} ({p.category || 'عام'})</option>
             ))}
           </select>
         </label>
-        <label style={{ width: '90px' }}>
+        <label className="free-material-picker-qty">
           <span>الكمية</span>
-          <input type="number" min="1" value={selectedQty} onChange={e => setSelectedQty(e.target.value)} />
+          <input className="free-material-framed-input" type="number" min="1" value={selectedQty} onChange={e => setSelectedQty(e.target.value)} />
         </label>
-        <button type="button" className="secondary-action" onClick={addProductLine} disabled={!selectedProductId}>إضافة</button>
+        <button type="button" className="secondary-action free-material-add-btn" onClick={addProductLine} disabled={!selectedProductId}>إضافة</button>
       </div>
 
-      <div className="history-lines" style={{ marginTop: '0.75rem', maxHeight: '180px', overflowY: 'auto' }}>
+      <div className="history-lines free-material-lines-box">
         {lines.length === 0 ? (
-          <p style={{ textAlign: 'center', opacity: 0.7 }}>لا توجد مواد مختارة بعد.</p>
+          <p style={{ textAlign: 'center', opacity: 0.7, margin: '0.25rem 0' }}>لا توجد مواد مختارة بعد.</p>
         ) : (
           lines.map((line, idx) => (
-            <div key={`${line.productId}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.35rem 0' }}>
+            <div key={`${line.productId}-${idx}`} className="free-material-line-row">
               <span><b>{line.name}</b> <small>({line.category})</small></span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <button type="button" className="secondary-action" onClick={() => updateLineQty(idx, -1)}>-</button>
@@ -901,9 +902,15 @@ export function FreeMaterialDialog({ cartItems = [], products = [], onClose, onC
         )}
       </div>
 
-      <label className="discount-input" style={{ marginTop: '0.5rem' }}>
-        <span>ملاحظة (اختياري)</span>
-        <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="ملاحظة إضافية" />
+      <label className="discount-input free-material-note-box" data-testid="free-material-note-box">
+        <span className="free-material-note-label">ملاحظة (اختياري)</span>
+        <textarea
+          className="free-material-note-input"
+          rows={2}
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          placeholder="أدخل ملاحظة إضافية هنا..."
+        />
       </label>
 
       <div className="discount-summary" aria-label="ملخص الأثر المالي">
