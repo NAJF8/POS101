@@ -1,4 +1,4 @@
-import { writeSalesCache } from './localSalesCache.js'
+import { readSalesCache, writeSalesCache } from './localSalesCache.js'
 
 const SALES_KEY = 'pos101.sales'
 const QUEUE_KEY = 'pos101.syncQueue'
@@ -8,6 +8,14 @@ export const KNOWN_MANUAL_REVIEW_SALE_1056 = 'b55ca7d2-fd37-4aa9-bafe-866aa2f938
 export const KNOWN_MANUAL_REVIEW_REASON_1056 = 'PREVIOUSLY_QUARANTINED_SALE_NOW_EXISTS_IN_FIREBASE_CONFLICTS_WITH_ORDER_1056'
 
 const readJson = (key, fallback) => {
+  if (key === SALES_KEY) {
+    try {
+      const sales = readSalesCache()
+      return Array.isArray(sales) ? sales : fallback
+    } catch {
+      return fallback
+    }
+  }
   try {
     const value = JSON.parse(localStorage.getItem(key))
     return value ?? fallback

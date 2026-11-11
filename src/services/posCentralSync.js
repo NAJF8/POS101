@@ -146,8 +146,16 @@ const readLocalCashierSession = () => {
   } catch { return null }
 }
 const writeSales = sales => writeSalesCache(sales)
-const dispatchUpdated = () => window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
-const dispatchExpensesUpdated = () => window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
+const dispatchUpdated = () => {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('pos101-sales-updated'))
+  }
+}
+const dispatchExpensesUpdated = () => {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('pos101-expenses-updated'))
+  }
+}
 
 const kioskWorkerRequest = async (path, payload) => {
   if (!kioskWorkerUrl) throw Object.assign(new Error('إعداد Kiosk Worker غير موجود.'), { code: 'KIOSK_BACKEND_NOT_CONFIGURED' })
@@ -1227,7 +1235,7 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   const repair = repairPendingQueueForEndDay({ centralSales, operationalDay: centralDay })
   // Readback is also the restart repair path. Persist only sync metadata after
   // exact payload verification; never resend or rewrite the central sale.
-  reconcileSalesAgainstCentral(centralSales)
+  mergeCentralSalesLocally(centralSales)
   const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readRawSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay: centralDay, openOrderCount, saleEngineState: typeof window !== 'undefined' ? window.__POS101_SALE_ENGINE_STATE__ || '' : '' })
   const financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
   return {
@@ -2866,6 +2874,7 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
   if (!preClose.allowed) throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
   const centralBeforeWrite = centralValues(await get(salesRef()))
+  mergeCentralSalesLocally(centralBeforeWrite)
   const financialReconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales: centralBeforeWrite, operationalDay: day })
   if (!financialReconciliation.allowed) {
     throw Object.assign(new Error('تعذر مطابقة المبيعات المحلية والمركزية؛ تم تعطيل إنهاء اليوم دون أي كتابة.'), { code: 'FINANCIAL_RECONCILIATION_BLOCKED', financialReconciliation })

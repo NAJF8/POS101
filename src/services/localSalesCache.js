@@ -2,6 +2,20 @@ export const SALES_CACHE_KEY = 'pos101.sales'
 export const SALES_CACHE_MAX_ROWS = 50
 export const SALES_CACHE_MAX_BYTES = 180 * 1024
 export const STORAGE_PROBE_KEY = 'pos101.storageProbe'
+export const FULL_RECOVERY_BACKUP_PREFIX = 'pos101.fullRecoveryBackup.'
+export const MAX_BACKUP_AGE_MS = 48 * 60 * 60 * 1000
+
+let inMemorySalesCache = null
+let inMemorySalesUpdatedAt = 0
+let inMemoryStorageTarget = null
+let inMemoryFallbackActive = false
+
+export const resetInMemorySalesCache = () => {
+  inMemorySalesCache = null
+  inMemorySalesUpdatedAt = 0
+  inMemoryStorageTarget = null
+  inMemoryFallbackActive = false
+}
 
 const PROTECTED_KEYS = new Set([
   'pos101.session', 'pos101.orders', 'pos101.syncQueue', 'pos101.accSaleSyncQueue', 'pos101.salesQuarantine',
@@ -14,6 +28,32 @@ const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const saleId = sale => text(sale?.saleId || sale?.id || sale?.operationKey || sale?.orderNumber)
 const isCentralVerified = sale => sale?.centralVerified === true || sale?.syncStatus === 'synced' || sale?.status === 'synced' || Boolean(sale?.syncConfirmedAt)
 const isPending = sale => !isCentralVerified(sale) && !['voided', 'cancelled', 'canceled', 'abandoned', 'draft', 'باطل', 'ملغي'].includes(text(sale?.status).toLowerCase())
+
+const latestSaleTimestamp = sales => {
+  if (!Array.isArray(sales) || sales.length === 0) return 0
+  let latest = 0
+  for (const s of sales) {
+    const time = Number(s?.createdAt ?? s?.created_at ?? 0)
+    if (Number.isFinite(time) && time > latest) latest = time
+  }
+  return latest
+}
+
+export const isStaleFullRecoveryBackupKey = (key, rawValue = null, now = Date.now()) => {
+  const keyStr = String(key || '')
+  if (!keyStr.startsWith(FULL_RECOVERY_BACKUP_PREFIX)) return false
+  const suffix = keyStr.slice(FULL_RECOVERY_BACKUP_PREFIX.length)
+  let timestamp = Date.parse(suffix)
+  if (!Number.isFinite(timestamp) && rawValue) {
+    try {
+      const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue
+      const fromSnapshot = Date.parse(parsed?.timestamp)
+      if (Number.isFinite(fromSnapshot)) timestamp = fromSnapshot
+    } catch { /* best effort */ }
+  }
+  if (!Number.isFinite(timestamp)) return false
+  return (now - timestamp) > MAX_BACKUP_AGE_MS
+}
 
 export const isQuotaExceededError = error => {
   const value = `${error?.name || ''} ${error?.message || error || ''}`.toLowerCase()
@@ -64,11 +104,45 @@ export const compactSalesCache = (sales, { maxRows = SALES_CACHE_MAX_ROWS } = {}
 }
 
 export const readSalesCache = (storage = globalThis.localStorage) => {
+  let storageRows = []
   try {
     const raw = storage?.getItem?.(SALES_CACHE_KEY)
     const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed : []
-  } catch { return [] }
+    storageRows = Array.isArray(parsed) ? parsed : []
+  } catch {
+    storageRows = []
+  }
+
+  if (inMemoryStorageTarget && storage && inMemoryStorageTarget !== storage) {
+    return storageRows
+  }
+
+  if (!inMemorySalesCache) {
+    return storageRows
+  }
+
+  if (storageRows.length === 0) {
+    return inMemorySalesCache
+  }
+
+  const storageLatest = latestSaleTimestamp(storageRows)
+  const memoryLatest = latestSaleTimestamp(inMemorySalesCache)
+
+  if (storageLatest > memoryLatest) {
+    inMemorySalesCache = storageRows
+    inMemoryFallbackActive = false
+    return storageRows
+  }
+
+  if (memoryLatest > storageLatest) {
+    return inMemorySalesCache
+  }
+
+  if (inMemorySalesCache.length >= storageRows.length) {
+    return inMemorySalesCache
+  }
+
+  return storageRows
 }
 
 const serializedBytes = value => {
@@ -114,7 +188,7 @@ export const testLocalStorageWrite = (storage = globalThis.localStorage) => {
   }
 }
 
-export const cleanupOversizedLocalCaches = ({ storage = globalThis.localStorage, centralReadable = false } = {}) => {
+export const cleanupOversizedLocalCaches = ({ storage = globalThis.localStorage, centralReadable = false, now = Date.now() } = {}) => {
   const cleanedKeys = []
   const preservedKeys = [...PROTECTED_KEYS]
   const before = inspectLocalStorage(storage)
@@ -128,8 +202,32 @@ export const cleanupOversizedLocalCaches = ({ storage = globalThis.localStorage,
       // original value in place so pending sale payloads remain recoverable.
     }
   }
+
+  const allKeys = []
+  if (storage) {
+    for (let index = 0; index < Number(storage.length || 0); index += 1) {
+      const key = storage.key(index)
+      if (key !== null) allKeys.push(key)
+    }
+  }
+
+  for (const key of allKeys) {
+    if (!key || PROTECTED_KEYS.has(key) || key === SALES_CACHE_KEY) continue
+    if (key.startsWith(FULL_RECOVERY_BACKUP_PREFIX)) {
+      let raw = null
+      try { raw = storage.getItem(key) } catch { /* best effort */ }
+      if (isStaleFullRecoveryBackupKey(key, raw, now)) {
+        try {
+          storage.removeItem(key)
+          cleanedKeys.push(key)
+        } catch { /* best effort */ }
+      }
+    }
+  }
+
   for (const row of before.oversizedKeys) {
     if (row.key === SALES_CACHE_KEY || PROTECTED_KEYS.has(row.key)) continue
+    if (row.key.startsWith(FULL_RECOVERY_BACKUP_PREFIX)) continue
     if (/^(pos101\.(report|image|blob|diagnostic)|reportCache|imageCache)/i.test(row.key)) {
       try { storage?.removeItem?.(row.key); cleanedKeys.push(row.key) } catch { /* best effort */ }
     }
@@ -137,19 +235,38 @@ export const cleanupOversizedLocalCaches = ({ storage = globalThis.localStorage,
   return { cleanedKeys: [...new Set(cleanedKeys)], preservedKeys, before, after: inspectLocalStorage(storage) }
 }
 
-export const writeSalesCache = (sales, { storage = globalThis.localStorage, centralReadable = false } = {}) => {
+export const writeSalesCache = (sales, { storage = globalThis.localStorage, centralReadable = false, now = Date.now() } = {}) => {
   const compacted = compactSalesCache(sales)
+  inMemorySalesCache = compacted
+  inMemorySalesUpdatedAt = now
+  inMemoryStorageTarget = storage
+
   const write = rows => {
     try {
       storage?.setItem?.(SALES_CACHE_KEY, JSON.stringify(rows))
       return true
     } catch { return false }
   }
-  if (write(compacted)) return { ok: true, quota: false, cleanedKeys: [], count: compacted.length, bytes: serializedBytes(compacted) }
-  const cleanup = cleanupOversizedLocalCaches({ storage, centralReadable })
+
+  if (write(compacted)) {
+    inMemoryFallbackActive = false
+    return { ok: true, quota: false, cleanedKeys: [], count: compacted.length, bytes: serializedBytes(compacted), inMemoryFallback: false }
+  }
+
+  const cleanup = cleanupOversizedLocalCaches({ storage, centralReadable, now })
+  if (write(compacted)) {
+    inMemoryFallbackActive = false
+    return { ok: true, quota: true, cleanedKeys: cleanup.cleanedKeys, count: compacted.length, bytes: serializedBytes(compacted), inMemoryFallback: false }
+  }
+
   const retryRows = compactSalesCache(sales, { maxRows: 20 })
-  if (write(retryRows)) return { ok: true, quota: true, cleanedKeys: cleanup.cleanedKeys, count: retryRows.length, bytes: serializedBytes(retryRows) }
-  return { ok: false, quota: true, cleanedKeys: cleanup.cleanedKeys, count: 0, bytes: 0, preservedKeys: cleanup.preservedKeys }
+  if (write(retryRows)) {
+    inMemoryFallbackActive = compacted.length > retryRows.length
+    return { ok: true, quota: true, cleanedKeys: cleanup.cleanedKeys, count: retryRows.length, bytes: serializedBytes(retryRows), inMemoryFallback: inMemoryFallbackActive }
+  }
+
+  inMemoryFallbackActive = true
+  return { ok: false, quota: true, cleanedKeys: cleanup.cleanedKeys, count: compacted.length, bytes: 0, preservedKeys: cleanup.preservedKeys, inMemoryFallback: true }
 }
 
 export const persistLocalSaleAfterCentralReadback = (sale, markLocalSync) => {
