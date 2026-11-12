@@ -165,6 +165,7 @@ export default function App() {
   const [preCloseGuard, setPreCloseGuard] = useState({ loading: false, state: 'unknown', allowed: true, message: '' })
   const [freshSettlementPreview, setFreshSettlementPreview] = useState(null)
   const [ledgerVersion, setLedgerVersion] = useState(0)
+  const [preCloseRevision, setPreCloseRevision] = useState(0)
   const operationalDayListener = useRef(null)
   const expenseListener = useRef(null)
   const staffListener = useRef(null)
@@ -792,7 +793,7 @@ export default function App() {
       active = false
       if (preCloseRequestRef.current === requestId) preCloseRequestRef.current += 1
     }
-  }, [operationalDay?.id, operationalDay?.status, operationalDay?.businessDate, ledgerVersion, centralAuthUser?.uid, openOrdersCount, tracePreClose])
+  }, [operationalDay?.id, operationalDay?.status, operationalDay?.businessDate, preCloseRevision, centralAuthUser?.uid, openOrdersCount, tracePreClose])
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
@@ -807,12 +808,17 @@ export default function App() {
 
   useEffect(() => {
     const refreshOperationalSummary = () => setLedgerVersion(value => value + 1)
+    const refreshPreClose = () => setPreCloseRevision(value => value + 1)
     const refreshSaleSyncStatus = () => setSaleSyncStatus(readSaleSyncStatus())
     window.addEventListener('pos101-sale-created', refreshOperationalSummary)
     window.addEventListener('pos101-sale-updated', refreshOperationalSummary)
     window.addEventListener('pos101-sales-updated', refreshOperationalSummary)
     window.addEventListener('pos101-expenses-updated', refreshOperationalSummary)
     window.addEventListener('pos101-sale-engine-state', refreshOperationalSummary)
+    window.addEventListener('pos101-sale-created', refreshPreClose)
+    window.addEventListener('pos101-sale-updated', refreshPreClose)
+    window.addEventListener('pos101-sales-updated', refreshPreClose)
+    window.addEventListener('pos101-expenses-updated', refreshPreClose)
     window.addEventListener('pos101-sale-created', refreshSaleSyncStatus)
     window.addEventListener('pos101-sale-updated', refreshSaleSyncStatus)
     return () => {
@@ -821,6 +827,10 @@ export default function App() {
       window.removeEventListener('pos101-sales-updated', refreshOperationalSummary)
       window.removeEventListener('pos101-expenses-updated', refreshOperationalSummary)
       window.removeEventListener('pos101-sale-engine-state', refreshOperationalSummary)
+      window.removeEventListener('pos101-sale-created', refreshPreClose)
+      window.removeEventListener('pos101-sale-updated', refreshPreClose)
+      window.removeEventListener('pos101-sales-updated', refreshPreClose)
+      window.removeEventListener('pos101-expenses-updated', refreshPreClose)
       window.removeEventListener('pos101-sale-created', refreshSaleSyncStatus)
       window.removeEventListener('pos101-sale-updated', refreshSaleSyncStatus)
     }
