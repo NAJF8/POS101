@@ -693,7 +693,7 @@ export const canManageStaff = (user, authorizationRecord = null) => {
 // One structured gate shared by sale workers, manual recovery, diagnostics,
 // and readback. Kiosk claims are accepted, while authorized uid records are a
 // deliberate fallback for cashier/manager/admin accounts.
-export const canSyncPosSales = async (user = null) => {
+export const canSyncPosSales = async (user = null, onLifecycle = null) => {
   let authResolved = false
   if (!user) {
     try {
@@ -720,13 +720,29 @@ export const canSyncPosSales = async (user = null) => {
     missingReason: '',
   }
   if (!user?.uid) { result.missingReason = 'AUTH_REQUIRED'; return result }
-  const claims = await hydrateKioskClaims(user)
+  onLifecycle?.('AUTH_CLAIMS_START')
+  let claims
+  try {
+    claims = await hydrateKioskClaims(user)
+    onLifecycle?.('AUTH_CLAIMS_RESOLVED')
+  } catch (error) {
+    onLifecycle?.('AUTH_CLAIMS_REJECTED')
+    throw error
+  }
   result.claimsReady = Boolean(claims)
   result.claims = claims || null
   result.cashierId = String(claims?.cashierId || claims?.pos101_cashierId || claims?.staffId || '')
   result.cashierName = String(claims?.cashierName || claims?.pos101_cashierName || claims?.name || '')
   const claimsRole = String(claims?.role || claims?.pos101_role || claims?.userRole || '').trim().toLowerCase()
-  const record = await readCentralAuthorizationRecord(user)
+  onLifecycle?.('AUTH_RECORD_START')
+  let record
+  try {
+    record = await readCentralAuthorizationRecord(user)
+    onLifecycle?.('AUTH_RECORD_RESOLVED')
+  } catch (error) {
+    onLifecycle?.('AUTH_RECORD_REJECTED')
+    throw error
+  }
   result.authorizedPathChecked = Boolean(db)
   result.authorizedUidExists = Boolean(record)
   const staffSession = readLocalCashierSession()
@@ -2698,7 +2714,7 @@ const financialUser = async (write = false, onLifecycle = null) => {
   onLifecycle?.('AUTH_READY')
   const user = auth?.currentUser
   if (!write) {
-    const permission = await canSyncPosSales(user)
+    const permission = await canSyncPosSales(user, onLifecycle)
     onLifecycle?.('AUTH_PERMISSION_RESOLVED')
     if (permission.allowed) return user
     throw Object.assign(new Error('هذا الحساب غير مخول لقراءة البيانات المالية.'), { code: 'CENTRAL_ROLE_BLOCKED', permission })
