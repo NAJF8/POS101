@@ -734,6 +734,17 @@ export const canSyncPosSales = async (user = null, onLifecycle = null) => {
   result.cashierId = String(claims?.cashierId || claims?.pos101_cashierId || claims?.staffId || '')
   result.cashierName = String(claims?.cashierName || claims?.pos101_cashierName || claims?.name || '')
   const claimsRole = String(claims?.role || claims?.pos101_role || claims?.userRole || '').trim().toLowerCase()
+  const roleAllowed = new Set(['cashier', 'cashier-sync', 'employee', 'manager', 'admin', 'super_admin', 'admin-viewer']).has(claimsRole)
+  const kioskAllowed = claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId
+  // Firebase ID-token claims are server-issued authorization. When they already
+  // establish an allowed POS role, do not add a second RTDB authorization read
+  // to the pre-close critical path; that read can remain unresolved while the
+  // authenticated session and sales data are otherwise healthy.
+  if (kioskAllowed || roleAllowed) {
+    result.allowed = true
+    result.role = ['super_admin', 'admin', 'manager'].includes(claimsRole) ? claimsRole : 'cashier'
+    return result
+  }
   onLifecycle?.('AUTH_RECORD_START')
   let record
   try {
@@ -752,10 +763,8 @@ export const canSyncPosSales = async (user = null, onLifecycle = null) => {
   result.cashierId ||= staffSession?.cashierId || ''
   result.cashierName ||= staffSession?.cashierName || ''
   const role = String(record?.role || claimsRole || '').trim().toLowerCase()
-  const roleAllowed = new Set(['cashier', 'cashier-sync', 'employee', 'manager', 'admin', 'super_admin', 'admin-viewer']).has(role)
   const recordAllowed = Boolean(record && record.active !== false && record.authorized !== false)
   const staffSessionAllowed = Boolean(staffSession)
-  const kioskAllowed = claims?.pos101_kiosk === true && claims?.scope === 'cashier' && claims?.kioskId
   if (kioskAllowed || recordAllowed || roleAllowed || staffSessionAllowed) {
     result.allowed = true
     result.role = ['super_admin', 'admin', 'manager'].includes(role) ? role : 'cashier'
