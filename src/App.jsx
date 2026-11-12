@@ -793,7 +793,7 @@ export default function App() {
       setPreCloseGuard(next)
       publishPreCloseDiagnostic({ requestId, operationalDay, state: next.state, loading: next.loading, allowed: next.allowed, error })
       lifecycle(error?.code === 'PRE_CLOSE_TIMEOUT' ? 'TIMEOUT' : 'FINAL_REJECTED')
-      tracePreClose('PRE_CLOSE_ERROR', { requestId, operationalDay: operationalDay.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
+      tracePreClose('PRE_CLOSE_ERROR', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: openOrdersCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
     })
     return () => {
       active = false

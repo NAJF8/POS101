@@ -1225,7 +1225,7 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   const lifecycle = event => { try { onLifecycle?.(event) } catch { /* diagnostics must never affect reconciliation */ } }
   lifecycle('SALES_START')
   try {
-    await financialUser(false)
+    await financialUser(false, lifecycle)
   } catch (error) {
     lifecycle('SALES_REJECTED')
     throw error
@@ -2691,12 +2691,15 @@ export const saveCentralProduct = async product => {
 // or expense records. Every write is read back before the caller treats it as
 // durable; voiding is represented as a status change, never a hard delete.
 const financialPath = path => ref(db, path)
-const financialUser = async (write = false) => {
+const financialUser = async (write = false, onLifecycle = null) => {
   if (!configured || !db) throw Object.assign(new Error('إعداد Firebase المركزي غير موجود.'), { code: 'NOT_CONFIGURED' })
+  onLifecycle?.('AUTH_PERMISSION_START')
   await authReady
+  onLifecycle?.('AUTH_READY')
   const user = auth?.currentUser
   if (!write) {
     const permission = await canSyncPosSales(user)
+    onLifecycle?.('AUTH_PERMISSION_RESOLVED')
     if (permission.allowed) return user
     throw Object.assign(new Error('هذا الحساب غير مخول لقراءة البيانات المالية.'), { code: 'CENTRAL_ROLE_BLOCKED', permission })
   }
