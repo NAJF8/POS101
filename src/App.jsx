@@ -41,7 +41,8 @@ import { saleEngine } from './services/saleEngine.js'
 import { recordFreeMaterial } from './services/freeMaterialService.js'
 import { saveCentralFreeMaterial } from './services/posCentralSync.js'
 import { recordEndDayReconciliationTrace } from './services/endDayReconciliationTrace.js'
-import { PRE_CLOSE_STATE, beginPreCloseCheck, completePreCloseCheck, failPreCloseCheck, isCurrentPreCloseRequest } from './services/preCloseGuard.js'
+import { PRE_CLOSE_STATE, beginPreCloseCheck, completePreCloseCheck, failPreCloseCheck, isCurrentPreCloseRequest, withPreCloseTimeout } from './services/preCloseGuard.js'
+import { recordPreCloseLifecycle } from './services/preCloseLifecycleDiagnostic.js'
 import { publishPreCloseDiagnostic } from './services/preCloseDiagnostic.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
@@ -767,11 +768,14 @@ export default function App() {
       return undefined
     }
     let active = true
+    const lifecycle = event => recordPreCloseLifecycle({ requestId, event, operationalDay })
+    lifecycle('START')
     setPreCloseGuard(previous => beginPreCloseCheck(previous))
     publishPreCloseDiagnostic({ requestId, operationalDay, state: PRE_CLOSE_STATE.CHECKING, loading: true, allowed: false })
     tracePreClose('PRE_CLOSE_START', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: openOrdersCount, saleEngineState: window.__POS101_SALE_ENGINE_STATE__ || '' })
-    void readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount }).then(result => {
+    void withPreCloseTimeout(readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount, onLifecycle: lifecycle })).then(result => {
       if (!active || !isCurrent()) {
+        lifecycle('STALE_IGNORED')
         tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current })
         return
       }
@@ -781,16 +785,19 @@ export default function App() {
       tracePreClose('PRE_CLOSE_RESULT', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: result?.openOrderCount ?? openOrdersCount, salesAllowed: result?.salesReconciliation?.allowed ?? (result?.financialReconciliation ? result.allowed && result.financialReconciliation.allowed : result?.allowed), financialAllowed: result?.financialReconciliation?.allowed ?? null, finalAllowed: next.allowed, loading: next.loading, state: next.state, message: next.message })
     }).catch(error => {
       if (!active || !isCurrent()) {
+        lifecycle('STALE_IGNORED')
         tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current, error: error?.message || String(error) })
         return
       }
       const next = failPreCloseCheck(error)
       setPreCloseGuard(next)
       publishPreCloseDiagnostic({ requestId, operationalDay, state: next.state, loading: next.loading, allowed: next.allowed, error })
+      lifecycle(error?.code === 'PRE_CLOSE_TIMEOUT' ? 'TIMEOUT' : 'FINAL_REJECTED')
       tracePreClose('PRE_CLOSE_ERROR', { requestId, operationalDay: operationalDay.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
     })
     return () => {
       active = false
+      lifecycle('RUNNER_CLEANUP')
       if (preCloseRequestRef.current === requestId) preCloseRequestRef.current += 1
     }
   }, [operationalDay?.id, operationalDay?.status, operationalDay?.businessDate, preCloseRevision, centralAuthUser?.uid, openOrdersCount, tracePreClose])

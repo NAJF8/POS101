@@ -1221,26 +1221,61 @@ const readPreCloseFinancialReconciliation = async operationalDay => {
   }
 }
 
-export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0 } = {}) => {
-  await financialUser(false)
-  const [salesSnapshot, centralDay] = await Promise.all([get(salesRef()), readCentralOperationalDay()])
+export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0, onLifecycle } = {}) => {
+  const lifecycle = event => { try { onLifecycle?.(event) } catch { /* diagnostics must never affect reconciliation */ } }
+  lifecycle('SALES_START')
+  try {
+    await financialUser(false)
+  } catch (error) {
+    lifecycle('SALES_REJECTED')
+    throw error
+  }
+  lifecycle('CENTRAL_SNAPSHOT_START')
+  let salesSnapshot
+  let centralDay
+  try {
+    ;[salesSnapshot, centralDay] = await Promise.all([get(salesRef()), readCentralOperationalDay()])
+  } catch (error) {
+    lifecycle('CENTRAL_SNAPSHOT_REJECTED')
+    throw error
+  }
+  lifecycle('CENTRAL_SNAPSHOT_RESOLVED')
   const centralSales = centralValues(salesSnapshot)
   if (centralDay?.status === 'closed') {
+    lifecycle('FINAL_RESULT')
     return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'اليوم منتهي مركزيًا.' }
   }
   if (!centralDay || centralDay.status !== 'open') {
+    lifecycle('FINAL_RESULT')
     return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'تعذر قراءة حالة اليوم المركزي.' }
   }
   if (operationalDay?.id && (String(operationalDay.id) !== String(centralDay.id) || String(operationalDay.businessDate || '') !== String(centralDay.businessDate || ''))) {
+    lifecycle('FINAL_RESULT')
     return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'تغيّر اليوم التشغيلي مركزيًا. أعد قراءة الحالة قبل الإنهاء.' }
   }
-  const repair = repairPendingQueueForEndDay({ centralSales, operationalDay: centralDay })
-  // Readback is also the restart repair path. Persist only sync metadata after
-  // exact payload verification; never resend or rewrite the central sale.
-  mergeCentralSalesLocally(centralSales)
-  const salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readRawSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay: centralDay, openOrderCount, saleEngineState: typeof window !== 'undefined' ? window.__POS101_SALE_ENGINE_STATE__ || '' : '' })
-  const financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
-  return {
+  let repair
+  let salesReconciliation
+  try {
+    repair = repairPendingQueueForEndDay({ centralSales, operationalDay: centralDay })
+    // Readback is also the restart repair path. Persist only sync metadata after
+    // exact payload verification; never resend or rewrite the central sale.
+    mergeCentralSalesLocally(centralSales)
+    salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readRawSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay: centralDay, openOrderCount, saleEngineState: typeof window !== 'undefined' ? window.__POS101_SALE_ENGINE_STATE__ || '' : '' })
+  } catch (error) {
+    lifecycle('SALES_REJECTED')
+    throw error
+  }
+  lifecycle('SALES_RESOLVED')
+  lifecycle('FINANCIAL_START')
+  let financialReconciliation
+  try {
+    financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
+  } catch (error) {
+    lifecycle('FINANCIAL_REJECTED')
+    throw error
+  }
+  lifecycle('FINANCIAL_RESOLVED')
+  const result = {
     ...salesReconciliation,
     salesReconciliation,
     freshCentralSales: centralSales,
@@ -1249,6 +1284,8 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
     allowed: salesReconciliation.allowed && financialReconciliation.allowed,
     message: salesReconciliation.message || financialReconciliation.message,
   }
+  lifecycle('FINAL_RESULT')
+  return result
 }
 
 // Read-only diagnostic path. Unlike readPreCloseReconciliation, this deliberately

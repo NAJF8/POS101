@@ -37,3 +37,15 @@ export const failPreCloseCheck = error => ({
 })
 
 export const isCurrentPreCloseRequest = (requestId, currentRequestId) => requestId === currentRequestId
+
+export const withPreCloseTimeout = (promise, timeoutMs = 15000, message = 'انتهت مهلة فحص ما قبل الإغلاق.') => {
+  const delay = Number(timeoutMs)
+  if (!Number.isFinite(delay) || delay <= 0) return Promise.resolve(promise)
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(Object.assign(new Error(message), { code: 'PRE_CLOSE_TIMEOUT' })), delay)
+      Promise.resolve(promise).finally(() => clearTimeout(timer)).catch(() => {})
+    }),
+  ])
+}
