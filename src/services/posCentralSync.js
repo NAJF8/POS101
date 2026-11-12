@@ -119,6 +119,8 @@ const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager', 'admin-viewer'])
 const STAFF_MANAGEMENT_ROLES = new Set(['super_admin', 'admin', 'manager', 'cashier', 'cashier-sync', 'employee'])
 const authorizationCache = new Map()
 const tokenClaimsCache = new Map()
+let centralSalesSnapshot = null
+let centralSalesSnapshotReady = false
 const INITIAL_SYNC_COMPLETED_KEY = 'pos101.initialSyncCompleted'
 const salesRef = () => ref(db, 'pos101_sales')
 const pendingTablesRef = () => ref(db, 'pos101_pending_tables')
@@ -1259,7 +1261,7 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
     throw error
   }
   lifecycle('CENTRAL_SNAPSHOT_START')
-  let salesSnapshot
+  let centralSales
   let centralDay
   try {
     lifecycle('CENTRAL_DAY_READ_START')
@@ -1276,16 +1278,23 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
     lifecycle('CENTRAL_SALES_READ_START')
     const dayId = String(centralDay?.id || centralDay?.operationalDayId || '').trim()
     const businessDate = String(centralDay?.businessDate || operationalDay?.businessDate || '').trim()
-    const salesQuery = dayId
-      ? query(salesRef(), orderByChild('operationalDayId'), equalTo(dayId))
-      : query(salesRef(), orderByChild('businessDate'), equalTo(businessDate))
-    salesSnapshot = await get(salesQuery).then(snapshot => { lifecycle('CENTRAL_SALES_READ_RESOLVED'); return snapshot }, error => { lifecycle('CENTRAL_SALES_READ_REJECTED'); throw error })
+    const matchesDay = sale => String(sale?.operationalDayId || sale?.operational_day_id || '') === dayId
+      || (!sale?.operationalDayId && !sale?.operational_day_id && String(sale?.businessDate || '') === businessDate)
+    if (centralSalesSnapshotReady && Array.isArray(centralSalesSnapshot)) {
+      centralSales = centralSalesSnapshot.filter(matchesDay)
+      lifecycle('CENTRAL_SALES_READ_RESOLVED')
+    } else {
+      const salesQuery = dayId
+        ? query(salesRef(), orderByChild('operationalDayId'), equalTo(dayId))
+        : query(salesRef(), orderByChild('businessDate'), equalTo(businessDate))
+      const salesSnapshot = await get(salesQuery).then(snapshot => { lifecycle('CENTRAL_SALES_READ_RESOLVED'); return snapshot }, error => { lifecycle('CENTRAL_SALES_READ_REJECTED'); throw error })
+      centralSales = centralValues(salesSnapshot)
+    }
   } catch (error) {
     lifecycle('CENTRAL_SNAPSHOT_REJECTED')
     throw error
   }
   lifecycle('CENTRAL_SNAPSHOT_RESOLVED')
-  const centralSales = centralValues(salesSnapshot)
   if (centralDay?.status === 'closed') {
     lifecycle('FINAL_RESULT')
     return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'اليوم منتهي مركزيًا.' }
@@ -2041,6 +2050,8 @@ export const subscribeCentralSales = (callback, authenticatedUser = auth?.curren
   // listener even though auth.currentUser and the RTDB token are ready.
   const publish = snapshot => {
     const centralSales = centralValues(snapshot)
+    centralSalesSnapshot = centralSales
+    centralSalesSnapshotReady = true
     let merged = centralSales
     try { merged = mergeCentralSalesLocally(centralSales) } catch (error) { console.error('CENTRAL_SALES_MERGE_ERROR', error) }
     callback({ centralSales, mergedSales: merged, centralCount: centralSales.length, mergedCount: merged.length })
