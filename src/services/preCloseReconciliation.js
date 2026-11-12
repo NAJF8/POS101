@@ -107,6 +107,8 @@ export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], voi
     missingQueue,
     pendingQueue: pendingSales.length + voidPending.length + queuedVoidPending.length,
     pendingVoidUpdateCount: voidPending.length + queuedVoidPending.length,
+    voidPending: voidPending.length,
+    queuedVoidPending: queuedVoidPending.length,
     localActiveCount: activeLocal.length,
     centralActiveCount: activeCentral.length,
     localActiveTotal: activeTotal(activeLocal),

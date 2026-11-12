@@ -42,6 +42,7 @@ import { recordFreeMaterial } from './services/freeMaterialService.js'
 import { saveCentralFreeMaterial } from './services/posCentralSync.js'
 import { recordEndDayReconciliationTrace } from './services/endDayReconciliationTrace.js'
 import { PRE_CLOSE_STATE, beginPreCloseCheck, completePreCloseCheck, failPreCloseCheck, isCurrentPreCloseRequest } from './services/preCloseGuard.js'
+import { publishPreCloseDiagnostic } from './services/preCloseDiagnostic.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -761,10 +762,12 @@ export default function App() {
     const isCurrent = () => isCurrentPreCloseRequest(requestId, preCloseRequestRef.current)
     if (!operationalDay?.id || operationalDay.status !== 'open') {
       setPreCloseGuard({ loading: false, state: PRE_CLOSE_STATE.UNKNOWN, allowed: true, message: '', error: null })
+      publishPreCloseDiagnostic({ requestId, operationalDay, state: PRE_CLOSE_STATE.UNKNOWN, loading: false, allowed: true })
       return undefined
     }
     let active = true
     setPreCloseGuard(previous => beginPreCloseCheck(previous))
+    publishPreCloseDiagnostic({ requestId, operationalDay, state: PRE_CLOSE_STATE.CHECKING, loading: true, allowed: false })
     tracePreClose('PRE_CLOSE_START', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: openOrdersCount, saleEngineState: window.__POS101_SALE_ENGINE_STATE__ || '' })
     void readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount }).then(result => {
       if (!active || !isCurrent()) {
@@ -773,6 +776,7 @@ export default function App() {
       }
       const next = completePreCloseCheck(result)
       setPreCloseGuard(next)
+      publishPreCloseDiagnostic({ requestId, operationalDay, result, state: next.state, loading: next.loading, allowed: next.allowed })
       tracePreClose('PRE_CLOSE_RESULT', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: result?.openOrderCount ?? openOrdersCount, salesAllowed: result?.salesReconciliation?.allowed ?? (result?.financialReconciliation ? result.allowed && result.financialReconciliation.allowed : result?.allowed), financialAllowed: result?.financialReconciliation?.allowed ?? null, finalAllowed: next.allowed, loading: next.loading, state: next.state, message: next.message })
     }).catch(error => {
       if (!active || !isCurrent()) {
@@ -781,6 +785,7 @@ export default function App() {
       }
       const next = failPreCloseCheck(error)
       setPreCloseGuard(next)
+      publishPreCloseDiagnostic({ requestId, operationalDay, state: next.state, loading: next.loading, allowed: next.allowed, error })
       tracePreClose('PRE_CLOSE_ERROR', { requestId, operationalDay: operationalDay.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
     })
     return () => {
@@ -843,6 +848,7 @@ export default function App() {
     const requestId = ++preCloseRequestRef.current
     const isCurrent = () => isCurrentPreCloseRequest(requestId, preCloseRequestRef.current)
     tracePreClose('PRE_CLOSE_START', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount: openOrdersCount, saleEngineState: window.__POS101_SALE_ENGINE_STATE__ || '' })
+    publishPreCloseDiagnostic({ requestId, operationalDay, state: PRE_CLOSE_STATE.CHECKING, loading: true, allowed: false })
     let guard
     try {
       guard = await readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount })
@@ -850,6 +856,7 @@ export default function App() {
       if (isCurrent()) {
         const next = failPreCloseCheck(error)
         setPreCloseGuard(next)
+        publishPreCloseDiagnostic({ requestId, operationalDay, state: next.state, loading: next.loading, allowed: next.allowed, error })
         tracePreClose('PRE_CLOSE_ERROR', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
       } else tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current, caller: 'prepareEndOperationalDay', error: error?.message || String(error) })
       throw error
@@ -869,6 +876,7 @@ export default function App() {
       if (isCurrent()) {
         const next = failPreCloseCheck(error)
         setPreCloseGuard(next)
+        publishPreCloseDiagnostic({ requestId, operationalDay, state: next.state, loading: next.loading, allowed: next.allowed, error })
         tracePreClose('PRE_CLOSE_ERROR', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
       }
       throw error
@@ -881,6 +889,7 @@ export default function App() {
     if (!guard.allowed || !reconciliation.allowed) {
       const message = guard.message || 'تعذر مطابقة المبيعات المحلية والمركزية قبل التسوية.'
       setPreCloseGuard({ ...guard, loading: false, state: PRE_CLOSE_STATE.BLOCKED, allowed: false, message, financialReconciliation: reconciliation })
+      publishPreCloseDiagnostic({ requestId, operationalDay, result: { ...guard, financialReconciliation: reconciliation, message }, state: PRE_CLOSE_STATE.BLOCKED, loading: false, allowed: false })
       tracePreClose('PRE_CLOSE_RESULT', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, salesAllowed: guard.salesReconciliation?.allowed ?? null, financialAllowed: guard.financialReconciliation?.allowed ?? null, finalAllowed: false, loading: false, state: 'blocked', message })
       throw Object.assign(new Error(message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose: { ...guard, financialReconciliation: reconciliation } })
     }
@@ -888,6 +897,7 @@ export default function App() {
       ? 'تم عزل طلب قديم من هذا الجهاز ولا يمنع إنهاء اليوم.'
       : 'لا توجد طلبات معلقة. يمكنك إنهاء اليوم.'
     setPreCloseGuard({ ...guard, loading: false, state: PRE_CLOSE_STATE.ALLOWED, allowed: true, message: repairMessage, financialReconciliation: reconciliation })
+    publishPreCloseDiagnostic({ requestId, operationalDay, result: { ...guard, financialReconciliation: reconciliation, message: repairMessage, allowed: true }, state: PRE_CLOSE_STATE.ALLOWED, loading: false, allowed: true })
     tracePreClose('PRE_CLOSE_RESULT', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, salesAllowed: guard.salesReconciliation?.allowed ?? null, financialAllowed: guard.financialReconciliation?.allowed ?? null, finalAllowed: true, loading: false, state: 'allowed', message: repairMessage })
   }, [operationalDay, openOrdersCount, tracePreClose])
 

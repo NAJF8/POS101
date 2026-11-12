@@ -1211,6 +1211,7 @@ const readPreCloseFinancialReconciliation = async operationalDay => {
     allowed: unresolvedExpenses.length === 0 && pendingWithdrawals === 0,
     pendingExpenses: unresolvedExpenses,
     pendingExpenseCount: unresolvedExpenses.length,
+    unresolvedExpenseCount: unresolvedExpenses.length,
     pendingWithdrawals,
     centralExpenseCount: centralExpenses.length,
     centralTransactionCount: centralTransactions.length,

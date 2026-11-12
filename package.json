@@ -12,6 +12,7 @@
     "test:end-day-fresh-reconciliation": "node scripts/end-day-fresh-reconciliation-regression.mjs",
     "test:end-day-reconciliation-gate-trace": "node scripts/end-day-reconciliation-gate-trace-regression.mjs",
     "test:pre-close-guard": "node scripts/pre-close-guard-regression.mjs",
+    "test:pre-close-diagnostic": "node scripts/pre-close-diagnostic-regression.mjs",
     "test:version-update": "node scripts/version-update-regression.mjs",
     "test:operational-day-close": "node scripts/operational-day-close-regression.mjs",
     "test:materials-report": "node scripts/materials-report-regression.mjs",
