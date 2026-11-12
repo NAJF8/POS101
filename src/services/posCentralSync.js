@@ -1263,7 +1263,16 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   let centralDay
   try {
     lifecycle('CENTRAL_DAY_READ_START')
-    centralDay = await readCentralOperationalDay().then(day => { lifecycle('CENTRAL_DAY_READ_RESOLVED'); return day }, error => { lifecycle('CENTRAL_DAY_READ_REJECTED'); throw error })
+    const cachedCentralDay = readCachedOperationalDay()
+    const requestedDayId = String(operationalDay?.id || operationalDay?.operationalDayId || '').trim()
+    const requestedBusinessDate = String(operationalDay?.businessDate || '').trim()
+    const cacheMatchesRequestedDay = cachedCentralDay
+      && String(cachedCentralDay.id || cachedCentralDay.operationalDayId || '') === requestedDayId
+      && String(cachedCentralDay.businessDate || '') === requestedBusinessDate
+    centralDay = cacheMatchesRequestedDay
+      ? cachedCentralDay
+      : await readCentralOperationalDay()
+    lifecycle('CENTRAL_DAY_READ_RESOLVED')
     lifecycle('CENTRAL_SALES_READ_START')
     const dayId = String(centralDay?.id || centralDay?.operationalDayId || '').trim()
     const businessDate = String(centralDay?.businessDate || operationalDay?.businessDate || '').trim()
