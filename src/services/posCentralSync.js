@@ -1259,7 +1259,11 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   let salesSnapshot
   let centralDay
   try {
-    ;[salesSnapshot, centralDay] = await Promise.all([get(salesRef()), readCentralOperationalDay()])
+    lifecycle('CENTRAL_SALES_READ_START')
+    const salesPromise = get(salesRef()).then(snapshot => { lifecycle('CENTRAL_SALES_READ_RESOLVED'); return snapshot }, error => { lifecycle('CENTRAL_SALES_READ_REJECTED'); throw error })
+    lifecycle('CENTRAL_DAY_READ_START')
+    const dayPromise = readCentralOperationalDay().then(day => { lifecycle('CENTRAL_DAY_READ_RESOLVED'); return day }, error => { lifecycle('CENTRAL_DAY_READ_REJECTED'); throw error })
+    ;[salesSnapshot, centralDay] = await Promise.all([salesPromise, dayPromise])
   } catch (error) {
     lifecycle('CENTRAL_SNAPSHOT_REJECTED')
     throw error
