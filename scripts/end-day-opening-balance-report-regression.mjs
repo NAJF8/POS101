@@ -27,7 +27,7 @@ const ui = fs.readFileSync(new URL('../src/components/OperationalDay.jsx', impor
 const financialCenter = fs.readFileSync(new URL('../src/components/FinancialCenter.jsx', import.meta.url), 'utf8')
 const reports = fs.readFileSync(new URL('../src/components/Reports.jsx', import.meta.url), 'utf8')
 const sync = fs.readFileSync(new URL('../src/services/posCentralSync.js', import.meta.url), 'utf8')
-for (const label of ['الرصيد الافتتاحي', 'مبيعات الكاش', 'المصاريف', 'السحوبات', 'الرصيد المتوقع بالصندوق', 'الكاش الفعلي', 'الفرق', 'صافي حركة الصندوق بعد خصم الرصيد الافتتاحي', 'صافي مبيعات اليوم النقدية', 'فرق المبيعات النقدية']) assert.match(ui, new RegExp(label))
+for (const label of ['الرصيد الافتتاحي', 'مبيعات الكاش', 'المصاريف', 'السحوبات', 'الرصيد المتوقع بالصندوق', 'الكاش الفعلي', 'الفرق', 'صافي تغيّر الصندوق عن الرصيد الافتتاحي', 'صافي مبيعات اليوم النقدية', 'فرق المبيعات النقدية']) assert.match(ui, new RegExp(label))
 for (const label of ['الرصيد الافتتاحي', 'صافي حركة الصندوق بعد خصم الرصيد الافتتاحي', 'صافي مبيعات اليوم النقدية', 'فرق المبيعات النقدية']) { assert.match(financialCenter, new RegExp(label)); assert.match(reports, new RegExp(label)) }
 assert.match(sync, /calculateEndDayCashAnalysis/)
 assert.match(fs.readFileSync(new URL('../src/services/financialCenter.js', import.meta.url), 'utf8'), /netDrawerMovement/)

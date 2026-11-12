@@ -13,6 +13,14 @@ export const buildSaleEditPatch = (sale, changes = {}) => {
   const subtotal = number(sale?.subtotal || number(sale?.total) + number(sale?.discount))
   const discount = Math.min(subtotal, Math.max(0, number(changes.discount)))
   const patch = { subtotal, discount, total: subtotal - discount, paymentMethod: changes.paymentMethod || sale.paymentMethod, orderType: changes.orderType || sale.orderType || sale.order?.orderType || null }
+  if (discount === 0) {
+    patch.discount = 0
+    patch.discountDetails = null
+    patch.discountAmount = 0
+    if (sale?.order) {
+      patch.order = { ...sale.order, discount: null, discountDetails: null }
+    }
+  }
   const noteKey = ['customerNote', 'orderNote', 'cashierNote', 'note', 'notes'].find(key => sale?.[key] !== undefined) || 'customerNote'
   patch[noteKey] = String(changes.note ?? '')
   patch.cashierNameSnapshot = String(changes.cashier ?? sale?.cashierNameSnapshot ?? sale?.cashierName ?? sale?.seller ?? '')
@@ -107,6 +115,14 @@ export const buildSaleItemCorrectionPatch = (sale, changes = {}) => {
   const total = subtotal - discount
   if (total < 0) throw Object.assign(new Error('الإجمالي النهائي لا يمكن أن يكون سالباً.'), { code: 'SALE_CORRECTION_TOTAL_INVALID' })
   const patch = { items, subtotal, discount, total }
+  if (discount === 0) {
+    patch.discount = 0
+    patch.discountDetails = null
+    patch.discountAmount = 0
+    if (sale?.order) {
+      patch.order = { ...sale.order, discount: null, discountDetails: null }
+    }
+  }
   const itemField = ['items', 'cart', 'products', 'orderItems', 'lines'].find(key => Array.isArray(sale?.[key]))
   if (itemField && itemField !== 'items') patch[itemField] = items
   setExisting(patch, sale, ['originalTotal', 'totalBeforeDiscount'], subtotal)

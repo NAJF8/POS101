@@ -20,11 +20,41 @@ const cashAmount = value => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+const firstValue = (...values) => values.find(value => value !== undefined && value !== null && value !== '')
+
 // `discount` is the sale's canonical cash amount. The details object records
 // how that amount was chosen (amount, percent, Baly, or Toters), so it must
 // only be used as a fallback for legacy rows that do not have `discount`.
 export const actualCashDiscountOf = sale => {
   const order = sale?.order || {}
+  const explicitDiscount = cashAmount(firstValue(sale?.discount, sale?.discountAmount, sale?.discount_amount))
+
+  if (explicitDiscount !== null) {
+    if (explicitDiscount > 0) return explicitDiscount
+    const explicitSubtotal = firstValue(sale?.subtotal, order?.subtotal, sale?.gross, sale?.gross_amount)
+    const explicitTotal = firstValue(sale?.total, sale?.total_after_discount, sale?.net_total, sale?.net)
+    let sub = explicitSubtotal !== undefined ? numberValue(explicitSubtotal) : null
+    let tot = explicitTotal !== undefined ? numberValue(explicitTotal) : null
+    if (sub !== null && tot !== null && sub > 0 && tot > 0 && sub <= tot) {
+      return 0
+    }
+  }
+
+  const explicitSubtotal = firstValue(sale?.subtotal, order?.subtotal, sale?.gross, sale?.gross_amount)
+  const explicitTotal = firstValue(sale?.total, sale?.total_after_discount, sale?.net_total, sale?.net)
+
+  let sub = explicitSubtotal !== undefined ? numberValue(explicitSubtotal) : null
+  if (sub === null) {
+    const items = Array.isArray(sale?.items) ? sale.items : Array.isArray(order?.items) ? order.items : null
+    if (items && items.length > 0) {
+      sub = items.reduce((sum, item) => sum + (numberValue(item?.price ?? item?.unitPrice, 0) * numberValue(item?.quantity, 1)), 0)
+    }
+  }
+  const tot = explicitTotal !== undefined ? numberValue(explicitTotal) : null
+  if (sub !== null && tot !== null && sub > 0 && tot > 0 && sub <= tot) {
+    return 0
+  }
+
   const values = [
     sale?.discount,
     sale?.discountAmount,
@@ -82,8 +112,6 @@ export const dateValue = value => {
   const parsed = Date.parse(normalized)
   return Number.isFinite(parsed) ? parsed : 0
 }
-
-const firstValue = (...values) => values.find(value => value !== undefined && value !== null && value !== '')
 
 export const normalizeSale = sale => {
   const order = sale?.order || {}

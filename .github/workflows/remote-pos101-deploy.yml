@@ -58,6 +58,9 @@ jobs:
       - run: npm run test:pending-diagnostics
       - run: npm run test:remote-reconcile
       - run: node scripts/operational-day-close-regression.mjs
+      - run: npm run test:canonical-reconciliation-comprehensive
+      - run: npm run test:pre-close-architecture
+      - run: npm run test:sync-queue-lifecycle
       - run: node scripts/pre-close-reconciliation-regression.mjs
       - run: node scripts/closed-day-report-regression.mjs
       - run: node scripts/settlement-correction-regression.mjs

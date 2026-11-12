@@ -20,7 +20,8 @@ export const completePreCloseCheck = result => ({
   loading: false,
   state: result?.allowed ? PRE_CLOSE_STATE.ALLOWED : PRE_CLOSE_STATE.BLOCKED,
   allowed: Boolean(result?.allowed),
-  message: result?.allowed ? '' : (result?.message || 'تعذر التحقق من حالة الإغلاق.'),
+  reason: result?.reason || (result?.allowed ? '' : 'UNKNOWN'),
+  message: result?.allowed ? (result?.message || '') : (result?.message || 'تعذر التحقق من حالة الإغلاق.'),
   error: null,
 })
 
@@ -28,6 +29,7 @@ export const failPreCloseCheck = error => ({
   loading: false,
   state: PRE_CLOSE_STATE.ERROR,
   allowed: false,
+  reason: error?.code || 'RECONCILIATION_ERROR',
   message: error?.message || 'تعذر التحقق من مزامنة المبيعات.',
   error: {
     name: error?.name || 'Error',
@@ -37,6 +39,10 @@ export const failPreCloseCheck = error => ({
 })
 
 export const isCurrentPreCloseRequest = (requestId, currentRequestId) => requestId === currentRequestId
+
+export const isLatestPreCloseRequest = (requestId, currentRequestId, latestResolvedId = 0) => {
+  return requestId === currentRequestId && requestId >= latestResolvedId
+}
 
 export const withPreCloseTimeout = (promise, timeoutMs = 15000, message = 'انتهت مهلة فحص ما قبل الإغلاق.') => {
   const delay = Number(timeoutMs)

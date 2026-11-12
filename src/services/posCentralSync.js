@@ -1251,7 +1251,8 @@ const readPreCloseFinancialReconciliation = async operationalDay => {
   }
 }
 
-export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0, onLifecycle } = {}) => {
+export const readPreCloseReconciliation = async (operationalDay, { openOrderCount = 0, openOrdersCount = openOrderCount, onLifecycle } = {}) => {
+  const effectiveOpenOrders = Number(openOrdersCount ?? openOrderCount) || 0
   const lifecycle = event => { try { onLifecycle?.(event) } catch { /* diagnostics must never affect reconciliation */ } }
   lifecycle('SALES_START')
   try {
@@ -1297,15 +1298,51 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   lifecycle('CENTRAL_SNAPSHOT_RESOLVED')
   if (centralDay?.status === 'closed') {
     lifecycle('FINAL_RESULT')
-    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'اليوم منتهي مركزيًا.' }
+    return {
+      allowed: false,
+      state: 'blocked',
+      loading: false,
+      reason: 'CENTRAL_DAY_CLOSED',
+      pendingQueue: 0,
+      validCurrentDayPendingSyncCount: 0,
+      openOrderCount: effectiveOpenOrders,
+      openOrdersCount: effectiveOpenOrders,
+      centralDay,
+      freshCentralSales: centralSales,
+      message: 'اليوم منتهي مركزيًا.'
+    }
   }
   if (!centralDay || centralDay.status !== 'open') {
     lifecycle('FINAL_RESULT')
-    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'تعذر قراءة حالة اليوم المركزي.' }
+    return {
+      allowed: false,
+      state: 'blocked',
+      loading: false,
+      reason: 'CENTRAL_DAY_UNAVAILABLE',
+      pendingQueue: 0,
+      validCurrentDayPendingSyncCount: 0,
+      openOrderCount: effectiveOpenOrders,
+      openOrdersCount: effectiveOpenOrders,
+      centralDay,
+      freshCentralSales: centralSales,
+      message: 'تعذر قراءة حالة اليوم المركزي.'
+    }
   }
   if (operationalDay?.id && (String(operationalDay.id) !== String(centralDay.id) || String(operationalDay.businessDate || '') !== String(centralDay.businessDate || ''))) {
     lifecycle('FINAL_RESULT')
-    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'تغيّر اليوم التشغيلي مركزيًا. أعد قراءة الحالة قبل الإنهاء.' }
+    return {
+      allowed: false,
+      state: 'blocked',
+      loading: false,
+      reason: 'CENTRAL_DAY_MISMATCH',
+      pendingQueue: 0,
+      validCurrentDayPendingSyncCount: 0,
+      openOrderCount: effectiveOpenOrders,
+      openOrdersCount: effectiveOpenOrders,
+      centralDay,
+      freshCentralSales: centralSales,
+      message: 'تغيّر اليوم التشغيلي مركزيًا. أعد قراءة الحالة قبل الإنهاء.'
+    }
   }
   let repair
   let salesReconciliation
@@ -1314,12 +1351,21 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
     // Readback is also the restart repair path. Persist only sync metadata after
     // exact payload verification; never resend or rewrite the central sale.
     mergeCentralSalesLocally(centralSales)
-    salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readRawSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay: centralDay, openOrderCount, saleEngineState: typeof window !== 'undefined' ? window.__POS101_SALE_ENGINE_STATE__ || '' : '' })
+    salesReconciliation = reconcilePreCloseSales({ localSales: readSales(), queueEntries: readRawSaleQueue(), voidQueueEntries: readVoidUpdateQueue(), centralSales, operationalDay: centralDay, openOrderCount: effectiveOpenOrders, openOrdersCount: effectiveOpenOrders, saleEngineState: typeof window !== 'undefined' ? window.__POS101_SALE_ENGINE_STATE__ || '' : '' })
   } catch (error) {
     lifecycle('SALES_REJECTED')
     throw error
   }
   lifecycle('SALES_RESOLVED')
+  lifecycle('CANONICAL_START')
+  let canonicalSalesReconciliation
+  try {
+    canonicalSalesReconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales, operationalDay: centralDay })
+  } catch (error) {
+    lifecycle('CANONICAL_REJECTED')
+    throw error
+  }
+  lifecycle('CANONICAL_RESOLVED')
   lifecycle('FINANCIAL_START')
   let financialReconciliation
   try {
@@ -1329,14 +1375,96 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
     throw error
   }
   lifecycle('FINANCIAL_RESOLVED')
+
+  const salesAllowed = Boolean(salesReconciliation.allowed)
+  const canonicalSalesAllowed = Boolean(canonicalSalesReconciliation.allowed)
+  const financialAllowed = Boolean(financialReconciliation.allowed)
+  const finalAllowed = salesAllowed && canonicalSalesAllowed && financialAllowed
+
+  let reason = ''
+  let message = ''
+  if (!salesAllowed) {
+    if (effectiveOpenOrders > 0) {
+      reason = 'OPEN_ORDERS'
+      message = 'يوجد طلب مفتوح، أكمله أو ألغِه قبل إنهاء اليوم.'
+    } else if (salesReconciliation.pendingQueue > 0 || ['BUILDING', 'WRITING_FIREBASE', 'READING_BACK'].includes(salesReconciliation.saleEngineState)) {
+      reason = 'PENDING_SYNC'
+      message = 'يوجد طلب غير مثبت لهذا اليوم. أعد المحاولة أو انسخ تقرير الخطأ.'
+    } else if (salesReconciliation.localActiveCount !== salesReconciliation.centralActiveCount) {
+      reason = 'LOCAL_CENTRAL_SALES_COUNT_MISMATCH'
+      message = 'يوجد اختلاف في عدد المبيعات (المحلي: ' + salesReconciliation.localActiveCount + '، المركزي: ' + salesReconciliation.centralActiveCount + ').'
+    } else if (salesReconciliation.localActiveTotal !== salesReconciliation.centralActiveTotal) {
+      reason = 'LOCAL_CENTRAL_SALES_TOTAL_MISMATCH'
+      message = 'يوجد اختلاف في إجمالي المبيعات (المحلي: ' + Number(salesReconciliation.localActiveTotal || 0).toLocaleString('en-US') + ' د.ع، المركزي: ' + Number(salesReconciliation.centralActiveTotal || 0).toLocaleString('en-US') + ' د.ع).'
+    } else {
+      reason = 'CENTRAL_SALES_CANONICAL_MISMATCH'
+      message = salesReconciliation.message || 'توجد فروقات بين المبيعات المحلية والمركزية.'
+    }
+  } else if (!canonicalSalesAllowed) {
+    reason = canonicalSalesReconciliation.reason || 'CENTRAL_SALES_CANONICAL_MISMATCH'
+    message = canonicalSalesReconciliation.message || 'توجد فروقات بين المبيعات المحلية والمركزية.'
+  } else if (!financialAllowed) {
+    reason = 'FINANCIAL_RECONCILIATION_FAILED'
+    message = financialReconciliation.message || 'فشل تحقق المطابقة المالية؛ لا يمكن إنهاء اليوم.'
+  } else {
+    reason = ''
+    message = repair?.moved > 0 ? 'تم عزل طلب قديم من هذا الجهاز ولا يمنع إنهاء اليوم.' : 'لا توجد طلبات معلقة. يمكنك إنهاء اليوم.'
+  }
+
   const result = {
     ...salesReconciliation,
-    salesReconciliation,
+    allowed: finalAllowed,
+    state: finalAllowed ? 'allowed' : 'blocked',
+    loading: false,
+    reason,
+    message,
+    businessDate: String(centralDay?.businessDate || operationalDay?.businessDate || ''),
+    operationalDayId: String(centralDay?.id || operationalDay?.id || ''),
+    centralDay,
     freshCentralSales: centralSales,
     queueRepair: repair,
+    openOrdersCount: effectiveOpenOrders,
+    openOrderCount: effectiveOpenOrders,
+    pendingQueue: salesReconciliation.pendingQueue,
+    validCurrentDayPendingSyncCount: salesReconciliation.validCurrentDayPendingSyncCount,
+
+    sales: {
+      allowed: salesAllowed,
+      localCount: salesReconciliation.localActiveCount,
+      centralCount: salesReconciliation.centralActiveCount,
+      localTotal: salesReconciliation.localActiveTotal,
+      centralTotal: salesReconciliation.centralActiveTotal,
+      missingLocal: salesReconciliation.missingLocal,
+      missingCentral: canonicalSalesReconciliation.missingCentralIds,
+      missingQueue: salesReconciliation.missingQueue,
+    },
+    salesReconciliation,
+
+    canonical: {
+      allowed: canonicalSalesAllowed,
+      localDiscount: canonicalSalesReconciliation.localSummary?.discount,
+      centralDiscount: canonicalSalesReconciliation.centralSummary?.discount,
+      discountDifference: canonicalSalesReconciliation.discountDifference,
+      localNet: canonicalSalesReconciliation.localSummary?.net,
+      centralNet: canonicalSalesReconciliation.centralSummary?.net,
+      localGross: canonicalSalesReconciliation.localSummary?.gross,
+      centralGross: canonicalSalesReconciliation.centralSummary?.gross,
+      differences: canonicalSalesReconciliation.differences,
+    },
+    canonicalSalesReconciliation,
+
+    financial: {
+      allowed: financialAllowed,
+      ...financialReconciliation,
+    },
     financialReconciliation,
-    allowed: salesReconciliation.allowed && financialReconciliation.allowed,
-    message: salesReconciliation.message || financialReconciliation.message,
+
+    queue: {
+      pendingCount: salesReconciliation.pendingQueue,
+      pendingSaleWriteCount: salesReconciliation.missingQueue?.length || 0,
+      pendingVoidUpdateCount: salesReconciliation.pendingVoidUpdateCount || 0,
+      activePendingQueueCount: salesReconciliation.validCurrentDayPendingSyncCount || 0,
+    },
   }
   lifecycle('FINAL_RESULT')
   return result
@@ -2970,12 +3098,13 @@ const centralSettlementInputs = async (operationalDay, { centralSales = null } =
 export const readFreshSettlementPreview = async (operationalDay, options = {}) => calculateSettlement({ ...(await centralSettlementInputs(operationalDay, options)), openingCashBalance: operationalDay?.openingCashBalance })
  
 
-export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {}, explicitUserAction = false, closeSource = 'manual_end_day', closeReason = 'manual-confirmed' } = {}) => {
+export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, openOrdersCount = openOrderCount, endedBy = {}, explicitUserAction = false, closeSource = 'manual_end_day', closeReason = 'manual-confirmed' } = {}) => {
+  const effectiveOpenOrders = Number(openOrdersCount ?? openOrderCount) || 0
   if (explicitUserAction !== true || closeSource !== 'manual_end_day' || !ALLOWED_DAY_CLOSE_SOURCES.has(closeSource)) {
     throw Object.assign(new Error('إغلاق اليوم التشغيلي يتطلب تأكيد المستخدم من شاشة إنهاء اليوم.'), { code: 'EXPLICIT_DAY_CLOSE_REQUIRED' })
   }
   endDayLog('END_DAY_SUBMIT_START', { operationalDayId: day?.id || day?.operationalDayId || '', businessDate: day?.businessDate || '', actualCash })
-  const preClose = await readPreCloseReconciliation(day, { openOrderCount })
+  const preClose = await readPreCloseReconciliation(day, { openOrderCount: effectiveOpenOrders, openOrdersCount: effectiveOpenOrders })
   if (!preClose.allowed) {
     recordEndDayReconciliationTrace({ caller: 'settleAndEndOperationalDay.preClose', reconciliation: preClose.financialReconciliation || null, freshCentralSales: preClose.freshCentralSales || null, localSource: 'readPreCloseReconciliation result', centralSales: preClose.freshCentralSales || [], centralSource: 'readPreCloseReconciliation().freshCentralSales', extra: { preCloseAllowed: false, preCloseMessage: preClose.message || '', pendingQueue: preClose.pendingQueue || 0, pendingExpenseCount: preClose.financialReconciliation?.pendingExpenseCount || 0 } })
     throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })

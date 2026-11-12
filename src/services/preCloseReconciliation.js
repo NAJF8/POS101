@@ -57,7 +57,8 @@ const quarantineStaleRetry = (sale, operationalDay) => {
   } catch { return false }
 }
 
-export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, saleEngineState = '' } = {}) => {
+export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], voidQueueEntries = [], centralSales = [], operationalDay = null, openOrderCount = 0, openOrdersCount = openOrderCount, saleEngineState = '' } = {}) => {
+  const effectiveOpenOrders = Number(openOrdersCount ?? openOrderCount) || 0
   const centralRows = Array.isArray(centralSales) ? centralSales : []
   const centralKeys = new Set(centralRows.filter(sale => belongsToCurrentDay(sale, operationalDay)).flatMap(identityKeys))
   const retrySale = currentRetryFromStorage()
@@ -114,13 +115,14 @@ export const reconcilePreCloseSales = ({ localSales = [], queueEntries = [], voi
     localActiveTotal: activeTotal(activeLocal),
     centralActiveTotal: activeTotal(activeCentral),
     activeTotalsMatch,
-    openOrderCount: Number(openOrderCount) || 0,
+    openOrderCount: effectiveOpenOrders,
+    openOrdersCount: effectiveOpenOrders,
     validCurrentDayPendingSyncCount: pendingSales.length + voidPending.length + queuedVoidPending.length,
     saleEngineState,
     confirmedRetryResolved: Boolean(retryIsVerified),
     staleRetryQuarantined,
-    message: pendingMessage({ openOrderCount: Number(openOrderCount) || 0, pendingQueue: pendingSales.length + voidPending.length + queuedVoidPending.length, saleEngineState }) || (!activeTotalsMatch ? 'توجد فروقات بين المبيعات المحلية والمركزية.' : ''),
-    allowed: (Number(openOrderCount) || 0) === 0 && !['BUILDING', 'WRITING_FIREBASE', 'READING_BACK'].includes(saleEngineState) && pendingSales.length === 0 && voidPending.length === 0 && queuedVoidPending.length === 0 && activeTotalsMatch,
+    message: pendingMessage({ openOrderCount: effectiveOpenOrders, pendingQueue: pendingSales.length + voidPending.length + queuedVoidPending.length, saleEngineState }) || (!activeTotalsMatch ? 'توجد فروقات بين المبيعات المحلية والمركزية.' : ''),
+    allowed: effectiveOpenOrders === 0 && !['BUILDING', 'WRITING_FIREBASE', 'READING_BACK'].includes(saleEngineState) && pendingSales.length === 0 && voidPending.length === 0 && queuedVoidPending.length === 0 && activeTotalsMatch,
   }
 }
 
