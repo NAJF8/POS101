@@ -1,5 +1,5 @@
 import { normalizeCartItems, normalizeOrder, safeNumber, safeText } from './cartItem.js'
-import { allocateCentralOrderNumber, readCentralOperationalDay, readCentralSalesForSaleEngine, saveCentralSaleImmediately } from './posCentralSync.js'
+import { allocateCentralOrderNumber, readCentralOperationalDay, readCentralSaleById, readCentralSalesForSaleEngine, saveCentralSaleImmediately } from './posCentralSync.js'
 import { financialFingerprint, markSaleSynced, quarantineStaleSaleQueueEntries, salePayloadMatches } from './salesSyncQueue.js'
 import { cleanupOversizedLocalCaches } from './localSalesCache.js'
 import { classifySaleSyncError, isRetryableSaleError } from './saleSyncError.js'
@@ -247,6 +247,7 @@ export const createSaleEngine = (overrides = {}) => {
     readOperationalDay: readCentralOperationalDay,
     allocateOrderNumber: allocateCentralOrderNumber,
     readCentralSales: readCentralSalesForSaleEngine,
+    readCentralSaleById,
     writeCentralSale: saveCentralSaleImmediately,
     markLocalSynced: markSaleSynced,
     quarantineStaleQueue: quarantineStaleSaleQueueEntries,
@@ -349,15 +350,26 @@ export const createSaleEngine = (overrides = {}) => {
       if (!exactMatch(sale, written.sale) || String(written.sale.status || '').toLowerCase() !== 'completed') throw Object.assign(new Error('تعذر تأكيد الطلب مركزيًا.'), { code: 'SALE_READBACK_FAILED' })
       return confirm(written.sale, { ...diagnostics, firebaseWrite: 'completed' })
     } catch (error) {
-      // A lost response is never rewritten blindly. Read the canonical sales
-      // snapshot once more; an exact single match is already a success.
+      // A lost response is never rewritten blindly. The write targets exactly
+      // one node (pos101_sales/{saleId}), so a single point read is the most
+      // reliable re-check available on the same degraded connection that just
+      // produced this failure — far smaller than fetching the whole sales
+      // table, and just as conclusive for this saleId. Fall back to the full
+      // table scan only if that point read itself cannot be completed.
       try {
-        const afterFailure = await dependencies.readCentralSales({ sale, afterWriteFailure: true })
-        const exact = (Array.isArray(afterFailure) ? afterFailure : []).filter(remote => exactMatch(sale, remote))
-        const identity = (Array.isArray(afterFailure) ? afterFailure : []).filter(remote => identityMatches(sale, remote))
-        if (exact.length === 1 && identity.length === 1) return confirm(exact[0], { ...diagnostics, writeFailureResolvedByReadback: true })
-        if (identity.length > 0 && exact.length === 0) return fail({ sale, error: Object.assign(new Error('معرف البيع موجود ببيانات مختلفة.'), { code: 'SALE_ID_COLLISION' }), diagnostics, final: true, errorClass: 'SALE_ID_COLLISION' })
-      } catch (readError) { diagnostics.readbackAfterWriteFailure = readError?.code || readError?.message || String(readError) }
+        const afterFailure = await dependencies.readCentralSaleById(idOf(sale))
+        if (afterFailure && exactMatch(sale, afterFailure)) return confirm(afterFailure, { ...diagnostics, writeFailureResolvedByReadback: true, writeFailureRecoveryMethod: 'point-read' })
+        if (afterFailure && !exactMatch(sale, afterFailure)) return fail({ sale, error: Object.assign(new Error('معرف البيع موجود ببيانات مختلفة.'), { code: 'SALE_ID_COLLISION' }), diagnostics, final: true, errorClass: 'SALE_ID_COLLISION' })
+      } catch (pointReadError) {
+        diagnostics.readbackAfterWriteFailurePointRead = pointReadError?.code || pointReadError?.message || String(pointReadError)
+        try {
+          const afterFailure = await dependencies.readCentralSales({ sale, afterWriteFailure: true })
+          const exact = (Array.isArray(afterFailure) ? afterFailure : []).filter(remote => exactMatch(sale, remote))
+          const identity = (Array.isArray(afterFailure) ? afterFailure : []).filter(remote => identityMatches(sale, remote))
+          if (exact.length === 1 && identity.length === 1) return confirm(exact[0], { ...diagnostics, writeFailureResolvedByReadback: true, writeFailureRecoveryMethod: 'full-table-fallback' })
+          if (identity.length > 0 && exact.length === 0) return fail({ sale, error: Object.assign(new Error('معرف البيع موجود ببيانات مختلفة.'), { code: 'SALE_ID_COLLISION' }), diagnostics, final: true, errorClass: 'SALE_ID_COLLISION' })
+        } catch (readError) { diagnostics.readbackAfterWriteFailure = readError?.code || readError?.message || String(readError) }
+      }
       return fail({ sale, error, diagnostics })
     }
   }
