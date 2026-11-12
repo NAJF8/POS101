@@ -13,9 +13,12 @@ import {
 } from 'firebase/auth'
 import {
   connectDatabaseEmulator,
+  equalTo,
   get,
   getDatabase,
   onValue,
+  orderByChild,
+  query,
   ref,
   runTransaction,
   set,
@@ -1259,11 +1262,15 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   let salesSnapshot
   let centralDay
   try {
-    lifecycle('CENTRAL_SALES_READ_START')
-    const salesPromise = get(salesRef()).then(snapshot => { lifecycle('CENTRAL_SALES_READ_RESOLVED'); return snapshot }, error => { lifecycle('CENTRAL_SALES_READ_REJECTED'); throw error })
     lifecycle('CENTRAL_DAY_READ_START')
-    const dayPromise = readCentralOperationalDay().then(day => { lifecycle('CENTRAL_DAY_READ_RESOLVED'); return day }, error => { lifecycle('CENTRAL_DAY_READ_REJECTED'); throw error })
-    ;[salesSnapshot, centralDay] = await Promise.all([salesPromise, dayPromise])
+    centralDay = await readCentralOperationalDay().then(day => { lifecycle('CENTRAL_DAY_READ_RESOLVED'); return day }, error => { lifecycle('CENTRAL_DAY_READ_REJECTED'); throw error })
+    lifecycle('CENTRAL_SALES_READ_START')
+    const dayId = String(centralDay?.id || centralDay?.operationalDayId || '').trim()
+    const businessDate = String(centralDay?.businessDate || operationalDay?.businessDate || '').trim()
+    const salesQuery = dayId
+      ? query(salesRef(), orderByChild('operationalDayId'), equalTo(dayId))
+      : query(salesRef(), orderByChild('businessDate'), equalTo(businessDate))
+    salesSnapshot = await get(salesQuery).then(snapshot => { lifecycle('CENTRAL_SALES_READ_RESOLVED'); return snapshot }, error => { lifecycle('CENTRAL_SALES_READ_REJECTED'); throw error })
   } catch (error) {
     lifecycle('CENTRAL_SNAPSHOT_REJECTED')
     throw error
