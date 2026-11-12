@@ -4,6 +4,7 @@ import { formatMoney, formatDateTime, formatNumber, formatTime } from '../utils.
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { createRecoverySnapshot, downloadRecoverySnapshot } from '../services/recoverySnapshot.js'
 import { calculateEndDayCashAnalysis, toMoneyNumber } from '../services/financialCenter.js'
+import { recordEndDayReconciliationTrace } from '../services/endDayReconciliationTrace.js'
 
 const money = value => formatMoney(toMoneyNumber(value, 0))
 const displayMoney = value => value === null || value === undefined || value === '' ? '—' : money(value)
@@ -93,7 +94,9 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
     if (busy) return
     setBusy(true)
     setShortageConfirmed(false)
-    try { await onPrepareEnd?.(); setEndOpen(true) } catch { /* App surfaces the guard error. */ } finally { setBusy(false) }
+    try { await onPrepareEnd?.(); setEndOpen(true) } catch (error) {
+      recordEndDayReconciliationTrace({ caller: 'OperationalDay.openEnd.exception', exception: error, localSource: 'OperationalDay -> onPrepareEnd', centralSource: 'OperationalDay -> onPrepareEnd', extra: { code: error?.code || '' } })
+    } finally { setBusy(false) }
   }
   const openOpeningAdjust = () => {
     setOpeningAdjustCash(day?.openingCashBalance == null ? '' : String(day.openingCashBalance))
@@ -378,7 +381,7 @@ export default function OperationalDay({ day = {}, summary = {}, settlementPrevi
           <section className="end-day-section net-movement-section" aria-labelledby="net-movement-title">
             <div className="end-day-section-heading"><div><span className="end-day-section-kicker">تفاصيل إضافية</span><h3 id="net-movement-title">حركة الصندوق</h3></div></div>
             <div className="net-movement-grid">
-              <div><span>صافي حركة الصندوق بعد خصم الرصيد الافتتاحي</span><strong className="end-day-number">{endDayAnalysis.netDrawerMovement == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netDrawerMovement)}</strong></div>
+              <div><span>صافي تغيّر الصندوق عن الرصيد الافتتاحي</span><strong className="end-day-number">{endDayAnalysis.netDrawerMovement == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netDrawerMovement)}</strong></div>
               <div><span>صافي مبيعات اليوم النقدية</span><strong className="end-day-number">{endDayAnalysis.netCashSalesFromDrawer == null ? ACTUAL_CASH_PENDING : money(endDayAnalysis.netCashSalesFromDrawer)}</strong></div>
               <div><span>فرق المبيعات النقدية</span><strong className="end-day-number">{endDayAnalysis.cashSalesDifference == null ? ACTUAL_CASH_PENDING : `${money(endDayAnalysis.cashSalesDifference)} ${differenceLabel(endDayAnalysis.cashSalesDifference)}`}</strong></div>
             </div>

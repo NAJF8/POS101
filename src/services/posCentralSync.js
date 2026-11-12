@@ -41,6 +41,7 @@ import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnaps
 import { buildRecoveryCandidates, classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
 import { readSalesCache, writeSalesCache } from './localSalesCache.js'
 import { buildPendingSaleDiagnostic, classifyPendingDiagnostic, diagnosticKeyFor, PENDING_DIAGNOSTIC_STATUS, RESOLVED_DIAGNOSTIC_STATUS } from './pendingSaleDiagnostics.js'
+import { recordEndDayReconciliationTrace } from './endDayReconciliationTrace.js'
 
 const env = import.meta.env || {}
 const localHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
@@ -1224,13 +1225,13 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   const [salesSnapshot, centralDay] = await Promise.all([get(salesRef()), readCentralOperationalDay()])
   const centralSales = centralValues(salesSnapshot)
   if (centralDay?.status === 'closed') {
-    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, message: 'اليوم منتهي مركزيًا.' }
+    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'اليوم منتهي مركزيًا.' }
   }
   if (!centralDay || centralDay.status !== 'open') {
-    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, message: 'تعذر قراءة حالة اليوم المركزي.' }
+    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'تعذر قراءة حالة اليوم المركزي.' }
   }
   if (operationalDay?.id && (String(operationalDay.id) !== String(centralDay.id) || String(operationalDay.businessDate || '') !== String(centralDay.businessDate || ''))) {
-    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, message: 'تغيّر اليوم التشغيلي مركزيًا. أعد قراءة الحالة قبل الإنهاء.' }
+    return { allowed: false, pendingQueue: 0, validCurrentDayPendingSyncCount: 0, openOrderCount: Number(openOrderCount) || 0, centralDay, freshCentralSales: centralSales, message: 'تغيّر اليوم التشغيلي مركزيًا. أعد قراءة الحالة قبل الإنهاء.' }
   }
   const repair = repairPendingQueueForEndDay({ centralSales, operationalDay: centralDay })
   // Readback is also the restart repair path. Persist only sync metadata after
@@ -1240,6 +1241,8 @@ export const readPreCloseReconciliation = async (operationalDay, { openOrderCoun
   const financialReconciliation = await readPreCloseFinancialReconciliation(operationalDay)
   return {
     ...salesReconciliation,
+    salesReconciliation,
+    freshCentralSales: centralSales,
     queueRepair: repair,
     financialReconciliation,
     allowed: salesReconciliation.allowed && financialReconciliation.allowed,
@@ -2853,17 +2856,21 @@ export const saveSettlementCorrection = async ({ settlementId, correctedActualCa
   return { correction: correctionBack.val(), audit: auditBack.val(), settlement: original }
 }
 
-const centralSettlementInputs = async operationalDay => {
-  const [salesSnapshot, expensesSnapshot, transactionsSnapshot] = await Promise.all([get(salesRef()), get(expensesRef()), get(financialPath(cashboxTransactionsPath))])
+const centralSettlementInputs = async (operationalDay, { centralSales = null } = {}) => {
+  const [salesSnapshot, expensesSnapshot, transactionsSnapshot] = await Promise.all([
+    Array.isArray(centralSales) ? Promise.resolve(null) : get(salesRef()),
+    get(expensesRef()),
+    get(financialPath(cashboxTransactionsPath)),
+  ])
   const dayId = String(operationalDay?.id || operationalDay?.operationalDayId || '')
   const dayDate = String(operationalDay?.businessDate || '')
-  const sales = getReportSalesForOperationalDay({ centralSales: centralValues(salesSnapshot), operationalDayId: dayId, businessDate: dayDate }).filter(isReportableSale)
+  const sales = getReportSalesForOperationalDay({ centralSales: Array.isArray(centralSales) ? centralSales : centralValues(salesSnapshot), operationalDayId: dayId, businessDate: dayDate }).filter(isReportableSale)
   const expenses = expenseValues(expensesSnapshot).filter(row => row.operationalDayId === dayId || (!row.operationalDayId && row.businessDate === dayDate))
   const transactions = objectValues(transactionsSnapshot).filter(row => row.businessDate === dayDate && row.status !== 'voided')
   return { sales, expenses, transactions }
 }
 
-export const readFreshSettlementPreview = async operationalDay => calculateSettlement({ ...(await centralSettlementInputs(operationalDay)), openingCashBalance: operationalDay?.openingCashBalance })
+export const readFreshSettlementPreview = async (operationalDay, options = {}) => calculateSettlement({ ...(await centralSettlementInputs(operationalDay, options)), openingCashBalance: operationalDay?.openingCashBalance })
  
 
 export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCount = 0, endedBy = {}, explicitUserAction = false, closeSource = 'manual_end_day', closeReason = 'manual-confirmed' } = {}) => {
@@ -2872,10 +2879,15 @@ export const settleAndEndOperationalDay = async (day, { actualCash, openOrderCou
   }
   endDayLog('END_DAY_SUBMIT_START', { operationalDayId: day?.id || day?.operationalDayId || '', businessDate: day?.businessDate || '', actualCash })
   const preClose = await readPreCloseReconciliation(day, { openOrderCount })
-  if (!preClose.allowed) throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
+  if (!preClose.allowed) {
+    recordEndDayReconciliationTrace({ caller: 'settleAndEndOperationalDay.preClose', reconciliation: preClose.financialReconciliation || null, freshCentralSales: preClose.freshCentralSales || null, localSource: 'readPreCloseReconciliation result', centralSales: preClose.freshCentralSales || [], centralSource: 'readPreCloseReconciliation().freshCentralSales', extra: { preCloseAllowed: false, preCloseMessage: preClose.message || '', pendingQueue: preClose.pendingQueue || 0, pendingExpenseCount: preClose.financialReconciliation?.pendingExpenseCount || 0 } })
+    throw Object.assign(new Error(preClose.message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose })
+  }
   const centralBeforeWrite = centralValues(await get(salesRef()))
   mergeCentralSalesLocally(centralBeforeWrite)
-  const financialReconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales: centralBeforeWrite, operationalDay: day })
+  const localSalesBeforeWrite = readLocalSales()
+  const financialReconciliation = reconcileCanonicalSales({ localSales: localSalesBeforeWrite, centralSales: centralBeforeWrite, operationalDay: day })
+  recordEndDayReconciliationTrace({ caller: 'settleAndEndOperationalDay.financialReconciliation', localSales: localSalesBeforeWrite, centralSales: centralBeforeWrite, reconciliation: financialReconciliation, freshCentralSales: preClose.freshCentralSales || null, localSource: 'readLocalSales()', centralSource: 'get(salesRef()) -> centralBeforeWrite', extra: { preCloseAllowed: preClose.allowed, samePreCloseSnapshot: centralBeforeWrite === preClose.freshCentralSales } })
   if (!financialReconciliation.allowed) {
     throw Object.assign(new Error('تعذر مطابقة المبيعات المحلية والمركزية؛ تم تعطيل إنهاء اليوم دون أي كتابة.'), { code: 'FINANCIAL_RECONCILIATION_BLOCKED', financialReconciliation })
   }

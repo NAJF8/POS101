@@ -40,6 +40,8 @@ import { recordSafeUiError, runSafeSystemCheck } from './services/safeSystemChec
 import { saleEngine } from './services/saleEngine.js'
 import { recordFreeMaterial } from './services/freeMaterialService.js'
 import { saveCentralFreeMaterial } from './services/posCentralSync.js'
+import { recordEndDayReconciliationTrace } from './services/endDayReconciliationTrace.js'
+import { PRE_CLOSE_STATE, beginPreCloseCheck, completePreCloseCheck, failPreCloseCheck, isCurrentPreCloseRequest } from './services/preCloseGuard.js'
 
 const blankOrder = index => ({ id: index, name: `طلب ${index}`, items: [], table: null, orderType: null, held: false, completed: false, adjustments: [] })
 const ensureOrderSlots = (value, count = 10) => {
@@ -179,6 +181,12 @@ export default function App() {
   const lastSellerName = useRef('')
   const staffMigrationAttempted = useRef(false)
   const staffAuthInFlight = useRef(null)
+  const preCloseRequestRef = useRef(0)
+
+  const tracePreClose = useCallback((event, details = {}) => {
+    if (!import.meta.env.DEV) return
+    console.info(`[${event}]`, { ...details, timestamp: new Date().toISOString() })
+  }, [])
 
   useEffect(() => {
     const online = () => setIsOnline(true)
@@ -749,34 +757,65 @@ export default function App() {
   }, [operationalDay, centralSales, ledgerVersion])
 
   useEffect(() => {
+    const requestId = ++preCloseRequestRef.current
+    const isCurrent = () => isCurrentPreCloseRequest(requestId, preCloseRequestRef.current)
     if (!operationalDay?.id || operationalDay.status !== 'open') {
-      setPreCloseGuard({ loading: false, state: 'unknown', allowed: true, message: '' })
+      setPreCloseGuard({ loading: false, state: PRE_CLOSE_STATE.UNKNOWN, allowed: true, message: '', error: null })
       return undefined
     }
     let active = true
-    setPreCloseGuard({ loading: true, state: 'loading', allowed: false, message: '' })
+    setPreCloseGuard(previous => beginPreCloseCheck(previous))
+    tracePreClose('PRE_CLOSE_START', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: openOrdersCount, saleEngineState: window.__POS101_SALE_ENGINE_STATE__ || '' })
     void readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount }).then(result => {
-      if (!active) return
-      setPreCloseGuard({ ...result, loading: false, state: result?.allowed ? 'verified' : 'real-pending', allowed: Boolean(result?.allowed), message: result?.allowed ? '' : (result?.message || 'تعذر التحقق من حالة الإغلاق.') })
+      if (!active || !isCurrent()) {
+        tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current })
+        return
+      }
+      const next = completePreCloseCheck(result)
+      setPreCloseGuard(next)
+      tracePreClose('PRE_CLOSE_RESULT', { requestId, operationalDay: operationalDay.businessDate, openOrderCount: result?.openOrderCount ?? openOrdersCount, salesAllowed: result?.salesReconciliation?.allowed ?? (result?.financialReconciliation ? result.allowed && result.financialReconciliation.allowed : result?.allowed), financialAllowed: result?.financialReconciliation?.allowed ?? null, finalAllowed: next.allowed, loading: next.loading, state: next.state, message: next.message })
     }).catch(error => {
-      if (!active) return
-      setPreCloseGuard({ loading: false, state: 'real-pending', allowed: false, message: error?.message || 'تعذر التحقق من مزامنة المبيعات.' })
+      if (!active || !isCurrent()) {
+        tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current, error: error?.message || String(error) })
+        return
+      }
+      const next = failPreCloseCheck(error)
+      setPreCloseGuard(next)
+      tracePreClose('PRE_CLOSE_ERROR', { requestId, operationalDay: operationalDay.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
     })
-    return () => { active = false }
-  }, [operationalDay?.id, operationalDay?.status, ledgerVersion, centralAuthUser?.uid, openOrdersCount])
+    return () => {
+      active = false
+      if (preCloseRequestRef.current === requestId) preCloseRequestRef.current += 1
+    }
+  }, [operationalDay?.id, operationalDay?.status, operationalDay?.businessDate, ledgerVersion, centralAuthUser?.uid, openOrdersCount, tracePreClose])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    tracePreClose('PRE_CLOSE_STATE_CHANGE', {
+      requestId: preCloseRequestRef.current,
+      loading: preCloseGuard.loading,
+      state: preCloseGuard.state,
+      allowed: preCloseGuard.allowed,
+      message: preCloseGuard.message,
+    })
+  }, [preCloseGuard, tracePreClose])
 
   useEffect(() => {
     const refreshOperationalSummary = () => setLedgerVersion(value => value + 1)
     const refreshSaleSyncStatus = () => setSaleSyncStatus(readSaleSyncStatus())
     window.addEventListener('pos101-sale-created', refreshOperationalSummary)
     window.addEventListener('pos101-sale-updated', refreshOperationalSummary)
+    window.addEventListener('pos101-sales-updated', refreshOperationalSummary)
     window.addEventListener('pos101-expenses-updated', refreshOperationalSummary)
+    window.addEventListener('pos101-sale-engine-state', refreshOperationalSummary)
     window.addEventListener('pos101-sale-created', refreshSaleSyncStatus)
     window.addEventListener('pos101-sale-updated', refreshSaleSyncStatus)
     return () => {
       window.removeEventListener('pos101-sale-created', refreshOperationalSummary)
       window.removeEventListener('pos101-sale-updated', refreshOperationalSummary)
+      window.removeEventListener('pos101-sales-updated', refreshOperationalSummary)
       window.removeEventListener('pos101-expenses-updated', refreshOperationalSummary)
+      window.removeEventListener('pos101-sale-engine-state', refreshOperationalSummary)
       window.removeEventListener('pos101-sale-created', refreshSaleSyncStatus)
       window.removeEventListener('pos101-sale-updated', refreshSaleSyncStatus)
     }
@@ -801,20 +840,56 @@ export default function App() {
   }, [session])
 
   const prepareEndOperationalDay = useCallback(async () => {
-    const fresh = await readFreshSettlementPreview(operationalDay)
+    const requestId = ++preCloseRequestRef.current
+    const isCurrent = () => isCurrentPreCloseRequest(requestId, preCloseRequestRef.current)
+    tracePreClose('PRE_CLOSE_START', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount: openOrdersCount, saleEngineState: window.__POS101_SALE_ENGINE_STATE__ || '' })
+    let guard
+    try {
+      guard = await readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount })
+    } catch (error) {
+      if (isCurrent()) {
+        const next = failPreCloseCheck(error)
+        setPreCloseGuard(next)
+        tracePreClose('PRE_CLOSE_ERROR', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
+      } else tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current, caller: 'prepareEndOperationalDay', error: error?.message || String(error) })
+      throw error
+    }
+    if (!isCurrent()) {
+      tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current, caller: 'prepareEndOperationalDay' })
+      throw Object.assign(new Error('تم تجاهل نتيجة فحص قديمة.'), { code: 'PRE_CLOSE_STALE_REQUEST' })
+    }
+    const freshCentralSales = Array.isArray(guard?.freshCentralSales) ? guard.freshCentralSales : []
+    const localSales = readLocalSales()
+    const reconciliation = reconcileCanonicalSales({ localSales, centralSales: freshCentralSales, operationalDay })
+    recordEndDayReconciliationTrace({ caller: 'App.prepareEndOperationalDay', localSales, centralSales: freshCentralSales, reconciliation, freshCentralSales, localSource: 'readLocalSales()', centralSource: 'readPreCloseReconciliation().freshCentralSales', extra: { preCloseAllowed: guard?.allowed ?? null, preCloseMessage: guard?.message || '' } })
+    let fresh
+    try {
+      fresh = await readFreshSettlementPreview(operationalDay, { centralSales: freshCentralSales })
+    } catch (error) {
+      if (isCurrent()) {
+        const next = failPreCloseCheck(error)
+        setPreCloseGuard(next)
+        tracePreClose('PRE_CLOSE_ERROR', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, loading: next.loading, state: next.state, finalAllowed: next.allowed, message: next.message, error: next.error })
+      }
+      throw error
+    }
+    if (!isCurrent()) {
+      tracePreClose('PRE_CLOSE_IGNORED_STALE_RESULT', { requestId, currentRequestId: preCloseRequestRef.current, caller: 'prepareEndOperationalDay', stage: 'settlement-preview' })
+      throw Object.assign(new Error('تم تجاهل نتيجة فحص قديمة.'), { code: 'PRE_CLOSE_STALE_REQUEST' })
+    }
     setFreshSettlementPreview(fresh)
-    const guard = await readPreCloseReconciliation(operationalDay, { openOrderCount: openOrdersCount })
-    const reconciliation = reconcileCanonicalSales({ localSales: readLocalSales(), centralSales, operationalDay })
     if (!guard.allowed || !reconciliation.allowed) {
       const message = guard.message || 'تعذر مطابقة المبيعات المحلية والمركزية قبل التسوية.'
-      setPreCloseGuard({ ...guard, loading: false, state: 'real-pending', allowed: false, message, financialReconciliation: reconciliation })
+      setPreCloseGuard({ ...guard, loading: false, state: PRE_CLOSE_STATE.BLOCKED, allowed: false, message, financialReconciliation: reconciliation })
+      tracePreClose('PRE_CLOSE_RESULT', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, salesAllowed: guard.salesReconciliation?.allowed ?? null, financialAllowed: guard.financialReconciliation?.allowed ?? null, finalAllowed: false, loading: false, state: 'blocked', message })
       throw Object.assign(new Error(message), { code: 'PRE_CLOSE_RECONCILIATION_BLOCKED', preClose: { ...guard, financialReconciliation: reconciliation } })
     }
     const repairMessage = guard.queueRepair?.moved > 0
       ? 'تم عزل طلب قديم من هذا الجهاز ولا يمنع إنهاء اليوم.'
       : 'لا توجد طلبات معلقة. يمكنك إنهاء اليوم.'
-    setPreCloseGuard({ ...guard, loading: false, state: 'verified', allowed: true, message: repairMessage, financialReconciliation: reconciliation })
-  }, [operationalDay, openOrdersCount, centralSales])
+    setPreCloseGuard({ ...guard, loading: false, state: PRE_CLOSE_STATE.ALLOWED, allowed: true, message: repairMessage, financialReconciliation: reconciliation })
+    tracePreClose('PRE_CLOSE_RESULT', { requestId, caller: 'prepareEndOperationalDay', operationalDay: operationalDay?.businessDate, openOrderCount, salesAllowed: guard.salesReconciliation?.allowed ?? null, financialAllowed: guard.financialReconciliation?.allowed ?? null, finalAllowed: true, loading: false, state: 'allowed', message: repairMessage })
+  }, [operationalDay, openOrdersCount, tracePreClose])
 
   const handleEndOperationalDay = useCallback(async actualCash => {
     setOperationalDayError('')
