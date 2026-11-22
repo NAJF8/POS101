@@ -1,6 +1,41 @@
+import { verifyCashierPin } from './cashierPin.js'
+
 const number = value => {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+// ── Completed-order edit permission ─────────────────────────────────────────
+// Granted per staff record (by its stable pos101_staff id) through
+// staff.permissions.EDIT_COMPLETED_ORDER === true. It is never derived from the
+// staff name, role, email or the visible staff "code" field. Identity is proven
+// with the existing salted cashier PIN (pinHash/pinSalt) used everywhere else in
+// POS; no new PIN or login method is introduced.
+export const EDIT_COMPLETED_ORDER = 'EDIT_COMPLETED_ORDER'
+export const COMPLETED_ORDER_EDIT_FORBIDDEN_MESSAGE = 'ليس لديك صلاحية لتعديل الطلب بعد البيع.'
+export const COMPLETED_ORDER_EDIT_PIN_INVALID_MESSAGE = 'رمز الدخول غير صحيح'
+export const COMPLETED_ORDER_EDIT_STAFF_MISSING_MESSAGE = 'اختر موظفًا مفعّلًا لديه رمز دخول.'
+
+export const staffHasPermission = (person, permission) => Boolean(person)
+  && person.active !== false
+  && person.permissions?.[permission] === true
+
+export const completedOrderEditCandidates = (staff = []) => (Array.isArray(staff) ? staff : [])
+  .filter(row => row?.id && row.active !== false && row.pinEnabled === true)
+
+export const anyStaffCanEditCompletedOrders = (staff = []) => completedOrderEditCandidates(staff)
+  .some(row => staffHasPermission(row, EDIT_COMPLETED_ORDER))
+
+// PIN is checked first so a wrong PIN is always reported as a wrong PIN; only a
+// verified identity without the permission gets the permission message.
+export const authorizeCompletedOrderEdit = async ({ staffId, pin, staff = [], verifyPin = verifyCashierPin } = {}) => {
+  const id = String(staffId || '').trim()
+  const person = completedOrderEditCandidates(staff).find(row => String(row.id) === id)
+  if (!id || !person) return { ok: false, code: 'COMPLETED_ORDER_EDIT_STAFF_REQUIRED', message: COMPLETED_ORDER_EDIT_STAFF_MISSING_MESSAGE }
+  const pinValue = String(pin ?? '')
+  if (!pinValue || !await verifyPin(pinValue, person)) return { ok: false, code: 'COMPLETED_ORDER_EDIT_PIN_INVALID', message: COMPLETED_ORDER_EDIT_PIN_INVALID_MESSAGE }
+  if (!staffHasPermission(person, EDIT_COMPLETED_ORDER)) return { ok: false, code: 'COMPLETED_ORDER_EDIT_FORBIDDEN', message: COMPLETED_ORDER_EDIT_FORBIDDEN_MESSAGE }
+  return { ok: true, staffId: String(person.id), name: String(person.name || '').trim(), role: String(person.role || '') }
 }
 
 export const saleEditableSnapshot = sale => ({

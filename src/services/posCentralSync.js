@@ -40,7 +40,7 @@ import { canonicalSalesForOperationalDay, reconcileCanonicalSales, summarizeCano
 import { retryAccSaleQueue, syncAccSaleBestEffort, syncAccExpenseBestEffort, retryAccExpenseQueue } from './accSync.js'
 import { defaultSyncLockManager, EMERGENCY_REPAIR_KEY } from './syncLockManager.js'
 import { BUILD_SHA } from './versionUpdate.js'
-import { buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, maskCorrectionCode, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot, validateCorrectionIdentity } from './saleEdit.js'
+import { EDIT_COMPLETED_ORDER, authorizeCompletedOrderEdit, buildSaleEditPatch, buildSaleItemCorrectionPatch, correctionTotalsSnapshot, saleCorrectionChangedFields, saleEditPreservesIdentity, saleEditableSnapshot, soldItemsSnapshot } from './saleEdit.js'
 import { buildRecoveryCandidates, classifyBackupSale, normalizeBackupSale, ORDER_1309_NUMBER, ORDER_1309_SALE_ID } from './backupSalesRecovery.js'
 import { readSalesCache, writeSalesCache } from './localSalesCache.js'
 import { buildPendingSaleDiagnostic, classifyPendingDiagnostic, diagnosticKeyFor, PENDING_DIAGNOSTIC_STATUS, RESOLVED_DIAGNOSTIC_STATUS } from './pendingSaleDiagnostics.js'
@@ -1005,12 +1005,22 @@ export const readCentralSalesForOperationalDay = async day => {
   return getReportSalesForOperationalDay({ centralSales: rows, operationalDayId: day?.id || day?.operationalDayId, businessDate: day?.businessDate })
 }
 
+// Every completed-sale mutation re-verifies the editor against the freshly read
+// central staff record: existing salted PIN + EDIT_COMPLETED_ORDER permission.
+// The PIN is only compared in memory and is never written to the sale or audit.
+const requireCompletedOrderEditor = async authorization => {
+  const result = await authorizeCompletedOrderEdit({ staffId: authorization?.staffId, pin: authorization?.pin, staff: await readCentralStaff() })
+  if (!result.ok) throw Object.assign(new Error(result.message), { code: result.code })
+  return result
+}
+
 // Edits are deliberately limited to metadata and discount/payment fields. The
 // original sale id, operation key, items, order number, and business day stay
 // immutable; the same RTDB node is updated and read back, so no second sale is
 // ever created by this workflow.
 export const updateCentralSale = async (sale, changes = {}) => {
   const user = await financialUser(true)
+  const editor = await requireCompletedOrderEditor(changes.editAuthorization)
   const id = saleIdOf(sale)
   if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
   const saleRef = ref(db, `pos101_sales/${id}`)
@@ -1026,10 +1036,10 @@ export const updateCentralSale = async (sale, changes = {}) => {
   const patch = buildSaleEditPatch(current, changes)
   if (!Number.isFinite(Number(patch.discount)) || Number(patch.discount) < 0 || Number(patch.discount) > Number(patch.subtotal)) throw Object.assign(new Error('قيمة الخصم غير صالحة.'), { code: 'SALE_DISCOUNT_INVALID' })
   const now = Date.now()
-  const next = { ...current, ...patch, id, saleId: current.saleId || id, updatedAt: now, updatedByUid: user.uid, updatedByName: user.displayName || user.email || '', lastEditReason: String(changes.reason || '').trim() }
+  const next = { ...current, ...patch, id, saleId: current.saleId || id, updatedAt: now, updatedByUid: user.uid, updatedByName: user.displayName || user.email || '', lastEditReason: String(changes.reason || '').trim(), lastEditedByStaffId: editor.staffId, lastEditedByStaffName: editor.name, lastEditedAt: now }
   if (!saleEditPreservesIdentity(current, next)) throw new Error('محاولة تعديل حقل محمي من البيع.')
   const auditId = `sale-edit-${safeKey(id)}-${now}-${crypto.randomUUID().slice(0, 8)}`
-  const audit = financialAuditPayload({ id: auditId, user, action: 'sale edit', entityType: 'sale', entityId: id, before: saleEditableSnapshot(current), after: saleEditableSnapshot(next), reason: next.lastEditReason, businessDate: current.businessDate || day.businessDate || '' })
+  const audit = { ...financialAuditPayload({ id: auditId, user, action: 'sale edit', entityType: 'sale', entityId: id, before: saleEditableSnapshot(current), after: saleEditableSnapshot(next), reason: next.lastEditReason, businessDate: current.businessDate || day.businessDate || '' }), saleId: id, orderNumber: current.orderNumber || '', permission: EDIT_COMPLETED_ORDER, editedByStaffId: editor.staffId, editedByStaffName: editor.name, editedAt: now, pinVerified: true }
   await update(ref(db), { [`pos101_sales/${id}`]: next, [`${auditPath}/${auditId}`]: audit })
   const [saleBack, auditBack] = await Promise.all([get(saleRef), get(financialPath(`${auditPath}/${auditId}`))])
   if (!saleBack.exists() || !auditBack.exists() || !saleEditPreservesIdentity(current, saleBack.val())) throw new Error('تعذر التحقق من تعديل البيع وسجل التدقيق.')
@@ -1152,9 +1162,7 @@ export const correctCentralSaleItems = async (sale, changes = {}) => {
   const user = await staffUser(true)
   const reason = String(changes.reason || '').trim()
   if (!reason) throw Object.assign(new Error('سبب تصحيح المنتجات مطلوب.'), { code: 'SALE_CORRECTION_REASON_REQUIRED' })
-  const identity = changes.correctionIdentity || {}
-  const identityCheck = validateCorrectionIdentity({ name: identity.name, code: identity.code, staff: await readCentralStaff(), actor: user, authorization: user.pos101Authorization || user.authorization, requireAdmin: false })
-  if (!identityCheck.valid) throw Object.assign(new Error('اسم الكاشير أو الرمز غير صحيح'), { code: 'SALE_CORRECTION_IDENTITY_INVALID' })
+  const editor = await requireCompletedOrderEditor(changes.editAuthorization)
   const id = saleIdOf(sale)
   if (!id) throw Object.assign(new Error('معرف البيع غير موجود.'), { code: 'SALE_ID_REQUIRED' })
   const saleRef = ref(db, `pos101_sales/${id}`)
@@ -1169,7 +1177,7 @@ export const correctCentralSaleItems = async (sale, changes = {}) => {
   if (!day || day.status !== 'open') throw Object.assign(new Error('تصحيح المنتجات متاح فقط ضمن اليوم التشغيلي المفتوح.'), { code: 'SALE_DAY_CLOSED' })
   const patch = buildSaleItemCorrectionPatch(current, changes)
   const now = Date.now()
-  const next = { ...current, ...patch, id, saleId: current.saleId || id, updatedAt: now, updatedByUid: user.uid, updatedByName: user.displayName || user.email || '', lastEditReason: reason, lastEditAction: 'SOLD_ORDER_ITEM_CORRECTION' }
+  const next = { ...current, ...patch, id, saleId: current.saleId || id, updatedAt: now, updatedByUid: user.uid, updatedByName: user.displayName || user.email || '', lastEditReason: reason, lastEditAction: 'SOLD_ORDER_ITEM_CORRECTION', lastEditedByStaffId: editor.staffId, lastEditedByStaffName: editor.name, lastEditedAt: now }
   if (!saleEditPreservesIdentity({ ...current, items: undefined }, { ...next, items: undefined })) throw new Error('محاولة تعديل حقل محمي من البيع.')
   const auditId = `sale-item-correction-${safeKey(id)}-${now}-${crypto.randomUUID().slice(0, 8)}`
   const oldTotals = correctionTotalsSnapshot(current)
@@ -1185,17 +1193,20 @@ export const correctCentralSaleItems = async (sale, changes = {}) => {
     oldTotals,
     newTotals,
     changedFields: saleCorrectionChangedFields(current, next),
-    correctedByName: identityCheck.name,
-    correctedByCode: identityCheck.maskedCode || maskCorrectionCode(identity.code),
-    maskedCode: identityCheck.maskedCode || maskCorrectionCode(identity.code),
+    permission: EDIT_COMPLETED_ORDER,
+    correctedByName: editor.name,
+    correctedByStaffId: editor.staffId,
+    editedByStaffId: editor.staffId,
+    editedByStaffName: editor.name,
     codeVerified: true,
-    correctedByRole: identityCheck.role,
+    pinVerified: true,
+    correctedByRole: editor.role,
     correctedByUid: user.uid || '',
     correctionReason: reason,
     correctedAt: now,
     diff: saleCorrectionChangedFields(current, next),
   }
-  const historyEntry = { action: audit.action, auditId, editedAt: now, editedByUid: user.uid, correctedByName: identityCheck.name, correctedByCode: identityCheck.maskedCode, correctedByRole: identityCheck.role, reason, oldTotal: oldTotals.total, newTotal: newTotals.total, changedFields: audit.changedFields }
+  const historyEntry = { action: audit.action, auditId, editedAt: now, editedByUid: user.uid, correctedByName: editor.name, correctedByStaffId: editor.staffId, correctedByRole: editor.role, reason, oldTotal: oldTotals.total, newTotal: newTotals.total, changedFields: audit.changedFields }
   if (Array.isArray(current.editHistory)) next.editHistory = [...current.editHistory, historyEntry]
   await update(ref(db), { [`pos101_sales/${id}`]: next, [`${auditPath}/${auditId}`]: audit })
   const [saleBack, auditBack, salesBack] = await Promise.all([get(saleRef), get(financialPath(`${auditPath}/${auditId}`)), get(salesRef())])

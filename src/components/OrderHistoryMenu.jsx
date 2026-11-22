@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icons'
 import { readSalesCache, writeSalesCache } from '../services/localSalesCache.js'
@@ -7,7 +7,7 @@ const PAGE_SIZE = 10
 const readSales = () => readSalesCache()
 import { formatMoney, formatDateTime, formatTime, formatNumber } from '../utils.js'
 import { businessDateForSale } from '../services/reportSales.js'
-import { validateCorrectionIdentity } from '../services/saleEdit.js'
+import { anyStaffCanEditCompletedOrders, authorizeCompletedOrderEdit, completedOrderEditCandidates } from '../services/saleEdit.js'
 import { getOptionLabel, normalizeCartItems, safeNumber, safeText } from '../services/cartItem.js'
 const money = formatMoney
 const paymentLabel = value => value === 'cash' ? 'نقدي' : value === 'electronic' || value === 'card' ? 'إلكتروني' : 'غير محدد'
@@ -63,7 +63,7 @@ function EditableSoldProducts({ items, enabled, canCorrect, onChange, onDelete, 
   </section>
 }
 
-function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }) {
+function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, editDisabledTitle = 'التعديل متاح فقط لليوم المفتوح', readOnly = false }) {
   const [confirmingVoid, setConfirmingVoid] = useState(false)
   const items = normalizeCartItems(sale.items || sale.order?.items)
 
@@ -104,7 +104,7 @@ function SaleDetails({ sale, onBack, onPrint, onVoid, onEdit, readOnly = false }
 
       {!readOnly && <div className="history-details-actions">
         <button onClick={() => onPrint(sale)}><Icon name="printer" size={18} /> إعادة طباعة</button>
-        <button disabled={!onEdit || sale.status === 'voided'} onClick={() => onEdit?.(sale)} title={onEdit ? 'تعديل آمن مع سجل تدقيق' : 'التعديل متاح فقط لليوم المفتوح'}><Icon name="edit" size={18} /> تعديل</button>
+        <button disabled={!onEdit || sale.status === 'voided'} onClick={() => onEdit?.(sale)} title={onEdit ? 'تعديل آمن مع سجل تدقيق' : editDisabledTitle}><Icon name="edit" size={18} /> تعديل</button>
         {sale.status !== 'voided' && (
           confirmingVoid ? (
             <span className="void-confirm"><b>تأكيد الإبطال؟</b><button onClick={async () => { await onVoid(sale); setConfirmingVoid(false) }}>تأكيد</button><button onClick={() => setConfirmingVoid(false)}>رجوع</button></span>
@@ -130,10 +130,16 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const [editError, setEditError] = useState('')
   const [correctionMode, setCorrectionMode] = useState(false)
   const [correctionItems, setCorrectionItems] = useState([])
-  const [identityModalOpen, setIdentityModalOpen] = useState(false)
-  const [identityForm, setIdentityForm] = useState({ name: '', code: '', reason: '' })
-  const [identityError, setIdentityError] = useState('')
+  const [authSale, setAuthSale] = useState(null)
+  const [authForm, setAuthForm] = useState({ staffId: '', pin: '' })
+  const [authError, setAuthError] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [editorName, setEditorName] = useState('')
+  const editAuthorizationRef = useRef(null)
   const [editSuccess, setEditSuccess] = useState('')
+  const editCandidates = useMemo(() => completedOrderEditCandidates(staff), [staff])
+  const editPermissionAvailable = useMemo(() => anyStaffCanEditCompletedOrders(staff), [staff])
+  const editDisabledTitle = !onEditSale ? 'التعديل متاح فقط لليوم المفتوح' : 'لا يوجد موظف لديه صلاحية تعديل الطلب بعد البيع'
 
   useEffect(() => {
     if (!editingSale) return undefined
@@ -197,11 +203,38 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
     setSales(nextSales)
     setSelectedSale(nextSales.find(entry => entry.id === sale.id))
   }
+  // Step 1-3: choose employee (by staff id), enter the existing POS PIN, then
+  // check EDIT_COMPLETED_ORDER. The service layer re-checks both on save.
   const beginEdit = sale => {
     setEditError('')
     setEditSuccess('')
-    setIdentityModalOpen(false)
-    setIdentityError('')
+    setAuthError('')
+    setAuthForm({ staffId: editCandidates[0]?.id || '', pin: '' })
+    setAuthSale(sale)
+  }
+  const closeAuthorization = () => { if (authBusy) return; setAuthSale(null); setAuthForm({ staffId: '', pin: '' }); setAuthError('') }
+  const confirmEditAuthorization = async event => {
+    event.preventDefault()
+    if (authBusy || !authSale) return
+    setAuthBusy(true); setAuthError('')
+    try {
+      const result = await authorizeCompletedOrderEdit({ staffId: authForm.staffId, pin: authForm.pin, staff })
+      if (!result.ok) { setAuthError(result.message); setAuthForm(form => ({ ...form, pin: '' })); return }
+      editAuthorizationRef.current = { staffId: result.staffId, pin: authForm.pin }
+      setEditorName(result.name)
+      const sale = authSale
+      setAuthSale(null); setAuthForm({ staffId: '', pin: '' })
+      openEditor(sale)
+    } catch (error) {
+      setAuthError(error?.message || 'تعذر التحقق من الموظف.')
+    } finally { setAuthBusy(false) }
+  }
+  const closeEditor = () => {
+    editAuthorizationRef.current = null
+    setEditorName(''); setEditingSale(null); setEditForm(null); setCorrectionMode(false)
+  }
+  const openEditor = sale => {
+    setEditError('')
     setEditingSale(sale)
     setCorrectionMode(false)
     setCorrectionItems(soldItemsForEdit(sale).map(normalizeSoldItem))
@@ -217,38 +250,22 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
   const saveEdit = async event => {
     event.preventDefault()
     if (!editingSale || !onEditSale || !editForm) return
-    if (correctionMode) {
-      setIdentityForm({ name: '', code: '', reason: editForm.reason || '' })
-      setIdentityError('')
-      setIdentityModalOpen(true)
-      return
-    }
+    const editAuthorization = editAuthorizationRef.current
+    if (!editAuthorization) { setEditError('يلزم التحقق من الموظف قبل حفظ التعديل.'); return }
+    const reason = String(editForm.reason || '').trim()
+    if (!reason) { setEditError('سبب التعديل مطلوب.'); return }
     setEditBusy(true); setEditError('')
     try {
-      const changes = correctionMode ? { ...editForm, itemCorrection: true, items: correctionItems } : editForm
+      const changes = correctionMode
+        ? { ...editForm, reason, itemCorrection: true, items: correctionItems, editAuthorization }
+        : { ...editForm, reason, editAuthorization }
       const saved = await onEditSale(editingSale, changes)
       const nextSales = sales.map(entry => entry.id === saved.id ? saved : entry)
-      setSales(nextSales); setSelectedSale(saved); setEditingSale(null); setEditForm(null)
+      const savedBy = editorName
+      setSales(nextSales); setSelectedSale(saved); closeEditor()
+      setEditSuccess(`تم حفظ التعديل باسم ${savedBy}`)
     } catch (error) {
       setEditError(error?.message || 'تعذر حفظ تعديل البيع.')
-    } finally { setEditBusy(false) }
-  }
-  const confirmIdentityAndSave = async event => {
-    event.preventDefault()
-    const identityCheck = validateCorrectionIdentity({ name: identityForm.name, code: identityForm.code, staff, actor: correctionActor, authorization: correctionAuthorization, requireAdmin: false })
-    if (!identityCheck.valid || !String(identityForm.reason || '').trim()) {
-      setIdentityError(identityCheck.valid ? 'سبب التعديل مطلوب.' : 'اسم الكاشير أو الرمز غير صحيح')
-      return
-    }
-    setEditBusy(true); setIdentityError(''); setEditError('')
-    try {
-      const changes = { ...editForm, reason: identityForm.reason.trim(), itemCorrection: true, items: correctionItems, correctionIdentity: { name: identityForm.name.trim(), code: identityForm.code.trim(), role: identityCheck.role } }
-      const saved = await onEditSale(editingSale, changes)
-      const nextSales = sales.map(entry => entry.id === saved.id ? saved : entry)
-      setSales(nextSales); setSelectedSale(saved); setEditingSale(null); setEditForm(null); setIdentityModalOpen(false); setCorrectionMode(false)
-      setEditSuccess(`تم حفظ التعديل باسم ${identityCheck.name}`)
-    } catch (error) {
-      setIdentityError(error?.message || 'تعذر حفظ تعديل البيع.')
     } finally { setEditBusy(false) }
   }
 
@@ -256,7 +273,7 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
       <div className="history-modal-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
       {editSuccess && <p className="history-edit-success" role="status">{editSuccess}</p>}
       <section className="history-modal-content" role="dialog" aria-modal="true" aria-labelledby="history-title">
-        {selectedSale ? <SaleDetails sale={selectedSale} onBack={() => setSelectedSale(null)} onPrint={reprint} onVoid={voidSale} onEdit={!readOnly && onEditSale ? beginEdit : null} readOnly={readOnly} /> : <>
+        {selectedSale ? <SaleDetails sale={selectedSale} onBack={() => setSelectedSale(null)} onPrint={reprint} onVoid={voidSale} onEdit={!readOnly && onEditSale && editPermissionAvailable ? beginEdit : null} editDisabledTitle={editDisabledTitle} readOnly={readOnly} /> : <>
             <header className="history-header"><div><h2 id="history-title"><Icon name="receipt" size={24} /> سجل الطلبات</h2><p>عرض جميع الطلبات السابقة حسب تاريخ العمل التشغيلي</p></div><button className="close-btn" onClick={onClose} aria-label="إغلاق سجل الطلبات"><Icon name="x" size={23} /></button></header>
           <div className="history-filters">
             <label className="history-search"><Icon name="search" size={20} /><input type="search" placeholder="ابحث برقم الطلب أو المنتج…" value={query} onChange={event => resetPage(() => setQuery(event.target.value))} /></label>
@@ -265,12 +282,12 @@ export default function OrderHistoryMenu({ onClose, session, salesOverride = nul
             <select aria-label="وسيلة الدفع" value={method} onChange={event => resetPage(() => setMethod(event.target.value))}><option value="all">جميع الوسائل</option><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select>
             <select aria-label="حالة الطلب" value={status} onChange={event => resetPage(() => setStatus(event.target.value))}><option value="all">جميع الحالات</option><option value="completed">مكتمل</option><option value="voided">مبطل</option></select>
           </div>
-          <div className="history-table-wrapper"><table className="history-table"><thead><tr><th>#</th><th>رقم الطلب</th><th>النوع</th><th>اليوم التشغيلي / الوقت</th><th>الوسيلة</th><th>المبلغ</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{paginated.map((sale, index) => <tr key={sale.id} className={sale.status === 'voided' ? 'history-row-voided' : ''}><td className="number-cell">{formatNumber((safePage - 1) * PAGE_SIZE + index + 1)}</td><td className="number-cell">{formatNumber(sale.orderNumber)}</td><td>{typeLabel(sale)}</td><td className="date-cell" title={`وقت البيع الفعلي: ${localDate(sale.createdAt)}`}><span className="history-business-date">{businessDateLabel(sale)}<small>{formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}</small></span></td><td>{paymentLabel(sale.paymentMethod)}</td><td className="number-cell money-cell">{money(sale.total)}</td><td><span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span></td><td><div className="h-actions"><button onClick={() => setSelectedSale(sale)} title="عرض التفاصيل" aria-label={`عرض تفاصيل الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="search" size={17} /></button>{!readOnly && <><button onClick={() => reprint(sale)} title="إعادة طباعة" aria-label={`إعادة طباعة الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="printer" size={17} /></button><button disabled={!onEditSale || sale.status === 'voided'} onClick={() => beginEdit(sale)} title={onEditSale ? 'تعديل آمن مع سجل تدقيق' : 'التعديل متاح فقط لليوم المفتوح'} aria-label="تعديل الطلب"><Icon name="edit" size={17} /></button>{sale.status !== 'voided' && <button className="history-void" onClick={() => setSelectedSale(sale)} title="فتح تفاصيل الإبطال" aria-label={`إبطال الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="trash" size={17} /></button>}</>}</div></td></tr>)}{!paginated.length && <tr><td className="history-empty" colSpan="8"><Icon name="receipt" size={28} /><b>{sales.length ? 'لا توجد مبيعات تطابق عوامل التصفية' : 'لا توجد مبيعات مسجلة بعد'}</b></td></tr>}</tbody></table></div>
+          <div className="history-table-wrapper"><table className="history-table"><thead><tr><th>#</th><th>رقم الطلب</th><th>النوع</th><th>اليوم التشغيلي / الوقت</th><th>الوسيلة</th><th>المبلغ</th><th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{paginated.map((sale, index) => <tr key={sale.id} className={sale.status === 'voided' ? 'history-row-voided' : ''}><td className="number-cell">{formatNumber((safePage - 1) * PAGE_SIZE + index + 1)}</td><td className="number-cell">{formatNumber(sale.orderNumber)}</td><td>{typeLabel(sale)}</td><td className="date-cell" title={`وقت البيع الفعلي: ${localDate(sale.createdAt)}`}><span className="history-business-date">{businessDateLabel(sale)}<small>{formatTime(sale.createdAt, { hour: '2-digit', minute: '2-digit', hour12: false })}</small></span></td><td>{paymentLabel(sale.paymentMethod)}</td><td className="number-cell money-cell">{money(sale.total)}</td><td><span className={`history-status ${sale.status === 'voided' ? 'voided' : 'complete'}`}>{statusLabel(sale.status)}</span></td><td><div className="h-actions"><button onClick={() => setSelectedSale(sale)} title="عرض التفاصيل" aria-label={`عرض تفاصيل الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="search" size={17} /></button>{!readOnly && <><button onClick={() => reprint(sale)} title="إعادة طباعة" aria-label={`إعادة طباعة الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="printer" size={17} /></button><button disabled={!onEditSale || !editPermissionAvailable || sale.status === 'voided'} onClick={() => beginEdit(sale)} title={onEditSale && editPermissionAvailable ? 'تعديل آمن مع سجل تدقيق' : editDisabledTitle} aria-label="تعديل الطلب"><Icon name="edit" size={17} /></button>{sale.status !== 'voided' && <button className="history-void" onClick={() => setSelectedSale(sale)} title="فتح تفاصيل الإبطال" aria-label={`إبطال الطلب ${formatNumber(sale.orderNumber)}`}><Icon name="trash" size={17} /></button>}</>}</div></td></tr>)}{!paginated.length && <tr><td className="history-empty" colSpan="8"><Icon name="receipt" size={28} /><b>{sales.length ? 'لا توجد مبيعات تطابق عوامل التصفية' : 'لا توجد مبيعات مسجلة بعد'}</b></td></tr>}</tbody></table></div>
           <footer className="history-footer"><div className="history-count">إجمالي النتائج: <b>{formatNumber(filtered.length)}</b></div><nav className="pagination" aria-label="ترقيم صفحات السجل"><button disabled={safePage === 1} onClick={() => setPage(value => value - 1)}>السابق</button><span>صفحة {formatNumber(safePage)} من {formatNumber(totalPages)}</span><button disabled={safePage === totalPages} onClick={() => setPage(value => value + 1)}>التالي</button></nav></footer>
         </>}
       </section>
-      {editingSale && editForm && createPortal(<div className="history-edit-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setEditingSale(null)}><form className="history-edit-modal" onSubmit={saveEdit} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-edit-title"><header className="history-edit-header"><div><h3 id="history-edit-title">تعديل الطلب رقم {formatNumber(editingSale.orderNumber)}</h3><p>{correctionMode ? 'وضع تصحيح إداري للعناصر والأسعار.' : 'المنتجات ورقم الطلب واليوم التشغيلي محمية.'}</p></div><button type="button" className="history-edit-close" onClick={() => setEditingSale(null)} disabled={editBusy} aria-label="إغلاق نافذة تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-edit-body"><EditableSoldProducts items={correctionItems} canCorrect={canCorrectSaleItems} enabled={{ value: correctionMode, toggle: () => { setCorrectionMode(value => !value); setEditError('') } }} onChange={updateCorrectionItem} onDelete={deleteCorrectionItem} oldTotal={Number(editingSale.total) || 0} newTotal={correctionMode ? correctionItems.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0) - (Number(editForm.discount) || 0) : Number(editingSale.total) || 0} paymentMethod={editForm.paymentMethod} orderType={editForm.orderType} /><label><span>المصدر / النوع</span><select value={editForm.orderType} onChange={event => setEditForm({ ...editForm, orderType: event.target.value })}><option value="">داخل الكوفي</option><option value="بلي">بلي</option><option value="توترز">توترز</option><option value="سفري">سفري</option></select></label><label><span>وسيلة الدفع</span><select value={editForm.paymentMethod} onChange={event => setEditForm({ ...editForm, paymentMethod: event.target.value })}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label><label className="history-edit-discount"><span>الخصم</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={editForm.discount ?? ''} onChange={event => setEditForm({ ...editForm, discount: event.target.value })} /></label><label><span>اسم الكاشير</span><input value={editForm.cashier} onChange={event => setEditForm({ ...editForm, cashier: event.target.value })} /></label><label><span>ملاحظة العميل</span><textarea className="history-edit-textarea-short" value={editForm.note} onChange={event => setEditForm({ ...editForm, note: event.target.value })} /></label><label><span>ملاحظة الإدارة</span><textarea className="history-edit-textarea-short" value={editForm.adminNote} onChange={event => setEditForm({ ...editForm, adminNote: event.target.value })} /></label><label><span>سبب التعديل {correctionMode ? '(مطلوب للتصحيح الإداري)' : ''}</span><input required={!correctionMode} value={editForm.reason} onChange={event => setEditForm({ ...editForm, reason: event.target.value })} /></label>{editError && <p className="form-error" role="alert">{editError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={() => setEditingSale(null)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy || (!correctionMode && !String(editForm.reason || '').trim())}>{editBusy ? 'جارٍ الحفظ…' : correctionMode ? 'حفظ التصحيح' : 'حفظ التعديل'}</button></footer></form></div>, document.body)}
-      {identityModalOpen && editingSale && createPortal(<div className="history-edit-overlay history-identity-overlay" role="presentation"><form className="history-identity-modal" onSubmit={confirmIdentityAndSave} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-identity-title"><header className="history-edit-header"><div><h3 id="history-identity-title">تأكيد تعديل الطلب</h3><p>أدخل هوية الموظف المخوّل قبل حفظ التصحيح.</p></div><button type="button" className="history-edit-close" onClick={() => setIdentityModalOpen(false)} disabled={editBusy} aria-label="إلغاء تأكيد تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-identity-body"><label><span>اسم الكاشير / الموظف</span><input autoFocus required value={identityForm.name} onChange={event => setIdentityForm({ ...identityForm, name: event.target.value })} /></label><label><span>الرمز / الكود</span><input required type="password" autoComplete="off" value={identityForm.code} onChange={event => setIdentityForm({ ...identityForm, code: event.target.value })} /></label><label><span>سبب التعديل</span><textarea required value={identityForm.reason} onChange={event => setIdentityForm({ ...identityForm, reason: event.target.value })} /></label>{identityError && <p className="form-error" role="alert">{identityError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={() => setIdentityModalOpen(false)} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy || !identityForm.name.trim() || !identityForm.code.trim() || !identityForm.reason.trim()}>{editBusy ? 'جارٍ التحقق…' : 'تأكيد وحفظ'}</button></footer></form></div>, document.body)}
+      {editingSale && editForm && createPortal(<div className="history-edit-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && !editBusy && closeEditor()}><form className="history-edit-modal" onSubmit={saveEdit} dir="rtl" role="dialog" aria-modal="true" aria-labelledby="history-edit-title"><header className="history-edit-header"><div><h3 id="history-edit-title">تعديل الطلب رقم {formatNumber(editingSale.orderNumber)}</h3><p>{correctionMode ? 'وضع تصحيح إداري للعناصر والأسعار.' : 'المنتجات ورقم الطلب واليوم التشغيلي محمية.'}{editorName ? ` · المعدِّل: ${editorName}` : ''}</p></div><button type="button" className="history-edit-close" onClick={closeEditor} disabled={editBusy} aria-label="إغلاق نافذة تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-edit-body"><EditableSoldProducts items={correctionItems} canCorrect={canCorrectSaleItems} enabled={{ value: correctionMode, toggle: () => { setCorrectionMode(value => !value); setEditError('') } }} onChange={updateCorrectionItem} onDelete={deleteCorrectionItem} oldTotal={Number(editingSale.total) || 0} newTotal={correctionMode ? correctionItems.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0) - (Number(editForm.discount) || 0) : Number(editingSale.total) || 0} paymentMethod={editForm.paymentMethod} orderType={editForm.orderType} /><label><span>المصدر / النوع</span><select value={editForm.orderType} onChange={event => setEditForm({ ...editForm, orderType: event.target.value })}><option value="">داخل الكوفي</option><option value="بلي">بلي</option><option value="توترز">توترز</option><option value="سفري">سفري</option></select></label><label><span>وسيلة الدفع</span><select value={editForm.paymentMethod} onChange={event => setEditForm({ ...editForm, paymentMethod: event.target.value })}><option value="cash">نقدي</option><option value="electronic">إلكتروني</option></select></label><label className="history-edit-discount"><span>الخصم</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={editForm.discount ?? ''} onChange={event => setEditForm({ ...editForm, discount: event.target.value })} /></label><label><span>اسم الكاشير</span><input value={editForm.cashier} onChange={event => setEditForm({ ...editForm, cashier: event.target.value })} /></label><label><span>ملاحظة العميل</span><textarea className="history-edit-textarea-short" value={editForm.note} onChange={event => setEditForm({ ...editForm, note: event.target.value })} /></label><label><span>ملاحظة الإدارة</span><textarea className="history-edit-textarea-short" value={editForm.adminNote} onChange={event => setEditForm({ ...editForm, adminNote: event.target.value })} /></label><label><span>سبب التعديل (مطلوب)</span><input required value={editForm.reason} onChange={event => setEditForm({ ...editForm, reason: event.target.value })} /></label>{editError && <p className="form-error" role="alert">{editError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={closeEditor} disabled={editBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={editBusy || !String(editForm.reason || '').trim()}>{editBusy ? 'جارٍ الحفظ…' : correctionMode ? 'حفظ التصحيح' : 'حفظ التعديل'}</button></footer></form></div>, document.body)}
+      {authSale && createPortal(<div className="history-edit-overlay history-identity-overlay" role="presentation" onKeyDown={event => event.key === 'Escape' && closeAuthorization()}><form className="history-identity-modal" onSubmit={confirmEditAuthorization} dir="rtl" lang="ar" role="dialog" aria-modal="true" aria-labelledby="history-identity-title" aria-describedby="history-identity-desc" aria-busy={authBusy}><header className="history-edit-header"><div><h3 id="history-identity-title">تأكيد تعديل الطلب</h3><p id="history-identity-desc">تعديل الطلب رقم {formatNumber(authSale.orderNumber)} بعد البيع يتطلب رمز دخول موظف مخوّل.</p></div><button type="button" className="history-edit-close" onClick={closeAuthorization} disabled={authBusy} aria-label="إلغاء تأكيد تعديل الطلب"><Icon name="x" size={22} /></button></header><div className="history-identity-body"><label><span>اسم الموظف</span><select value={authForm.staffId} onChange={event => { setAuthForm({ staffId: event.target.value, pin: '' }); setAuthError('') }} disabled={authBusy || !editCandidates.length} required>{editCandidates.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><label><span>رمز الدخول</span><input autoFocus required type="password" inputMode="numeric" autoComplete="off" dir="ltr" value={authForm.pin} onChange={event => { setAuthForm({ ...authForm, pin: event.target.value.replace(/\D/g, '').slice(0, 8) }); setAuthError('') }} disabled={authBusy || !editCandidates.length} /></label>{!editCandidates.length && <p className="form-error" role="alert">لا يوجد موظف برمز دخول مفعّل.</p>}{authError && <p className="form-error" role="alert">{authError}</p>}</div><footer className="history-edit-actions"><button type="button" onClick={closeAuthorization} disabled={authBusy}>إلغاء</button><button className="primary-action" type="submit" disabled={authBusy || !authForm.staffId || !authForm.pin}>{authBusy ? 'جارٍ التحقق…' : 'تأكيد'}</button></footer></form></div>, document.body)}
     </div>
   )
 }

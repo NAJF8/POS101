@@ -3,11 +3,12 @@ import { Icon } from './Icons'
 import { StaffPinDialog, SystemAdminCodeDialog } from './Dialogs'
 import { verifySystemAdminCode } from '../services/systemAdminCode.js'
 import { buildPayrollReport, normalizeFixedMonthlySalary } from '../services/salaryService.js'
+import { EDIT_COMPLETED_ORDER, staffHasPermission } from '../services/saleEdit.js'
 import { formatNumber } from '../utils.js'
 
 const ROLE_LABELS = { cashier: 'كاشير', employee: 'موظف', manager: 'مدير' }
 
-const emptyForm = { id: '', name: '', code: '', role: 'employee', active: true, canSell: true, fixedMonthlySalary: '' }
+const emptyForm = { id: '', name: '', code: '', role: 'employee', active: true, canSell: true, editCompletedOrder: false, fixedMonthlySalary: '' }
 
 export default function Employees({ staff = [], expenses = [], transactions = [], canWrite = false, onSaveStaff, onSaveStaffPin, onNavigate, onStaffSignIn, staffAuthBusy = false, staffAuthError = '' }) {
   const [form, setForm] = useState(emptyForm)
@@ -34,10 +35,13 @@ export default function Employees({ staff = [], expenses = [], transactions = []
     setNotice('')
     try {
       if (!await ensureStaffAccess()) return
+      const { editCompletedOrder, ...fields } = form
+      const existing = staff.find(person => String(person.id) === String(form.id))
       await onSaveStaff({
-        ...form,
+        ...fields,
         name: form.name.trim(),
         code: form.code.trim(),
+        permissions: { ...(existing?.permissions || {}), [EDIT_COMPLETED_ORDER]: editCompletedOrder === true },
         fixedMonthlySalary: normalizeFixedMonthlySalary(form.fixedMonthlySalary)
       })
       closeForm()
@@ -49,7 +53,7 @@ export default function Employees({ staff = [], expenses = [], transactions = []
     }
   }
 
-  const edit = async row => { if (await ensureStaffAccess()) setForm({ id: row.id, name: row.name, code: row.code || '', role: row.role || 'employee', active: row.active !== false, canSell: row.canSell !== false, fixedMonthlySalary: row.fixedMonthlySalary ? String(row.fixedMonthlySalary) : '' }) }
+  const edit = async row => { if (await ensureStaffAccess()) setForm({ id: row.id, name: row.name, code: row.code || '', role: row.role || 'employee', active: row.active !== false, canSell: row.canSell !== false, editCompletedOrder: staffHasPermission({ ...row, active: true }, EDIT_COMPLETED_ORDER), fixedMonthlySalary: row.fixedMonthlySalary ? String(row.fixedMonthlySalary) : '' }) }
   const toggle = async row => {
     setBusy(true)
     setNotice('')
@@ -74,6 +78,7 @@ export default function Employees({ staff = [], expenses = [], transactions = []
         <span>الكود: {person.code || 'بدون كود'}</span>
         <span>الدور: {ROLE_LABELS[person.role] || ROLE_LABELS.employee}</span>
         <span>البيع: {person.canSell === false ? 'لا يظهر ككابتن' : 'يظهر ككابتن'}</span>
+        <span>تعديل الطلب بعد البيع: {person.permissions?.[EDIT_COMPLETED_ORDER] === true ? 'مسموح' : 'غير مسموح'}</span>
         <span>الراتب الثابت (المستحق): {formatNumber(fixedSalary)} د.ع</span>
         {payroll && (fixedSalary > 0 || payroll.salaryPaid > 0) && (
           <span>المدفوع ({payrollPeriod}): {formatNumber(payroll.salaryPaid)} د.ع · المتبقي: {formatNumber(payroll.salaryRemaining)} د.ع</span>
@@ -89,7 +94,7 @@ export default function Employees({ staff = [], expenses = [], transactions = []
     {!canWrite && <div className="settings-readonly" role="status"><p>{staffAuthError || 'يلزم تسجيل الدخول بحساب POS المصرح لإدارة الموظفين.'}</p>{!staffAuthError && <button type="button" className="secondary-action" onClick={onStaffSignIn} disabled={staffAuthBusy}>{staffAuthBusy ? 'جارٍ تسجيل الدخول…' : 'تسجيل دخول'}</button>}</div>}
     <form className="settings-card employee-form" onSubmit={save}>
       <h2>{form.id ? 'تعديل موظف' : 'إضافة موظف'}</h2>
-      <div className="employee-form-grid"><label>الاسم *<input value={form.name} onChange={event => setForm(value => ({ ...value, name: event.target.value }))} required /></label><label>الكود<input value={form.code} onChange={event => setForm(value => ({ ...value, code: event.target.value }))} /></label><label>الدور<select value={form.role} onChange={event => setForm(value => ({ ...value, role: event.target.value }))}><option value="cashier">كاشير</option><option value="employee">موظف</option><option value="manager">مدير</option></select></label><label>الراتب الشهري الثابت (د.ع)<input type="number" min="0" step="1000" dir="ltr" placeholder="مثال: 600000" value={form.fixedMonthlySalary ?? ''} onChange={event => setForm(value => ({ ...value, fixedMonthlySalary: event.target.value }))} /></label><label className="staff-seller-toggle"><input type="checkbox" checked={form.canSell} onChange={event => setForm(value => ({ ...value, canSell: event.target.checked }))} /> يظهر ككابتن في البيع</label></div>
+      <div className="employee-form-grid"><label>الاسم *<input value={form.name} onChange={event => setForm(value => ({ ...value, name: event.target.value }))} required /></label><label>الكود<input value={form.code} onChange={event => setForm(value => ({ ...value, code: event.target.value }))} /></label><label>الدور<select value={form.role} onChange={event => setForm(value => ({ ...value, role: event.target.value }))}><option value="cashier">كاشير</option><option value="employee">موظف</option><option value="manager">مدير</option></select></label><label>الراتب الشهري الثابت (د.ع)<input type="number" min="0" step="1000" dir="ltr" placeholder="مثال: 600000" value={form.fixedMonthlySalary ?? ''} onChange={event => setForm(value => ({ ...value, fixedMonthlySalary: event.target.value }))} /></label><label className="staff-seller-toggle"><input type="checkbox" checked={form.canSell} onChange={event => setForm(value => ({ ...value, canSell: event.target.checked }))} /> يظهر ككابتن في البيع</label><label className="staff-seller-toggle"><input type="checkbox" checked={form.editCompletedOrder === true} onChange={event => setForm(value => ({ ...value, editCompletedOrder: event.target.checked }))} /> صلاحية تعديل الطلب بعد البيع</label></div>
       <div className="dialog-actions"><button type="button" className="secondary-action" onClick={closeForm}>إلغاء</button><button className="primary-action" type="submit" disabled={!canAttemptWrite || busy || staffAuthBusy}>{busy || staffAuthBusy ? 'جارٍ الحفظ…' : 'حفظ الموظف'}</button></div>
     </form>
     {notice && <p className="settings-notice" role="status">{notice}</p>}

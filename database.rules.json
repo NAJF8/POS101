@@ -24,7 +24,10 @@
     "pos101_sales": {
       ".read": "auth != null && ((auth.token.pos101_kiosk === true && auth.token.scope === 'cashier' && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true) || (root.child('pos101_authorized_uids').child(auth.uid).child('active').val() !== false && root.child('pos101_authorized_uids').child(auth.uid).child('authorized').val() !== false))",
       ".write": "auth != null && ((auth.token.pos101_kiosk === true && auth.token.scope === 'cashier' && root.child('pos101_kiosks').child(auth.token.kioskId).child('active').val() === true) || (root.child('pos101_authorized_uids').child(auth.uid).child('active').val() !== false && root.child('pos101_authorized_uids').child(auth.uid).child('authorized').val() !== false && (root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'super_admin' || root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'admin' || root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'manager' || root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'cashier' || root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'cashier-sync' || root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'employee' || root.child('pos101_authorized_uids').child(auth.uid).child('role').val() === 'admin-viewer')))",
-      ".indexOn": ["operationalDayId", "businessDate"]
+      ".indexOn": ["operationalDayId", "businessDate"],
+      "$saleId": {
+        ".validate": "!data.exists() || newData.child('status').val() === 'voided' || newData.child('voided').val() === true || (newData.child('lastEditedByStaffId').isString() && newData.child('lastEditedByStaffId').val().length > 0 && newData.child('lastEditedAt').isNumber() && root.child('pos101_staff').child(newData.child('lastEditedByStaffId').val()).child('active').val() !== false && root.child('pos101_staff').child(newData.child('lastEditedByStaffId').val()).child('permissions').child('EDIT_COMPLETED_ORDER').val() === true)"
+      }
     },
     "pos101_sync_diagnostics": {
       ".read": false,
